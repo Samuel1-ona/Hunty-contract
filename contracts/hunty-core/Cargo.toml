@@ -10,6 +10,7 @@ doctest = false
 
 [dependencies]
 soroban-sdk = { workspace = true }
+thiserror = "2.0.18"
 
 [dev-dependencies]
 soroban-sdk = { workspace = true, features = ["testutils"] }
