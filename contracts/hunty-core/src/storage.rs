@@ -15,6 +15,7 @@ impl Storage {
     const PLAYERS_LIST_KEY: soroban_sdk::Symbol = symbol_short!("PLRS");
     const CLUES_LIST_KEY: soroban_sdk::Symbol = symbol_short!("CLST");
     const HUNT_COUNTER_KEY: soroban_sdk::Symbol = symbol_short!("CNTR");
+    const CLUE_COUNTER_KEY: soroban_sdk::Symbol = symbol_short!("CCNT");
 
     // ========== Hunt Storage Functions ==========
 
@@ -227,6 +228,11 @@ impl Storage {
         (Self::CLUES_LIST_KEY, hunt_id)
     }
 
+    /// Generates a storage key for the clue counter per hunt.
+    fn clue_counter_key(hunt_id: u64) -> (soroban_sdk::Symbol, u64) {
+        (Self::CLUE_COUNTER_KEY, hunt_id)
+    }
+
     /// Generates a storage key for the list of player addresses for a hunt.
     /// Uses tuple key (PLAYERS_LIST_KEY, hunt_id) for efficient storage access.
     fn players_list_key(hunt_id: u64) -> (soroban_sdk::Symbol, u64) {
@@ -324,6 +330,38 @@ impl Storage {
     /// The current hunt counter value (0 if no hunts have been created)
     pub fn get_hunt_counter(env: &Env) -> u64 {
         let key = Self::HUNT_COUNTER_KEY;
+        env.storage().persistent().get(&key).unwrap_or(0)
+    }
+
+    // ========== Clue Counter (per hunt) Functions ==========
+
+    /// Increments and returns the next clue ID for a hunt.
+    /// Clue IDs are sequential within each hunt, starting from 1.
+    /// 
+    /// # Arguments
+    /// * `env` - The Soroban environment
+    /// * `hunt_id` - The hunt to allocate a clue ID for
+    /// 
+    /// # Returns
+    /// The next available clue ID for the hunt
+    pub fn next_clue_id(env: &Env, hunt_id: u64) -> u32 {
+        let key = Self::clue_counter_key(hunt_id);
+        let current: u32 = env.storage().persistent().get(&key).unwrap_or(0);
+        let next = current + 1;
+        env.storage().persistent().set(&key, &next);
+        next
+    }
+
+    /// Gets the current clue counter for a hunt without incrementing.
+    /// 
+    /// # Arguments
+    /// * `env` - The Soroban environment
+    /// * `hunt_id` - The hunt to get the clue count for
+    /// 
+    /// # Returns
+    /// The number of clues added so far for the hunt (0 if none)
+    pub fn get_clue_counter(env: &Env, hunt_id: u64) -> u32 {
+        let key = Self::clue_counter_key(hunt_id);
         env.storage().persistent().get(&key).unwrap_or(0)
     }
 }

@@ -1,8 +1,14 @@
 #![no_std]
-use soroban_sdk::{contract, contractimpl, Env, Address, String, Symbol};
-use crate::types::{Hunt, HuntStatus, RewardConfig, HuntCreatedEvent};
+use soroban_sdk::{contract, contractimpl, Address, Bytes, BytesN, Env, String, Symbol, Vec};
+use crate::errors::{HuntError, HuntErrorCode};
 use crate::storage::Storage;
-use crate::errors::HuntErrorCode;
+use crate::types::{
+    Clue, ClueAddedEvent, ClueInfo, Hunt, HuntCreatedEvent, HuntStatus, RewardConfig,
+};
+
+const MAX_QUESTION_LENGTH: u32 = 2000;
+const MAX_ANSWER_LENGTH: u32 = 256;
+const MAX_CLUES_PER_HUNT: u32 = 100;
 
 #[contract]
 pub struct HuntyCore;
@@ -98,6 +104,145 @@ impl HuntyCore {
         );
         
         Ok(hunt_id)
+    }
+
+    /// Adds a clue to a hunt. Only the hunt creator can add clues.
+    /// Answers are hashed with SHA256 before storage; the hash is never exposed.
+    ///
+    /// # Arguments
+    /// * `env` - The Soroban environment
+    /// * `hunt_id` - The hunt to add the clue to
+    /// * `question` - The clue question text (max 2000 chars, non-empty)
+    /// * `answer` - Plain-text answer; normalized (trimmed, lowercased) then hashed
+    /// * `points` - Points awarded for solving this clue
+    /// * `is_required` - Whether this clue must be solved to complete the hunt
+    ///
+    /// # Returns
+    /// The sequential clue ID assigned within the hunt
+    ///
+    /// # Errors
+    /// * `HuntNotFound` - Hunt does not exist
+    /// * `InvalidHuntStatus` - Hunt is not in Draft
+    /// * `Unauthorized` - Caller is not the hunt creator
+    /// * `TooManyClues` - Hunt already has max clues
+    /// * `InvalidQuestion` - Question empty or too long
+    /// * `InvalidAnswer` - Answer empty or too long
+    pub fn add_clue(
+        env: Env,
+        hunt_id: u64,
+        question: String,
+        answer: String,
+        points: u32,
+        is_required: bool,
+    ) -> Result<u32, HuntErrorCode> {
+        let hunt = Storage::get_hunt_or_error(&env, hunt_id).map_err(HuntErrorCode::from)?;
+        if hunt.status != HuntStatus::Draft {
+            return Err(HuntErrorCode::InvalidHuntStatus);
+        }
+        hunt.creator.require_auth();
+        if Storage::get_clue_counter(&env, hunt_id) >= MAX_CLUES_PER_HUNT {
+            return Err(HuntErrorCode::from(HuntError::TooManyClues {
+                hunt_id,
+                limit: MAX_CLUES_PER_HUNT,
+            }));
+        }
+        let qlen = question.len();
+        if qlen == 0 || qlen > MAX_QUESTION_LENGTH {
+            return Err(HuntErrorCode::InvalidQuestion);
+        }
+        let answer_hash = Self::normalize_and_hash_answer(&env, &answer)
+            .map_err(HuntErrorCode::from)?;
+        let clue_id = Storage::next_clue_id(&env, hunt_id);
+        let clue = Clue {
+            clue_id,
+            question: question.clone(),
+            answer_hash,
+            points,
+            is_required,
+        };
+        Storage::save_clue(&env, hunt_id, &clue);
+        let mut updated = hunt;
+        updated.total_clues += 1;
+        Storage::save_hunt(&env, &updated);
+        let event = ClueAddedEvent {
+            hunt_id,
+            clue_id,
+            creator: updated.creator.clone(),
+            question,
+            points,
+            is_required,
+        };
+        env.events().publish(
+            (Symbol::new(&env, "ClueAdded"), hunt_id, clue_id),
+            event,
+        );
+        Ok(clue_id)
+    }
+
+    /// Returns clue information for a hunt/clue. Does not expose the answer hash.
+    pub fn get_clue(env: Env, hunt_id: u64, clue_id: u32) -> Result<ClueInfo, HuntErrorCode> {
+        let clue = Storage::get_clue_or_error(&env, hunt_id, clue_id)
+            .map_err(HuntErrorCode::from)?;
+        Ok(ClueInfo {
+            clue_id: clue.clue_id,
+            question: clue.question,
+            points: clue.points,
+            is_required: clue.is_required,
+        })
+    }
+
+    /// Returns all clues for a hunt (question, points, required). Answer hashes are not exposed.
+    pub fn list_clues(env: Env, hunt_id: u64) -> Vec<ClueInfo> {
+        let raw = Storage::list_clues_for_hunt(&env, hunt_id);
+        let mut out = Vec::new(&env);
+        for i in 0..raw.len() {
+            let c = raw.get(i).unwrap();
+            out.push_back(ClueInfo {
+                clue_id: c.clue_id,
+                question: c.question,
+                points: c.points,
+                is_required: c.is_required,
+            });
+        }
+        out
+    }
+
+    /// Normalizes answer (trim, lowercase) and returns SHA256 hash as BytesN<32>.
+    fn normalize_and_hash_answer(env: &Env, answer: &String) -> Result<BytesN<32>, HuntError> {
+        let n = answer.len();
+        if n == 0 {
+            return Err(HuntError::InvalidAnswer);
+        }
+        if n > MAX_ANSWER_LENGTH {
+            return Err(HuntError::InvalidAnswer);
+        }
+        let mut buf = [0u8; 256];
+        answer.copy_into_slice(&mut buf[..n as usize]);
+        let mut start = 0usize;
+        let mut end = n as usize;
+        while start < end && Self::is_ascii_space(buf[start]) {
+            start += 1;
+        }
+        while end > start && Self::is_ascii_space(buf[end - 1]) {
+            end -= 1;
+        }
+        if start >= end {
+            return Err(HuntError::InvalidAnswer);
+        }
+        for i in start..end {
+            let b = buf[i];
+            if b >= b'A' && b <= b'Z' {
+                buf[i] = b + (b'a' - b'A');
+            }
+        }
+        let normalized = Bytes::from_slice(env, &buf[start..end]);
+        let hash = env.crypto().sha256(&normalized);
+        Ok(hash.to_bytes())
+    }
+
+    #[inline]
+    fn is_ascii_space(b: u8) -> bool {
+        b == 0x20 || b == 0x09 || b == 0x0a || b == 0x0d
     }
 }
 

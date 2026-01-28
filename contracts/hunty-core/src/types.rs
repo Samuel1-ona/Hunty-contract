@@ -1,4 +1,4 @@
-use soroban_sdk::{contracttype, Address, String, Vec, Env};
+use soroban_sdk::{contracttype, Address, BytesN, String, Vec, Env};
 
 #[contracttype]
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -35,17 +35,25 @@ pub struct Hunt {
     pub required_clues: u32,
 }
 
+/// Stored clue with SHA256 answer hash. The hash is never exposed via get_clue/list_clues or events.
 #[contracttype]
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Clue {
     pub clue_id: u32,
     pub question: String,
-    pub answer_hash: String, 
+    pub answer_hash: BytesN<32>,
     pub points: u32,
     pub is_required: bool,
-    pub hint: String, 
-    pub has_location: bool,
-    pub location: Location,
+}
+
+/// Clue info returned by get_clue/list_clues. Excludes answer hash.
+#[contracttype]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ClueInfo {
+    pub clue_id: u32,
+    pub question: String,
+    pub points: u32,
+    pub is_required: bool,
 }
 
 #[contracttype]
@@ -188,4 +196,16 @@ pub struct RewardClaimedEvent {
     pub player: Address,
     pub xlm_amount: i128,
     pub nft_awarded: bool,
+}
+
+/// Emitted when a clue is added. Does not expose the answer hash.
+#[contracttype]
+#[derive(Clone, Debug)]
+pub struct ClueAddedEvent {
+    pub hunt_id: u64,
+    pub clue_id: u32,
+    pub creator: Address,
+    pub question: String,
+    pub points: u32,
+    pub is_required: bool,
 }

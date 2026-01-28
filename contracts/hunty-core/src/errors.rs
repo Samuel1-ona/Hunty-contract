@@ -18,6 +18,8 @@ pub enum HuntErrorCode {
     InvalidTitle = 11,
     InvalidDescription = 12,
     InvalidAddress = 13,
+    TooManyClues = 14,
+    InvalidQuestion = 15,
 }
 
 #[derive(Debug)]
@@ -35,6 +37,8 @@ pub enum HuntError {
     InvalidTitle { reason: String },
     InvalidDescription { reason: String },
     InvalidAddress,
+    TooManyClues { hunt_id: u64, limit: u32 },
+    InvalidQuestion,
 }
 
 impl fmt::Display for HuntError {
@@ -79,27 +83,34 @@ impl fmt::Display for HuntError {
             HuntError::InvalidAddress => {
                 write!(f, "Invalid address")
             }
+            HuntError::TooManyClues { hunt_id, limit } => {
+                write!(f, "Too many clues for hunt {} (limit {})", hunt_id, limit)
+            }
+            HuntError::InvalidQuestion => {
+                write!(f, "Invalid question (empty or exceeds max length)")
+            }
         }
     }
 }
-
 
 impl From<HuntError> for HuntErrorCode {
     fn from(err: HuntError) -> Self {
         match err {
             HuntError::HuntNotFound { .. } => HuntErrorCode::HuntNotFound,
             HuntError::ClueNotFound { .. } => HuntErrorCode::ClueNotFound,
-            HuntError::InvalidHuntStatus { .. } => HuntErrorCode::InvalidHuntStatus,
+            HuntError::InvalidHuntStatus => HuntErrorCode::InvalidHuntStatus,
             HuntError::PlayerNotRegistered { .. } => HuntErrorCode::PlayerNotRegistered,
             HuntError::ClueAlreadyCompleted { .. } => HuntErrorCode::ClueAlreadyCompleted,
-            HuntError::InvalidAnswer { .. } => HuntErrorCode::InvalidAnswer,
+            HuntError::InvalidAnswer => HuntErrorCode::InvalidAnswer,
             HuntError::HuntNotActive { .. } => HuntErrorCode::HuntNotActive,
-            HuntError::Unauthorized { .. } => HuntErrorCode::Unauthorized,
+            HuntError::Unauthorized => HuntErrorCode::Unauthorized,
             HuntError::InsufficientRewardPool { .. } => HuntErrorCode::InsufficientRewardPool,
             HuntError::DuplicateRegistration { .. } => HuntErrorCode::DuplicateRegistration,
             HuntError::InvalidTitle { .. } => HuntErrorCode::InvalidTitle,
             HuntError::InvalidDescription { .. } => HuntErrorCode::InvalidDescription,
-            HuntError::InvalidAddress { .. } => HuntErrorCode::InvalidAddress,
+            HuntError::InvalidAddress => HuntErrorCode::InvalidAddress,
+            HuntError::TooManyClues { .. } => HuntErrorCode::TooManyClues,
+            HuntError::InvalidQuestion => HuntErrorCode::InvalidQuestion,
         }
     }
 }
