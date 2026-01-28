@@ -1,5 +1,4 @@
 use soroban_sdk::{contracterror, String};
-use thiserror::Error;
 use core::fmt;
 
 #[contracterror]
@@ -16,30 +15,72 @@ pub enum HuntErrorCode {
     Unauthorized = 8,
     InsufficientRewardPool = 9,
     DuplicateRegistration = 10,
+    InvalidTitle = 11,
+    InvalidDescription = 12,
+    InvalidAddress = 13,
 }
 
-#[derive(Error, Debug)]
+#[derive(Debug)]
 pub enum HuntError {
-    #[error("Hunt not found: ID {hunt_id}")]
     HuntNotFound { hunt_id: u64 },
-    #[error("Clue not found for hunt {hunt_id}")]
     ClueNotFound { hunt_id: u64 },
-    #[error("Invalid hunt status")]
     InvalidHuntStatus,
-    #[error("Player not registered for hunt {hunt_id}")]
     PlayerNotRegistered { hunt_id: u64 },
-    #[error("Clue already completed for hunt {hunt_id}")]
     ClueAlreadyCompleted { hunt_id: u64 },
-    #[error("Invalid answer submitted")]
     InvalidAnswer,
-    #[error("Hunt not active: ID {hunt_id}")]
     HuntNotActive { hunt_id: u64 },
-    #[error("Unauthorized access")]
     Unauthorized,
-    #[error("Insufficient reward pool: required {required}, available {available}")]
     InsufficientRewardPool { required: i128, available: i128 },
-    #[error("Duplicate registration for hunt {hunt_id}")]
     DuplicateRegistration { hunt_id: u64 },
+    InvalidTitle { reason: String },
+    InvalidDescription { reason: String },
+    InvalidAddress,
+}
+
+impl fmt::Display for HuntError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            HuntError::HuntNotFound { hunt_id } => {
+                write!(f, "Hunt not found: ID {}", hunt_id)
+            }
+            HuntError::ClueNotFound { hunt_id } => {
+                write!(f, "Clue not found for hunt {}", hunt_id)
+            }
+            HuntError::InvalidHuntStatus => {
+                write!(f, "Invalid hunt status")
+            }
+            HuntError::PlayerNotRegistered { hunt_id } => {
+                write!(f, "Player not registered for hunt {}", hunt_id)
+            }
+            HuntError::ClueAlreadyCompleted { hunt_id } => {
+                write!(f, "Clue already completed for hunt {}", hunt_id)
+            }
+            HuntError::InvalidAnswer => {
+                write!(f, "Invalid answer submitted")
+            }
+            HuntError::HuntNotActive { hunt_id } => {
+                write!(f, "Hunt not active: ID {}", hunt_id)
+            }
+            HuntError::Unauthorized => {
+                write!(f, "Unauthorized access")
+            }
+            HuntError::InsufficientRewardPool { required, available } => {
+                write!(f, "Insufficient reward pool: required {}, available {}", required, available)
+            }
+            HuntError::DuplicateRegistration { hunt_id } => {
+                write!(f, "Duplicate registration for hunt {}", hunt_id)
+            }
+            HuntError::InvalidTitle { reason } => {
+                write!(f, "Invalid title: {:?}", reason)
+            }
+            HuntError::InvalidDescription { reason } => {
+                write!(f, "Invalid description: {:?}", reason)
+            }
+            HuntError::InvalidAddress => {
+                write!(f, "Invalid address")
+            }
+        }
+    }
 }
 
 
@@ -56,6 +97,9 @@ impl From<HuntError> for HuntErrorCode {
             HuntError::Unauthorized { .. } => HuntErrorCode::Unauthorized,
             HuntError::InsufficientRewardPool { .. } => HuntErrorCode::InsufficientRewardPool,
             HuntError::DuplicateRegistration { .. } => HuntErrorCode::DuplicateRegistration,
+            HuntError::InvalidTitle { .. } => HuntErrorCode::InvalidTitle,
+            HuntError::InvalidDescription { .. } => HuntErrorCode::InvalidDescription,
+            HuntError::InvalidAddress { .. } => HuntErrorCode::InvalidAddress,
         }
     }
 }
