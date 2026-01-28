@@ -14,6 +14,7 @@ impl Storage {
     const PROGRESS_KEY: soroban_sdk::Symbol = symbol_short!("PROG");
     const PLAYERS_LIST_KEY: soroban_sdk::Symbol = symbol_short!("PLRS");
     const CLUES_LIST_KEY: soroban_sdk::Symbol = symbol_short!("CLST");
+    const HUNT_COUNTER_KEY: soroban_sdk::Symbol = symbol_short!("CNTR");
 
     // ========== Hunt Storage Functions ==========
 
@@ -294,6 +295,36 @@ impl Storage {
         let key = Self::players_list_key(hunt_id);
         env.storage().persistent().get(&key)
             .unwrap_or_else(|| Vec::new(env))
+    }
+
+    // ========== Hunt Counter Functions ==========
+
+    /// Increments and returns the next hunt ID.
+    /// This ensures unique, sequential hunt IDs.
+    /// 
+    /// # Arguments
+    /// * `env` - The Soroban environment
+    /// 
+    /// # Returns
+    /// The next available hunt ID (starting from 1)
+    pub fn next_hunt_id(env: &Env) -> u64 {
+        let key = Self::HUNT_COUNTER_KEY;
+        let current: u64 = env.storage().persistent().get(&key).unwrap_or(0);
+        let next = current + 1;
+        env.storage().persistent().set(&key, &next);
+        next
+    }
+
+    /// Gets the current hunt counter value without incrementing.
+    /// 
+    /// # Arguments
+    /// * `env` - The Soroban environment
+    /// 
+    /// # Returns
+    /// The current hunt counter value (0 if no hunts have been created)
+    pub fn get_hunt_counter(env: &Env) -> u64 {
+        let key = Self::HUNT_COUNTER_KEY;
+        env.storage().persistent().get(&key).unwrap_or(0)
     }
 }
 
