@@ -3,7 +3,7 @@ use crate::errors::{HuntError, HuntErrorCode};
 use crate::storage::Storage;
 use crate::types::{
     Clue, ClueAddedEvent, ClueInfo, Hunt, HuntActivatedEvent, HuntCancelledEvent, HuntCreatedEvent,
-    HuntDeactivatedEvent, HuntStatus, RewardConfig,
+    HuntDeactivatedEvent, HuntStatus, PlayerProgress, PlayerRegisteredEvent, RewardConfig,
 };
 use soroban_sdk::{contract, contractimpl, Address, Bytes, BytesN, Env, String, Symbol, Vec};
 
@@ -347,11 +347,69 @@ impl HuntyCore {
             | HuntStatus::Active
             | HuntStatus::Completed
             | HuntStatus::Cancelled => {}
-            _ => return Err(HuntErrorCode::InvalidHuntStatus),
         }
 
         // Return the full Hunt struct
         Ok(hunt)
+    }
+
+    /// Registers a player for an active hunt. The caller must pass their address and authorize;
+    /// only that identity can register themselves. Initializes player progress and prevents
+    /// duplicate registrations. Registration is only allowed while the hunt is active and
+    /// (if set) before end_time.
+    ///
+    /// # Arguments
+    /// * `env` - The Soroban environment
+    /// * `hunt_id` - The hunt to register for
+    /// * `player` - The address of the player (must authorize the call via require_auth)
+    ///
+    /// # Returns
+    /// `Ok(())` on success
+    ///
+    /// # Errors
+    /// * `HuntNotFound` - Hunt does not exist
+    /// * `InvalidHuntStatus` - Hunt is not in Active status
+    /// * `HuntNotActive` - Hunt has ended (past end_time)
+    /// * `DuplicateRegistration` - Player is already registered for this hunt
+    pub fn register_player(env: Env, hunt_id: u64, player: Address) -> Result<(), HuntErrorCode> {
+        player.require_auth();
+
+        let hunt = Storage::get_hunt(&env, hunt_id).ok_or(HuntErrorCode::HuntNotFound)?;
+
+        if hunt.status != HuntStatus::Active {
+            return Err(HuntErrorCode::InvalidHuntStatus);
+        }
+
+        let current_time = env.ledger().timestamp();
+        if !hunt.is_active(current_time) {
+            return Err(HuntErrorCode::HuntNotActive);
+        }
+
+        if Storage::get_player_progress(&env, hunt_id, &player).is_some() {
+            return Err(HuntErrorCode::DuplicateRegistration);
+        }
+
+        let progress = PlayerProgress::new(&env, player.clone(), hunt_id, current_time);
+        Storage::save_player_progress(&env, &progress);
+
+        let event = PlayerRegisteredEvent {
+            hunt_id,
+            player: player.clone(),
+        };
+        env.events()
+            .publish((Symbol::new(&env, "PlayerRegistered"), hunt_id), event);
+
+        Ok(())
+    }
+
+    /// Returns player progress for a hunt, or None if not registered.
+    pub fn get_player_progress(
+        env: Env,
+        hunt_id: u64,
+        player: Address,
+    ) -> Result<PlayerProgress, HuntErrorCode> {
+        Storage::get_player_progress(&env, hunt_id, &player)
+            .ok_or(HuntErrorCode::PlayerNotRegistered)
     }
 }
 

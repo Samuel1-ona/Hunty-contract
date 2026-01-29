@@ -1106,4 +1106,256 @@ mod test {
             assert_eq!(info.status, HuntStatus::Draft);
         });
     }
+
+    // ========== register_player() Tests ==========
+
+    #[test]
+    fn test_register_player_success() {
+        let env = Env::default();
+        env.ledger().set_timestamp(1_700_000_000);
+        env.mock_all_auths();
+
+        let creator = Address::generate(&env);
+        let player = Address::generate(&env);
+        let question = String::from_str(&env, "Valid question");
+        let answer = String::from_str(&env, "a");
+
+        with_core_contract(&env, |env, _cid| {
+            let hunt_id = HuntyCore::create_hunt(
+                env.clone(),
+                creator.clone(),
+                String::from_str(env, "Active Hunt"),
+                String::from_str(env, "Desc"),
+                None,
+                None,
+            )
+            .unwrap();
+            HuntyCore::add_clue(env.clone(), hunt_id, question, answer, 10, false).unwrap();
+            HuntyCore::activate_hunt(env.clone(), hunt_id, creator.clone()).unwrap();
+
+            HuntyCore::register_player(env.clone(), hunt_id, player.clone()).unwrap();
+
+            let progress = HuntyCore::get_player_progress(env.clone(), hunt_id, player.clone()).unwrap();
+            assert_eq!(progress.player, player);
+            assert_eq!(progress.hunt_id, hunt_id);
+            assert_eq!(progress.completed_clues.len(), 0);
+            assert_eq!(progress.total_score, 0);
+            assert_eq!(progress.is_completed, false);
+            assert_eq!(progress.reward_claimed, false);
+            assert!(progress.started_at > 0);
+            assert_eq!(progress.completed_at, 0);
+        });
+    }
+
+    #[test]
+    fn test_register_player_duplicate_fails() {
+        let env = Env::default();
+        env.ledger().set_timestamp(1_700_000_000);
+        env.mock_all_auths();
+
+        let creator = Address::generate(&env);
+        let player = Address::generate(&env);
+        let question = String::from_str(&env, "Q");
+        let answer = String::from_str(&env, "a");
+
+        // Pre-populate storage with existing progress so that the single register_player
+        // call hits the duplicate check (mock_all_auths only allows one auth per test frame).
+        let err = with_core_contract(&env, |env, _cid| {
+            let hunt_id = HuntyCore::create_hunt(
+                env.clone(),
+                creator.clone(),
+                String::from_str(env, "Hunt"),
+                String::from_str(env, "Desc"),
+                None,
+                None,
+            )
+            .unwrap();
+            HuntyCore::add_clue(env.clone(), hunt_id, question, answer, 1, false).unwrap();
+            HuntyCore::activate_hunt(env.clone(), hunt_id, creator.clone()).unwrap();
+
+            let current_time = env.ledger().timestamp();
+            let existing =
+                crate::types::PlayerProgress::new(env, player.clone(), hunt_id, current_time);
+            Storage::save_player_progress(env, &existing);
+
+            HuntyCore::register_player(env.clone(), hunt_id, player.clone()).unwrap_err()
+        });
+
+        assert_eq!(err, HuntErrorCode::DuplicateRegistration);
+    }
+
+    #[test]
+    fn test_register_player_hunt_not_found() {
+        let env = Env::default();
+        env.ledger().set_timestamp(1_700_000_000);
+        env.mock_all_auths();
+        let player = Address::generate(&env);
+
+        let err = with_core_contract(&env, |env, _cid| {
+            HuntyCore::register_player(env.clone(), 9999, player.clone()).unwrap_err()
+        });
+
+        assert_eq!(err, HuntErrorCode::HuntNotFound);
+    }
+
+    #[test]
+    fn test_register_player_hunt_not_active_draft() {
+        let env = Env::default();
+        env.ledger().set_timestamp(1_700_000_000);
+        env.mock_all_auths();
+
+        let creator = Address::generate(&env);
+        let player = Address::generate(&env);
+        let question = String::from_str(&env, "Q");
+        let answer = String::from_str(&env, "a");
+
+        let err = with_core_contract(&env, |env, _cid| {
+            let hunt_id = HuntyCore::create_hunt(
+                env.clone(),
+                creator.clone(),
+                String::from_str(env, "Hunt"),
+                String::from_str(env, "Desc"),
+                None,
+                None,
+            )
+            .unwrap();
+            HuntyCore::add_clue(env.clone(), hunt_id, question, answer, 1, false).unwrap();
+            // Hunt is still Draft, not activated
+            HuntyCore::register_player(env.clone(), hunt_id, player.clone()).unwrap_err()
+        });
+
+        assert_eq!(err, HuntErrorCode::InvalidHuntStatus);
+    }
+
+    #[test]
+    fn test_register_player_hunt_ended() {
+        let env = Env::default();
+        env.ledger().set_timestamp(1_700_000_000);
+        env.mock_all_auths();
+
+        let creator = Address::generate(&env);
+        let player = Address::generate(&env);
+        let question = String::from_str(&env, "Q");
+        let answer = String::from_str(&env, "a");
+        let end_time = 1_700_000_001; // One second after "now"
+
+        let err = with_core_contract(&env, |env, _cid| {
+            let hunt_id = HuntyCore::create_hunt(
+                env.clone(),
+                creator.clone(),
+                String::from_str(env, "Hunt"),
+                String::from_str(env, "Desc"),
+                None,
+                Some(end_time),
+            )
+            .unwrap();
+            HuntyCore::add_clue(env.clone(), hunt_id, question, answer, 1, false).unwrap();
+            HuntyCore::activate_hunt(env.clone(), hunt_id, creator.clone()).unwrap();
+            // Move time past end_time
+            env.ledger().set_timestamp(1_700_000_002);
+            HuntyCore::register_player(env.clone(), hunt_id, player.clone()).unwrap_err()
+        });
+
+        assert_eq!(err, HuntErrorCode::HuntNotActive);
+    }
+
+    #[test]
+    fn test_register_player_multiple_players_same_hunt() {
+        let env = Env::default();
+        env.ledger().set_timestamp(1_700_000_000);
+        env.mock_all_auths();
+
+        let creator = Address::generate(&env);
+        let player1 = Address::generate(&env);
+        let player2 = Address::generate(&env);
+        let player3 = Address::generate(&env);
+        let question = String::from_str(&env, "Q");
+        let answer = String::from_str(&env, "a");
+
+        with_core_contract(&env, |env, _cid| {
+            let hunt_id = HuntyCore::create_hunt(
+                env.clone(),
+                creator.clone(),
+                String::from_str(env, "Hunt"),
+                String::from_str(env, "Desc"),
+                None,
+                None,
+            )
+            .unwrap();
+            HuntyCore::add_clue(env.clone(), hunt_id, question, answer, 1, false).unwrap();
+            HuntyCore::activate_hunt(env.clone(), hunt_id, creator.clone()).unwrap();
+
+            HuntyCore::register_player(env.clone(), hunt_id, player1.clone()).unwrap();
+            HuntyCore::register_player(env.clone(), hunt_id, player2.clone()).unwrap();
+            HuntyCore::register_player(env.clone(), hunt_id, player3.clone()).unwrap();
+
+            let p1 = HuntyCore::get_player_progress(env.clone(), hunt_id, player1.clone()).unwrap();
+            let p2 = HuntyCore::get_player_progress(env.clone(), hunt_id, player2.clone()).unwrap();
+            let p3 = HuntyCore::get_player_progress(env.clone(), hunt_id, player3.clone()).unwrap();
+
+            assert_eq!(p1.player, player1);
+            assert_eq!(p2.player, player2);
+            assert_eq!(p3.player, player3);
+            assert_eq!(p1.hunt_id, hunt_id);
+            assert_eq!(p2.hunt_id, hunt_id);
+            assert_eq!(p3.hunt_id, hunt_id);
+        });
+    }
+
+    #[test]
+    #[should_panic]
+    fn test_register_player_unauthorized() {
+        let env = Env::default();
+        env.ledger().set_timestamp(1_700_000_000);
+        // Do NOT mock auth — player.require_auth() will fail if not authorized
+        let creator = Address::generate(&env);
+        let player = Address::generate(&env);
+        let question = String::from_str(&env, "Q");
+        let answer = String::from_str(&env, "a");
+
+        with_core_contract(&env, |env, _cid| {
+            let hunt_id = HuntyCore::create_hunt(
+                env.clone(),
+                creator.clone(),
+                String::from_str(env, "Hunt"),
+                String::from_str(env, "Desc"),
+                None,
+                None,
+            )
+            .unwrap();
+            HuntyCore::add_clue(env.clone(), hunt_id, question, answer, 1, false).unwrap();
+            HuntyCore::activate_hunt(env.clone(), hunt_id, creator.clone()).unwrap();
+            HuntyCore::register_player(env.clone(), hunt_id, player.clone()).unwrap();
+        });
+    }
+
+    #[test]
+    fn test_get_player_progress_not_registered() {
+        let env = Env::default();
+        env.ledger().set_timestamp(1_700_000_000);
+        env.mock_all_auths();
+
+        let creator = Address::generate(&env);
+        let player = Address::generate(&env);
+        let question = String::from_str(&env, "Q");
+        let answer = String::from_str(&env, "a");
+
+        let err = with_core_contract(&env, |env, _cid| {
+            let hunt_id = HuntyCore::create_hunt(
+                env.clone(),
+                creator.clone(),
+                String::from_str(env, "Hunt"),
+                String::from_str(env, "Desc"),
+                None,
+                None,
+            )
+            .unwrap();
+            HuntyCore::add_clue(env.clone(), hunt_id, question, answer, 1, false).unwrap();
+            HuntyCore::activate_hunt(env.clone(), hunt_id, creator.clone()).unwrap();
+            // Player never registered
+            HuntyCore::get_player_progress(env.clone(), hunt_id, player.clone()).unwrap_err()
+        });
+
+        assert_eq!(err, HuntErrorCode::PlayerNotRegistered);
+    }
 }
