@@ -6,7 +6,6 @@ use std::string::ToString;
 #[cfg(test)]
 mod test {
     use super::*;
-    use std::format;
     use soroban_sdk::{Address, Env, String, Vec};
     // Bring Soroban testutils traits into scope (generate addresses, set ledger info, register contracts).
     use crate::errors::{HuntError, HuntErrorCode};
@@ -14,31 +13,6 @@ mod test {
     use crate::types::HuntStatus;
     use crate::HuntyCore;
     use soroban_sdk::testutils::{Address as _, Ledger as _, Register as _};
-
-    // #region agent log
-    const DEBUG_LOG_PATH: &str = "/Users/0t41k1/Documents/Hunty-contract/.cursor/debug.log";
-    fn agent_log(test_name: &str, hypothesis_id: &str, message: &str, data: &[(&str, u64)]) {
-        let mut line = format!(
-            r#"{{"location":"test.rs","message":"{}","test_name":"{}","hypothesisId":"{}","timestamp":{}"#,
-            message,
-            test_name,
-            hypothesis_id,
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .map(|d| d.as_millis() as u64)
-                .unwrap_or(0)
-        );
-        for (k, v) in data {
-            line.push_str(&format!(r#","{}":{}"#, k, v));
-        }
-        line.push_str("}\n");
-        let _ = std::fs::OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(DEBUG_LOG_PATH)
-            .and_then(|mut f| std::io::Write::write_all(&mut f, line.as_bytes()));
-    }
-    // #endregion
 
     /// Runs a closure inside a registered HuntyCore contract context so storage is accessible.
     fn with_core_contract<T>(env: &Env, f: impl FnOnce(&Env, &Address) -> T) -> T {
@@ -1396,14 +1370,6 @@ mod test {
 
     #[test]
     fn test_get_player_progress_returns_state_after_submit() {
-        // #region agent log
-        agent_log(
-            "test_get_player_progress_returns_state_after_submit",
-            "E",
-            "test entry",
-            &[],
-        );
-        // #endregion
         let env = Env::default();
         env.ledger().set_timestamp(1_700_000_000);
         let contract_id = env.register_contract(None, HuntyCore);
@@ -1454,19 +1420,6 @@ mod test {
         let progress = as_core_contract(&env, &contract_id, |env| {
             HuntyCore::get_player_progress(env.clone(), hunt_id, player.clone()).unwrap()
         });
-        // #region agent log
-        agent_log(
-            "test_get_player_progress_returns_state_after_submit",
-            "A",
-            "after get_player_progress",
-            &[
-                ("completed_clues_len", progress.completed_clues.len() as u64),
-                ("total_score", progress.total_score as u64),
-                ("is_completed", if progress.is_completed { 1 } else { 0 }),
-                ("completed_at", progress.completed_at),
-            ],
-        );
-        // #endregion
         assert_eq!(progress.player, player);
         assert_eq!(progress.hunt_id, hunt_id);
         assert_eq!(progress.completed_clues.len(), 1);
@@ -1553,18 +1506,6 @@ mod test {
             HuntyCore::get_completed_clues(env.clone(), hunt_id, player.clone())
         });
 
-        // #region agent log
-        agent_log(
-            "test_get_completed_clues_returns_ids_after_submit",
-            "B",
-            "after get_completed_clues",
-            &[
-                ("list_len", list.len() as u64),
-                ("id0", list.get(0).unwrap_or(0) as u64),
-                ("id1", list.get(1).unwrap_or(0) as u64),
-            ],
-        );
-        // #endregion
         assert_eq!(list.len(), 2);
         assert_eq!(list.get(0).unwrap(), 1);
         assert_eq!(list.get(1).unwrap(), 2);
@@ -1733,25 +1674,9 @@ mod test {
             HuntyCore::get_hunt_leaderboard(env.clone(), hunt_id, 10).unwrap()
         });
 
-        // #region agent log
         let e1 = board.get(0).unwrap();
         let e2 = board.get(1).unwrap();
         let e3 = board.get(2).unwrap();
-        agent_log(
-            "test_get_hunt_leaderboard_sorted_by_score_then_completion_time",
-            "C",
-            "after get_hunt_leaderboard",
-            &[
-                ("board_len", board.len() as u64),
-                ("e1_rank", e1.rank as u64),
-                ("e1_score", e1.score as u64),
-                ("e1_completed_at", e1.completed_at),
-                ("e2_score", e2.score as u64),
-                ("e2_completed_at", e2.completed_at),
-                ("e3_score", e3.score as u64),
-            ],
-        );
-        // #endregion
         assert_eq!(board.len(), 3);
         assert_eq!(e1.rank, 1);
         assert_eq!(e2.rank, 2);
@@ -1923,20 +1848,6 @@ mod test {
             HuntyCore::get_hunt_statistics(env.clone(), hunt_id).unwrap()
         });
 
-        // #region agent log
-        agent_log(
-            "test_get_hunt_statistics_aggregates_correctly",
-            "D",
-            "after get_hunt_statistics",
-            &[
-                ("total_players", stats.total_players as u64),
-                ("completed_count", stats.completed_count as u64),
-                ("completion_rate_percent", stats.completion_rate_percent as u64),
-                ("total_score_sum", stats.total_score_sum),
-                ("average_score", stats.average_score as u64),
-            ],
-        );
-        // #endregion
         assert_eq!(stats.total_players, 3);
         assert_eq!(stats.completed_count, 2);
         assert_eq!(stats.completion_rate_percent, 66);
