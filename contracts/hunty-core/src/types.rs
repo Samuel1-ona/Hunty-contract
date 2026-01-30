@@ -244,3 +244,25 @@ pub struct AnswerIncorrectEvent {
     pub clue_id: u32,
     pub timestamp: u64,
 }
+
+/// Leaderboard entry for a single player in a hunt (read-only query result).
+#[contracttype]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct LeaderboardEntry {
+    pub rank: u32,
+    pub player: Address,
+    pub score: u32,
+    pub completed_at: u64,
+    pub is_completed: bool,
+}
+
+/// Aggregate statistics for a hunt (read-only query result).
+#[contracttype]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct HuntStatistics {
+    pub total_players: u32,
+    pub completed_count: u32,
+    pub completion_rate_percent: u32,
+    pub total_score_sum: u64,
+    pub average_score: u32,
+}

@@ -4,13 +4,16 @@ use crate::storage::Storage;
 use crate::types::{
     AnswerIncorrectEvent, Clue, ClueAddedEvent, ClueCompletedEvent, ClueInfo, Hunt,
     HuntActivatedEvent, HuntCancelledEvent, HuntCompletedEvent, HuntCreatedEvent,
-    HuntDeactivatedEvent, HuntStatus, PlayerProgress, PlayerRegisteredEvent, RewardConfig,
+    HuntDeactivatedEvent, HuntStatistics, HuntStatus, LeaderboardEntry, PlayerProgress,
+    PlayerRegisteredEvent, RewardConfig,
 };
 use soroban_sdk::{contract, contractimpl, Address, Bytes, BytesN, Env, String, Symbol, Vec};
 
 const MAX_QUESTION_LENGTH: u32 = 2000;
 const MAX_ANSWER_LENGTH: u32 = 256;
 const MAX_CLUES_PER_HUNT: u32 = 100;
+/// Maximum number of leaderboard entries returned (gas and UX limit).
+const MAX_LEADERBOARD_SIZE: u32 = 20;
 
 #[contract]
 pub struct HuntyCore;
@@ -548,7 +551,9 @@ impl HuntyCore {
         true
     }
 
-    /// Returns player progress for a hunt, or None if not registered.
+    /// Returns player progress for a hunt (read-only).
+    /// Includes completed clues, score, and completion status.
+    /// Returns error if player is not registered.
     pub fn get_player_progress(
         env: Env,
         hunt_id: u64,
@@ -556,6 +561,143 @@ impl HuntyCore {
     ) -> Result<PlayerProgress, HuntErrorCode> {
         Storage::get_player_progress(&env, hunt_id, &player)
             .ok_or(HuntErrorCode::PlayerNotRegistered)
+    }
+
+    /// Returns the list of clue IDs that the player has completed for a hunt (read-only).
+    /// Useful for UI to show progress. Returns empty vec if player is not registered.
+    pub fn get_completed_clues(env: Env, hunt_id: u64, player: Address) -> Vec<u32> {
+        match Storage::get_player_progress(&env, hunt_id, &player) {
+            Some(progress) => progress.completed_clues,
+            None => Vec::new(&env),
+        }
+    }
+
+    /// Returns the top N players by score for a hunt (read-only).
+    /// Sorted by score descending, then by completion time ascending (earlier = better).
+    /// Limit is capped at 20 to control gas. Returns error if hunt does not exist.
+    pub fn get_hunt_leaderboard(
+        env: Env,
+        hunt_id: u64,
+        limit: u32,
+    ) -> Result<Vec<LeaderboardEntry>, HuntErrorCode> {
+        let _ = Storage::get_hunt(&env, hunt_id).ok_or(HuntErrorCode::HuntNotFound)?;
+        let effective_limit = core::cmp::min(limit, MAX_LEADERBOARD_SIZE);
+        let players = Storage::get_hunt_players(&env, hunt_id);
+        let mut entries = Vec::new(&env);
+        for i in 0..players.len() {
+            let p = players.get(i).unwrap();
+            entries.push_back((
+                p.player.clone(),
+                p.total_score,
+                p.completed_at,
+                p.is_completed,
+            ));
+        }
+        let mut selected = Vec::new(&env);
+        let mut result = Vec::new(&env);
+        for rank in 1..=effective_limit {
+            if let Some(best_idx) = Self::leaderboard_best_index(&entries, &selected) {
+                selected.push_back(best_idx);
+                let (player, score, completed_at, is_completed) = entries.get(best_idx).unwrap();
+                result.push_back(LeaderboardEntry {
+                    rank,
+                    player,
+                    score,
+                    completed_at,
+                    is_completed,
+                });
+            } else {
+                break;
+            }
+        }
+        Ok(result)
+    }
+
+    /// Picks the index of the best entry not in `selected`. Order: score desc, then completed_at asc (0 = last).
+    fn leaderboard_best_index(
+        entries: &Vec<(Address, u32, u64, bool)>,
+        selected: &Vec<u32>,
+    ) -> Option<u32> {
+        let n = entries.len();
+        let mut best_idx: Option<u32> = None;
+        for i in 0..n {
+            let i_u32 = i as u32;
+            let mut taken = false;
+            for j in 0..selected.len() {
+                if selected.get(j).unwrap() == i_u32 {
+                    taken = true;
+                    break;
+                }
+            }
+            if taken {
+                continue;
+            }
+            let (_, score, completed_at, _) = entries.get(i).unwrap();
+            let better = match best_idx {
+                None => true,
+                Some(bi) => {
+                    let (_, b_score, b_completed_at, _) = entries.get(bi).unwrap();
+                    if score > b_score {
+                        true
+                    } else if score == b_score {
+                        let a_val = if completed_at == 0 {
+                            u64::MAX
+                        } else {
+                            completed_at
+                        };
+                        let b_val = if b_completed_at == 0 {
+                            u64::MAX
+                        } else {
+                            b_completed_at
+                        };
+                        a_val < b_val
+                    } else {
+                        false
+                    }
+                }
+            };
+            if better {
+                best_idx = Some(i_u32);
+            }
+        }
+        best_idx
+    }
+
+    /// Returns aggregate statistics for a hunt (read-only): total players, completion rate, average score.
+    /// Returns error if hunt does not exist.
+    pub fn get_hunt_statistics(
+        env: Env,
+        hunt_id: u64,
+    ) -> Result<HuntStatistics, HuntErrorCode> {
+        let _ = Storage::get_hunt(&env, hunt_id).ok_or(HuntErrorCode::HuntNotFound)?;
+        let players = Storage::get_hunt_players(&env, hunt_id);
+        let total_players = players.len() as u32;
+        let mut completed_count: u32 = 0;
+        let mut total_score_sum: u64 = 0;
+        for i in 0..players.len() {
+            let p = players.get(i).unwrap();
+            if p.is_completed {
+                completed_count += 1;
+            }
+            total_score_sum += p.total_score as u64;
+        }
+        let completion_rate_percent = if total_players > 0 {
+            (completed_count * 100) / total_players
+        } else {
+            0
+        };
+        let average_score = if total_players > 0 {
+            (total_score_sum / (total_players as u64)) as u32
+        } else {
+            0
+        };
+        Ok(HuntStatistics {
+            total_players,
+            completed_count,
+            completion_rate_percent,
+            total_score_sum,
+            average_score,
+        })
     }
 }
 
