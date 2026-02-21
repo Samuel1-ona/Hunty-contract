@@ -10,6 +10,7 @@ doctest = false
 
 [dependencies]
 soroban-sdk = { workspace = true }
+reward_manager = { path = "../reward-manager", package = "reward-manager" }
 
 [dev-dependencies]
 soroban-sdk = { workspace = true, features = ["testutils"] }

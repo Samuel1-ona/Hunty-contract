@@ -9,4 +9,6 @@ pub enum RewardErrorCode {
     AlreadyDistributed = 3,
     TransferFailed = 4,
     InvalidAmount = 5,
+    InvalidConfig = 6,
+    NftMintFailed = 7,
 }

@@ -1,10 +1,13 @@
 use soroban_sdk::{symbol_short, Address, Env};
 
+use crate::types::DistributionRecord;
+
 pub struct Storage;
 
 impl Storage {
     const XLM_TOKEN_KEY: soroban_sdk::Symbol = symbol_short!("XLMTKN");
     const DISTRIBUTION_KEY: soroban_sdk::Symbol = symbol_short!("DIST");
+    const DIST_RECORD_KEY: soroban_sdk::Symbol = symbol_short!("DREC");
     const POOL_KEY: soroban_sdk::Symbol = symbol_short!("POOL");
 
     // ========== XLM Token Address ==========
@@ -27,6 +30,30 @@ impl Storage {
     pub fn is_distributed(env: &Env, hunt_id: u64, player: &Address) -> bool {
         let key = Self::distribution_key(hunt_id, player);
         env.storage().persistent().get(&key).unwrap_or(false)
+    }
+
+    /// Stores the full distribution record (xlm_amount, nft_id) for status queries.
+    pub fn set_distribution_record(
+        env: &Env,
+        hunt_id: u64,
+        player: &Address,
+        record: &DistributionRecord,
+    ) {
+        let key = Self::distribution_record_key(hunt_id, player);
+        env.storage().persistent().set(&key, record);
+    }
+
+    pub fn get_distribution_record(
+        env: &Env,
+        hunt_id: u64,
+        player: &Address,
+    ) -> Option<DistributionRecord> {
+        let key = Self::distribution_record_key(hunt_id, player);
+        env.storage().persistent().get(&key)
+    }
+
+    fn distribution_record_key(hunt_id: u64, player: &Address) -> (soroban_sdk::Symbol, u64, Address) {
+        (Self::DIST_RECORD_KEY, hunt_id, player.clone())
     }
 
     // ========== Reward Pool Balance (per hunt) ==========

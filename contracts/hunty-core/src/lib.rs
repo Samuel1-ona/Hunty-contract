@@ -7,6 +7,7 @@ use crate::types::{
     HuntDeactivatedEvent, HuntStatistics, HuntStatus, LeaderboardEntry, PlayerProgress,
     PlayerRegisteredEvent, RewardClaimedEvent, RewardConfig,
 };
+use reward_manager::RewardErrorCode;
 use soroban_sdk::{
     contract, contractimpl, Address, Bytes, BytesN, Env, IntoVal, String, Symbol, Val, Vec,
 };
@@ -418,21 +419,53 @@ impl HuntyCore {
         let reward_amount = hunt.reward_config.reward_per_winner();
         let nft_awarded = hunt.reward_config.nft_enabled;
 
-        // Call RewardManager if configured
+        // Call RewardManager if configured and there are rewards to distribute
         if let Some(reward_manager_addr) = Storage::get_reward_manager(&env) {
-            let mut args: Vec<Val> = Vec::new(&env);
-            args.push_back(player.clone().into_val(&env));
-            args.push_back(hunt_id.into_val(&env));
-            args.push_back(reward_amount.into_val(&env));
-            args.push_back(nft_awarded.into_val(&env));
+            let xlm_amount = if reward_amount > 0 {
+                Some(reward_amount)
+            } else {
+                None
+            };
+            let (nft_contract, nft_title, nft_desc, nft_uri) = if nft_awarded {
+                hunt.reward_config.nft_contract.clone().map(|nft_contract| {
+                    (
+                        Some(nft_contract),
+                        hunt.title.clone(),
+                        hunt.description.clone(),
+                        String::from_str(&env, ""),
+                    )
+                }).unwrap_or((
+                    None,
+                    String::from_str(&env, ""),
+                    String::from_str(&env, ""),
+                    String::from_str(&env, ""),
+                ))
+            } else {
+                (None, String::from_str(&env, ""), String::from_str(&env, ""), String::from_str(&env, ""))
+            };
+            let rm_reward_config = reward_manager::RewardConfig {
+                xlm_amount,
+                nft_contract,
+                nft_title,
+                nft_description: nft_desc,
+                nft_image_uri: nft_uri,
+            };
 
-            let success: bool = env.invoke_contract(
-                &reward_manager_addr,
-                &Symbol::new(&env, "distribute_rewards"),
-                args,
-            );
-            if !success {
-                return Err(HuntErrorCode::RewardDistributionFailed);
+            // Only call RewardManager when there is at least one reward type
+            if rm_reward_config.is_valid() {
+                let mut args: Vec<Val> = Vec::new(&env);
+                args.push_back(hunt_id.into_val(&env));
+                args.push_back(player.clone().into_val(&env));
+                args.push_back(rm_reward_config.into_val(&env));
+
+                let result: Result<(), RewardErrorCode> = env.invoke_contract(
+                    &reward_manager_addr,
+                    &Symbol::new(&env, "distribute_rewards"),
+                    args,
+                );
+                if result.is_err() {
+                    return Err(HuntErrorCode::RewardDistributionFailed);
+                }
             }
         }
 

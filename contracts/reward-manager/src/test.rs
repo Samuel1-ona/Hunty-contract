@@ -1,6 +1,7 @@
 #[cfg(test)]
 mod test {
     use crate::storage::Storage;
+    use crate::types::RewardConfig;
     use crate::RewardManager;
     use soroban_sdk::testutils::{Address as _, Ledger as _};
     use soroban_sdk::{token, Address, Env};
@@ -24,6 +25,16 @@ mod test {
     fn get_balance(env: &Env, token_address: &Address, addr: &Address) -> i128 {
         let client = token::Client::new(env, token_address);
         client.balance(addr)
+    }
+
+    fn xlm_only_config(env: &Env, amount: i128) -> RewardConfig {
+        RewardConfig {
+            xlm_amount: Some(amount),
+            nft_contract: None,
+            nft_title: soroban_sdk::String::from_str(env, ""),
+            nft_description: soroban_sdk::String::from_str(env, ""),
+            nft_image_uri: soroban_sdk::String::from_str(env, ""),
+        }
     }
 
     #[test]
@@ -104,14 +115,9 @@ mod test {
             RewardManager::initialize(env.clone(), token_address.clone());
             RewardManager::fund_reward_pool(env.clone(), funder.clone(), 1, 5_000).unwrap();
 
-            let result = RewardManager::distribute_rewards(
-                env.clone(),
-                player.clone(),
-                1,
-                2_000,
-                false,
-            );
-            assert!(result);
+            let config = xlm_only_config(&env, 2_000);
+            let result = RewardManager::distribute_rewards(env.clone(), 1, player.clone(), config);
+            assert!(result.is_ok());
         });
 
         // Verify player received tokens
@@ -149,14 +155,9 @@ mod test {
             RewardManager::fund_reward_pool(env.clone(), funder.clone(), 1, 1_000).unwrap();
 
             // Try to distribute more than pool has
-            let result = RewardManager::distribute_rewards(
-                env.clone(),
-                player.clone(),
-                1,
-                5_000,
-                false,
-            );
-            assert!(!result);
+            let config = xlm_only_config(&env, 5_000);
+            let result = RewardManager::distribute_rewards(env.clone(), 1, player.clone(), config);
+            assert!(result.is_err());
         });
 
         // Verify player didn't receive tokens
@@ -178,28 +179,44 @@ mod test {
             RewardManager::fund_reward_pool(env.clone(), funder.clone(), 1, 10_000).unwrap();
 
             // First distribution — success
-            let result1 = RewardManager::distribute_rewards(
-                env.clone(),
-                player.clone(),
-                1,
-                2_000,
-                false,
-            );
-            assert!(result1);
+            let config1 = xlm_only_config(&env, 2_000);
+            let result1 =
+                RewardManager::distribute_rewards(env.clone(), 1, player.clone(), config1);
+            assert!(result1.is_ok());
 
             // Second distribution — blocked
-            let result2 = RewardManager::distribute_rewards(
-                env.clone(),
-                player.clone(),
-                1,
-                2_000,
-                false,
-            );
-            assert!(!result2);
+            let config2 = xlm_only_config(&env, 2_000);
+            let result2 =
+                RewardManager::distribute_rewards(env.clone(), 1, player.clone(), config2);
+            assert!(result2.is_err());
         });
 
         // Verify player only received once
         assert_eq!(get_balance(&env, &token_address, &player), 2_000);
+    }
+
+    #[test]
+    fn test_distribute_rewards_invalid_config() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let (contract_id, token_address, _) = setup(&env);
+        let player = Address::generate(&env);
+
+        env.as_contract(&contract_id, || {
+            RewardManager::initialize(env.clone(), token_address.clone());
+
+            // Empty config (no XLM, no NFT)
+            let config = RewardConfig {
+                xlm_amount: None,
+                nft_contract: None,
+                nft_title: soroban_sdk::String::from_str(&env, ""),
+                nft_description: soroban_sdk::String::from_str(&env, ""),
+                nft_image_uri: soroban_sdk::String::from_str(&env, ""),
+            };
+            let result =
+                RewardManager::distribute_rewards(env.clone(), 1, player.clone(), config);
+            assert_eq!(result, Err(crate::errors::RewardErrorCode::InvalidConfig));
+        });
     }
 
     #[test]
@@ -212,14 +229,17 @@ mod test {
         env.as_contract(&contract_id, || {
             RewardManager::initialize(env.clone(), token_address.clone());
 
-            let result = RewardManager::distribute_rewards(
-                env.clone(),
-                player.clone(),
-                1,
-                0,
-                false,
-            );
-            assert!(!result);
+            // Config with zero XLM amount is invalid (no reward types)
+            let config = RewardConfig {
+                xlm_amount: Some(0),
+                nft_contract: None,
+                nft_title: soroban_sdk::String::from_str(&env, ""),
+                nft_description: soroban_sdk::String::from_str(&env, ""),
+                nft_image_uri: soroban_sdk::String::from_str(&env, ""),
+            };
+            let result =
+                RewardManager::distribute_rewards(env.clone(), 1, player.clone(), config);
+            assert_eq!(result, Err(crate::errors::RewardErrorCode::InvalidConfig));
         });
     }
 
@@ -231,14 +251,10 @@ mod test {
         let player = Address::generate(&env);
 
         env.as_contract(&contract_id, || {
-            let result = RewardManager::distribute_rewards(
-                env.clone(),
-                player.clone(),
-                1,
-                1_000,
-                false,
-            );
-            assert!(!result);
+            let config = xlm_only_config(&env, 1_000);
+            let result =
+                RewardManager::distribute_rewards(env.clone(), 1, player.clone(), config);
+            assert_eq!(result, Err(crate::errors::RewardErrorCode::NotInitialized));
         });
     }
 
@@ -259,14 +275,26 @@ mod test {
             RewardManager::fund_reward_pool(env.clone(), funder.clone(), 1, 30_000).unwrap();
 
             assert!(RewardManager::distribute_rewards(
-                env.clone(), player1.clone(), 1, 10_000, false
-            ));
+                env.clone(),
+                1,
+                player1.clone(),
+                xlm_only_config(&env, 10_000),
+            )
+            .is_ok());
             assert!(RewardManager::distribute_rewards(
-                env.clone(), player2.clone(), 1, 10_000, false
-            ));
+                env.clone(),
+                1,
+                player2.clone(),
+                xlm_only_config(&env, 10_000),
+            )
+            .is_ok());
             assert!(RewardManager::distribute_rewards(
-                env.clone(), player3.clone(), 1, 10_000, false
-            ));
+                env.clone(),
+                1,
+                player3.clone(),
+                xlm_only_config(&env, 10_000),
+            )
+            .is_ok());
         });
 
         assert_eq!(get_balance(&env, &token_address, &player1), 10_000);
@@ -300,7 +328,8 @@ mod test {
             assert_eq!(RewardManager::get_pool_balance(env.clone(), 1), 8_000);
 
             // After distribution
-            RewardManager::distribute_rewards(env.clone(), player.clone(), 1, 3_000, false);
+            let config = xlm_only_config(&env, 3_000);
+            RewardManager::distribute_rewards(env.clone(), 1, player.clone(), config).unwrap();
             assert_eq!(RewardManager::get_pool_balance(env.clone(), 1), 5_000);
         });
     }
@@ -359,9 +388,11 @@ mod test {
         // Distribute from hunt 1
         env.mock_all_auths();
         env.as_contract(&contract_id, || {
+            let config = xlm_only_config(&env, 3_000);
             assert!(RewardManager::distribute_rewards(
-                env.clone(), player.clone(), 1, 3_000, false
-            ));
+                env.clone(), 1, player.clone(), config
+            )
+            .is_ok());
             assert_eq!(RewardManager::get_pool_balance(env.clone(), 1), 2_000);
             assert_eq!(RewardManager::get_pool_balance(env.clone(), 2), 10_000);
         });
@@ -369,10 +400,70 @@ mod test {
         // Player can still claim from hunt 2
         env.mock_all_auths();
         env.as_contract(&contract_id, || {
+            let config = xlm_only_config(&env, 5_000);
             assert!(RewardManager::distribute_rewards(
-                env.clone(), player.clone(), 2, 5_000, false
-            ));
+                env.clone(), 2, player.clone(), config
+            )
+            .is_ok());
             assert_eq!(RewardManager::get_pool_balance(env.clone(), 2), 5_000);
         });
+    }
+
+    #[test]
+    fn test_get_distribution_status() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let (contract_id, token_address, token_admin) = setup(&env);
+        let funder = Address::generate(&env);
+        let player = Address::generate(&env);
+
+        mint_tokens(&env, &token_address, &token_admin, &funder, 10_000);
+
+        env.as_contract(&contract_id, || {
+            RewardManager::initialize(env.clone(), token_address.clone());
+            RewardManager::fund_reward_pool(env.clone(), funder.clone(), 1, 5_000).unwrap();
+
+            // Before distribution
+            let status = RewardManager::get_distribution_status(env.clone(), 1, player.clone());
+            assert!(!status.distributed);
+            assert_eq!(status.xlm_amount, 0);
+            assert_eq!(status.nft_id, None);
+
+            // After distribution
+            let config = xlm_only_config(&env, 2_000);
+            RewardManager::distribute_rewards(env.clone(), 1, player.clone(), config).unwrap();
+
+            let status = RewardManager::get_distribution_status(env.clone(), 1, player.clone());
+            assert!(status.distributed);
+            assert_eq!(status.xlm_amount, 2_000);
+            assert_eq!(status.nft_id, None);
+        });
+    }
+
+    #[test]
+    fn test_distribute_rewards_legacy() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let (contract_id, token_address, token_admin) = setup(&env);
+        let funder = Address::generate(&env);
+        let player = Address::generate(&env);
+
+        mint_tokens(&env, &token_address, &token_admin, &funder, 10_000);
+
+        env.as_contract(&contract_id, || {
+            RewardManager::initialize(env.clone(), token_address.clone());
+            RewardManager::fund_reward_pool(env.clone(), funder.clone(), 1, 5_000).unwrap();
+
+            let ok = RewardManager::distribute_rewards_legacy(
+                env.clone(),
+                player.clone(),
+                1,
+                2_000,
+                false,
+            );
+            assert!(ok);
+        });
+
+        assert_eq!(get_balance(&env, &token_address, &player), 2_000);
     }
 }

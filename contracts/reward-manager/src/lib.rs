@@ -1,12 +1,24 @@
-#![no_std]
-use soroban_sdk::{contract, contractimpl, Address, Env, Symbol};
+#![cfg_attr(not(test), no_std)]
+use soroban_sdk::{contract, contractimpl, contracttype, Address, Env, Symbol};
 
-use crate::errors::RewardErrorCode;
+pub use crate::errors::RewardErrorCode;
+pub use crate::types::{DistributionRecord, DistributionStatus, RewardConfig};
 use crate::storage::Storage;
 use crate::xlm_handler::XlmHandler;
+use crate::nft_handler::NftHandler;
 
 #[contract]
 pub struct RewardManager;
+
+/// Event emitted when rewards are successfully distributed.
+#[contracttype]
+#[derive(Clone, Debug)]
+pub struct RewardsDistributedEvent {
+    pub hunt_id: u64,
+    pub player: Address,
+    pub xlm_amount: i128,
+    pub nft_id: Option<u64>,
+}
 
 #[contractimpl]
 impl RewardManager {
@@ -55,74 +67,156 @@ impl RewardManager {
         Ok(())
     }
 
-    /// Distributes XLM rewards to a player for completing a hunt.
-    ///
-    /// Validates sufficient pool funds, prevents double distribution,
-    /// transfers XLM to the player, and updates tracking state.
+    /// Main entry point for reward distribution. Determines reward type from configuration,
+    /// routes to XLM and/or NFT handlers, and ensures atomic all-or-nothing execution.
     ///
     /// # Arguments
-    /// * `player` - The player receiving the reward
-    /// * `hunt_id` - The hunt ID
-    /// * `xlm_amount` - The XLM amount to distribute
-    /// * `nft_enabled` - Whether to award an NFT (reserved for future use)
+    /// * `hunt_id` - The hunt being rewarded
+    /// * `player_address` - The player receiving rewards
+    /// * `reward_config` - Configuration specifying XLM amount and/or NFT metadata
     ///
     /// # Returns
-    /// `true` on success
+    /// `Ok(())` on success
+    ///
+    /// # Errors
+    /// * `InvalidConfig` - No reward type configured or invalid values
+    /// * `NotInitialized` - XLM token not set (when XLM rewards requested)
+    /// * `AlreadyDistributed` - Rewards already distributed for this hunt/player
+    /// * `InsufficientPool` - Pool has insufficient XLM for requested amount
+    /// * `InvalidAmount` - XLM amount <= 0 (when XLM requested)
+    /// * `NftMintFailed` - NFT minting failed (when NFT requested)
     pub fn distribute_rewards(
+        env: Env,
+        hunt_id: u64,
+        player_address: Address,
+        reward_config: RewardConfig,
+    ) -> Result<(), RewardErrorCode> {
+        // Validate configuration
+        if !reward_config.is_valid() {
+            return Err(RewardErrorCode::InvalidConfig);
+        }
+
+        // Prevent double distribution
+        if Storage::is_distributed(&env, hunt_id, &player_address) {
+            return Err(RewardErrorCode::AlreadyDistributed);
+        }
+
+        let mut xlm_amount = 0i128;
+        let mut nft_id: Option<u64> = None;
+
+        // Route to XLM handler if configured
+        if reward_config.has_xlm() {
+            let amount = reward_config.xlm_amount.unwrap();
+            if amount <= 0 {
+                return Err(RewardErrorCode::InvalidAmount);
+            }
+
+            let xlm_token = Storage::get_xlm_token(&env)
+                .ok_or(RewardErrorCode::NotInitialized)?;
+
+            let pool_balance = Storage::get_pool_balance(&env, hunt_id);
+            if pool_balance < amount {
+                return Err(RewardErrorCode::InsufficientPool);
+            }
+
+            let contract_addr = env.current_contract_address();
+            XlmHandler::distribute_xlm(
+                &env,
+                &xlm_token,
+                &contract_addr,
+                &player_address,
+                amount,
+            );
+            xlm_amount = amount;
+            Storage::set_pool_balance(&env, hunt_id, pool_balance - amount);
+        }
+
+        // Route to NFT handler if configured
+        if reward_config.has_nft() {
+            let nft_contract = reward_config.nft_contract.as_ref().unwrap();
+            nft_id = Some(NftHandler::distribute_nft(
+                &env,
+                nft_contract,
+                hunt_id,
+                &player_address,
+                reward_config.nft_title.clone(),
+                reward_config.nft_description.clone(),
+                reward_config.nft_image_uri.clone(),
+            ));
+        }
+
+        // All operations succeeded — update state atomically
+        Storage::set_distributed(&env, hunt_id, &player_address);
+        Storage::set_distribution_record(
+            &env,
+            hunt_id,
+            &player_address,
+            &DistributionRecord {
+                xlm_amount,
+                nft_id,
+            },
+        );
+
+        // Emit RewardsDistributed event
+        let event = RewardsDistributedEvent {
+            hunt_id,
+            player: player_address.clone(),
+            xlm_amount,
+            nft_id,
+        };
+        env.events()
+            .publish((Symbol::new(&env, "RewardsDistributed"), hunt_id), event);
+
+        Ok(())
+    }
+
+    /// Legacy entry point for XLM-only or XLM + NFT (placeholder) distribution.
+    /// Kept for backward compatibility with HuntyCore. For full config support use distribute_rewards.
+    ///
+    /// Note: When nft_enabled is true, NFT distribution is NOT performed by this legacy path
+    /// (metadata/contract not available). Use distribute_rewards with RewardConfig for NFT support.
+    pub fn distribute_rewards_legacy(
         env: Env,
         player: Address,
         hunt_id: u64,
         xlm_amount: i128,
-        nft_enabled: bool,
+        _nft_enabled: bool,
     ) -> bool {
-        // Validate XLM token is initialized
-        let xlm_token = match Storage::get_xlm_token(&env) {
-            Some(addr) => addr,
-            None => return false,
+        let config = RewardConfig {
+            xlm_amount: if xlm_amount > 0 {
+                Some(xlm_amount)
+            } else {
+                None
+            },
+            nft_contract: None,
+            nft_title: soroban_sdk::String::from_str(&env, ""),
+            nft_description: soroban_sdk::String::from_str(&env, ""),
+            nft_image_uri: soroban_sdk::String::from_str(&env, ""),
         };
+        Self::distribute_rewards(env, hunt_id, player, config).is_ok()
+    }
 
-        // Prevent double distribution
-        if Storage::is_distributed(&env, hunt_id, &player) {
-            return false;
+    /// Returns the distribution status for a hunt/player pair.
+    pub fn get_distribution_status(
+        env: Env,
+        hunt_id: u64,
+        player: Address,
+    ) -> DistributionStatus {
+        let distributed = Storage::is_distributed(&env, hunt_id, &player);
+        let record = Storage::get_distribution_record(&env, hunt_id, &player);
+
+        match record {
+            Some(r) => DistributionStatus {
+                distributed,
+                xlm_amount: r.xlm_amount,
+                nft_id: r.nft_id,
+            },
+            None => DistributionStatus {
+                distributed,
+                xlm_amount: 0,
+                nft_id: None,
+            },
         }
-
-        // Validate amount
-        if xlm_amount <= 0 {
-            // No XLM to distribute — still mark as distributed if nft_enabled
-            if nft_enabled {
-                // TODO: NFT distribution via NftHandler
-                Storage::set_distributed(&env, hunt_id, &player);
-                env.events().publish(
-                    (Symbol::new(&env, "RewardDistributed"), hunt_id),
-                    (player, 0i128, nft_enabled),
-                );
-                return true;
-            }
-            return false;
-        }
-
-        // Validate pool has sufficient funds
-        let pool_balance = Storage::get_pool_balance(&env, hunt_id);
-        if pool_balance < xlm_amount {
-            return false;
-        }
-
-        // Transfer XLM to player
-        let contract_addr = env.current_contract_address();
-        XlmHandler::distribute_xlm(&env, &xlm_token, &contract_addr, &player, xlm_amount);
-
-        // Update state
-        Storage::set_distributed(&env, hunt_id, &player);
-        Storage::set_pool_balance(&env, hunt_id, pool_balance - xlm_amount);
-
-        // TODO: Handle NFT distribution if nft_enabled
-
-        env.events().publish(
-            (Symbol::new(&env, "RewardDistributed"), hunt_id),
-            (player, xlm_amount, nft_enabled),
-        );
-
-        true
     }
 
     /// Returns the current reward pool balance for a hunt.
@@ -136,9 +230,10 @@ impl RewardManager {
     }
 }
 
-mod errors;
+pub mod errors;
 mod nft_handler;
 mod storage;
+mod types;
 mod xlm_handler;
 
 #[cfg(test)]
