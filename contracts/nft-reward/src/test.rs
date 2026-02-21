@@ -19,6 +19,28 @@ fn create_metadata(env: &Env, title: &str, desc: &str, image_uri: &str) -> NftMe
         title: String::from_str(env, title),
         description: String::from_str(env, desc),
         image_uri: String::from_str(env, image_uri),
+        hunt_title: String::from_str(env, title),
+        rarity: 0u32,
+        tier: 0u32,
+    }
+}
+
+fn create_metadata_full(
+    env: &Env,
+    title: &str,
+    desc: &str,
+    image_uri: &str,
+    hunt_title: &str,
+    rarity: u32,
+    tier: u32,
+) -> NftMetadata {
+    NftMetadata {
+        title: String::from_str(env, title),
+        description: String::from_str(env, desc),
+        image_uri: String::from_str(env, image_uri),
+        hunt_title: String::from_str(env, hunt_title),
+        rarity,
+        tier,
     }
 }
 
@@ -182,4 +204,86 @@ fn test_get_nonexistent_nft_returns_none() {
 
     let owner = client.owner_of(&999);
     assert!(owner.is_none());
+
+    let meta = client.get_nft_metadata(&999);
+    assert!(meta.is_none());
+}
+
+#[test]
+fn test_get_nft_metadata_returns_complete_info() {
+    let env = setup_env();
+    let client = NftRewardClient::new(&env, &env.register_contract(None, NftReward));
+
+    let player = Address::generate(&env);
+    let metadata = create_metadata_full(
+        &env,
+        "Epic Hunt Trophy",
+        "Completed legendary hunt",
+        "ipfs://trophy",
+        "Legendary City Hunt",
+        4, // rare
+        1, // tier 1
+    );
+
+    let nft_id = client.mint_reward_nft(&42, &player, &metadata);
+    let meta = client.get_nft_metadata(&nft_id).unwrap();
+
+    assert_eq!(meta.nft_id, nft_id);
+    assert_eq!(meta.hunt_id, 42);
+    assert_eq!(meta.hunt_title, String::from_str(&env, "Legendary City Hunt"));
+    assert_eq!(meta.completion_timestamp, 1000);
+    assert_eq!(meta.completion_player, player);
+    assert_eq!(meta.current_owner, player);
+    assert_eq!(meta.title, String::from_str(&env, "Epic Hunt Trophy"));
+    assert_eq!(meta.description, String::from_str(&env, "Completed legendary hunt"));
+    assert_eq!(meta.image_uri, String::from_str(&env, "ipfs://trophy"));
+    assert_eq!(meta.rarity, 4);
+    assert_eq!(meta.tier, 1);
+}
+
+#[test]
+fn test_update_nft_metadata_owner_only() {
+    let env = setup_env();
+    let client = NftRewardClient::new(&env, &env.register_contract(None, NftReward));
+
+    let owner = Address::generate(&env);
+    let metadata = create_metadata(&env, "Original", "Original desc", "ipfs://old");
+
+    let nft_id = client.mint_reward_nft(&1, &owner, &metadata);
+
+    client.update_nft_metadata(
+        &nft_id,
+        &owner,
+        &String::from_str(&env, "Updated description"),
+        &String::from_str(&env, "ipfs://new"),
+    );
+
+    let nft = client.get_nft(&nft_id).unwrap();
+    assert_eq!(nft.metadata.description, String::from_str(&env, "Updated description"));
+    assert_eq!(nft.metadata.image_uri, String::from_str(&env, "ipfs://new"));
+    assert_eq!(nft.metadata.title, String::from_str(&env, "Original"));
+}
+
+#[test]
+fn test_update_nft_metadata_preserves_immutable_fields() {
+    let env = setup_env();
+    let client = NftRewardClient::new(&env, &env.register_contract(None, NftReward));
+
+    let owner = Address::generate(&env);
+    let metadata = create_metadata_full(&env, "Title", "Desc", "ipfs://img", "Hunt", 3, 2);
+
+    let nft_id = client.mint_reward_nft(&1, &owner, &metadata);
+
+    client.update_nft_metadata(
+        &nft_id,
+        &owner,
+        &String::from_str(&env, "New desc"),
+        &String::from_str(&env, "ipfs://newimg"),
+    );
+
+    let meta = client.get_nft_metadata(&nft_id).unwrap();
+    assert_eq!(meta.title, String::from_str(&env, "Title"));
+    assert_eq!(meta.rarity, 3);
+    assert_eq!(meta.tier, 2);
+    assert_eq!(meta.hunt_title, String::from_str(&env, "Hunt"));
 }

@@ -426,22 +426,24 @@ impl HuntyCore {
             } else {
                 None
             };
-            let (nft_contract, nft_title, nft_desc, nft_uri) = if nft_awarded {
+            let (nft_contract, nft_title, nft_desc, nft_uri, nft_hunt_title) = if nft_awarded {
                 hunt.reward_config.nft_contract.clone().map(|nft_contract| {
                     (
                         Some(nft_contract),
                         hunt.title.clone(),
                         hunt.description.clone(),
                         String::from_str(&env, ""),
+                        hunt.title.clone(),
                     )
                 }).unwrap_or((
                     None,
                     String::from_str(&env, ""),
                     String::from_str(&env, ""),
                     String::from_str(&env, ""),
+                    String::from_str(&env, ""),
                 ))
             } else {
-                (None, String::from_str(&env, ""), String::from_str(&env, ""), String::from_str(&env, ""))
+                (None, String::from_str(&env, ""), String::from_str(&env, ""), String::from_str(&env, ""), String::from_str(&env, ""))
             };
             let rm_reward_config = reward_manager::RewardConfig {
                 xlm_amount,
@@ -449,6 +451,9 @@ impl HuntyCore {
                 nft_title,
                 nft_description: nft_desc,
                 nft_image_uri: nft_uri,
+                nft_hunt_title,
+                nft_rarity: 0,
+                nft_tier: 0,
             };
 
             // Only call RewardManager when there is at least one reward type

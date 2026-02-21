@@ -34,6 +34,9 @@ mod test {
             nft_title: soroban_sdk::String::from_str(env, ""),
             nft_description: soroban_sdk::String::from_str(env, ""),
             nft_image_uri: soroban_sdk::String::from_str(env, ""),
+            nft_hunt_title: soroban_sdk::String::from_str(env, ""),
+            nft_rarity: 0,
+            nft_tier: 0,
         }
     }
 
@@ -212,6 +215,9 @@ mod test {
                 nft_title: soroban_sdk::String::from_str(&env, ""),
                 nft_description: soroban_sdk::String::from_str(&env, ""),
                 nft_image_uri: soroban_sdk::String::from_str(&env, ""),
+                nft_hunt_title: soroban_sdk::String::from_str(&env, ""),
+                nft_rarity: 0,
+                nft_tier: 0,
             };
             let result =
                 RewardManager::distribute_rewards(env.clone(), 1, player.clone(), config);
@@ -236,6 +242,9 @@ mod test {
                 nft_title: soroban_sdk::String::from_str(&env, ""),
                 nft_description: soroban_sdk::String::from_str(&env, ""),
                 nft_image_uri: soroban_sdk::String::from_str(&env, ""),
+                nft_hunt_title: soroban_sdk::String::from_str(&env, ""),
+                nft_rarity: 0,
+                nft_tier: 0,
             };
             let result =
                 RewardManager::distribute_rewards(env.clone(), 1, player.clone(), config);

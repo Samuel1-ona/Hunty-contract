@@ -13,6 +13,9 @@ impl NftHandler {
     /// * `title` - NFT title
     /// * `description` - NFT description
     /// * `image_uri` - NFT image URI
+    /// * `hunt_title` - Hunt title (for metadata context)
+    /// * `rarity` - Rarity tier (0-5, 0 = default)
+    /// * `tier` - Custom tier (0 = none)
     ///
     /// # Returns
     /// The unique NFT ID of the minted NFT
@@ -24,8 +27,10 @@ impl NftHandler {
         title: soroban_sdk::String,
         description: soroban_sdk::String,
         image_uri: soroban_sdk::String,
+        hunt_title: soroban_sdk::String,
+        rarity: u32,
+        tier: u32,
     ) -> u64 {
-        // Build NftMetadata as Map (NftReward expects struct with title, description, image_uri)
         let mut metadata: Map<soroban_sdk::Symbol, soroban_sdk::Val> = Map::new(env);
         metadata.set(soroban_sdk::Symbol::new(env, "title"), title.into_val(env));
         metadata.set(
@@ -36,6 +41,12 @@ impl NftHandler {
             soroban_sdk::Symbol::new(env, "image_uri"),
             image_uri.into_val(env),
         );
+        metadata.set(
+            soroban_sdk::Symbol::new(env, "hunt_title"),
+            hunt_title.into_val(env),
+        );
+        metadata.set(soroban_sdk::Symbol::new(env, "rarity"), rarity.into_val(env));
+        metadata.set(soroban_sdk::Symbol::new(env, "tier"), tier.into_val(env));
 
         let mut args = soroban_sdk::Vec::new(env);
         args.push_back(hunt_id.into_val(env));

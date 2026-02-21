@@ -142,6 +142,9 @@ impl RewardManager {
                 reward_config.nft_title.clone(),
                 reward_config.nft_description.clone(),
                 reward_config.nft_image_uri.clone(),
+                reward_config.nft_hunt_title.clone(),
+                reward_config.nft_rarity,
+                reward_config.nft_tier,
             ));
         }
 
@@ -192,6 +195,9 @@ impl RewardManager {
             nft_title: soroban_sdk::String::from_str(&env, ""),
             nft_description: soroban_sdk::String::from_str(&env, ""),
             nft_image_uri: soroban_sdk::String::from_str(&env, ""),
+            nft_hunt_title: soroban_sdk::String::from_str(&env, ""),
+            nft_rarity: 0,
+            nft_tier: 0,
         };
         Self::distribute_rewards(env, hunt_id, player, config).is_ok()
     }

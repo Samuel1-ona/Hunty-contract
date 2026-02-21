@@ -15,6 +15,12 @@ pub struct RewardConfig {
     pub nft_description: String,
     /// NFT image URI. Used when nft_contract is Some.
     pub nft_image_uri: String,
+    /// Hunt title (for metadata context). Defaults to nft_title when same.
+    pub nft_hunt_title: String,
+    /// Rarity tier: 0 = default, 1-5 = common to legendary.
+    pub nft_rarity: u32,
+    /// Custom tier (0 = none).
+    pub nft_tier: u32,
 }
 
 /// Status of a reward distribution for a specific hunt and player.
