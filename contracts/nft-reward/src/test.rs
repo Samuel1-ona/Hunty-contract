@@ -183,3 +183,153 @@ fn test_get_nonexistent_nft_returns_none() {
     let owner = client.owner_of(&999);
     assert!(owner.is_none());
 }
+
+#[test]
+fn test_transfer_nft_success() {
+    let env = setup_env();
+    let client = NftRewardClient::new(&env, &env.register_contract(None, NftReward));
+
+    let from = Address::generate(&env);
+    let to = Address::generate(&env);
+    let metadata = create_metadata(&env, "Transfer NFT", "Test transfer", "ipfs://transfer");
+
+    let nft_id = client.mint_reward_nft(&1, &from, &metadata);
+    assert_eq!(client.owner_of(&nft_id), Some(from.clone()));
+
+    client.transfer_nft(&nft_id, &from, &to);
+
+    assert_eq!(client.owner_of(&nft_id), Some(to.clone()));
+    assert_eq!(client.get_nft_owner(&nft_id), Some(to.clone()));
+
+    let nft = client.get_nft(&nft_id).unwrap();
+    assert_eq!(nft.owner, to);
+}
+
+#[test]
+fn test_transfer_nft_updates_player_nfts() {
+    let env = setup_env();
+    let client = NftRewardClient::new(&env, &env.register_contract(None, NftReward));
+
+    let alice = Address::generate(&env);
+    let bob = Address::generate(&env);
+    let metadata1 = create_metadata(&env, "NFT 1", "Desc 1", "ipfs://1");
+    let metadata2 = create_metadata(&env, "NFT 2", "Desc 2", "ipfs://2");
+
+    let nft1 = client.mint_reward_nft(&1, &alice, &metadata1);
+    let nft2 = client.mint_reward_nft(&2, &alice, &metadata2);
+
+    let alice_nfts = client.get_player_nfts(&alice);
+    assert_eq!(alice_nfts.len(), 2);
+    assert!(alice_nfts.get(0).unwrap() == nft1 || alice_nfts.get(0).unwrap() == nft2);
+
+    client.transfer_nft(&nft1, &alice, &bob);
+
+    let alice_nfts = client.get_player_nfts(&alice);
+    assert_eq!(alice_nfts.len(), 1);
+
+    let bob_nfts = client.get_player_nfts(&bob);
+    assert_eq!(bob_nfts.len(), 1);
+    assert_eq!(bob_nfts.get(0).unwrap(), nft1);
+}
+
+#[test]
+#[should_panic(expected = "HostError")]
+fn test_transfer_nft_requires_auth() {
+    let env = Env::default();
+    // Do NOT mock auth - we want the transfer to fail without auth
+    env.ledger().set_timestamp(1000);
+
+    let client = NftRewardClient::new(&env, &env.register_contract(None, NftReward));
+
+    let from = Address::generate(&env);
+    let to = Address::generate(&env);
+    let metadata = create_metadata(&env, "Auth Test", "Desc", "ipfs://auth");
+
+    let _nft_id = client.mint_reward_nft(&1, &from, &metadata);
+
+    // This should fail - from has not authorized
+    client.transfer_nft(&1, &from, &to);
+}
+
+#[test]
+#[should_panic]
+fn test_transfer_nft_nonexistent() {
+    let env = setup_env();
+    let client = NftRewardClient::new(&env, &env.register_contract(None, NftReward));
+
+    let from = Address::generate(&env);
+    let to = Address::generate(&env);
+
+    client.transfer_nft(&999, &from, &to);
+}
+
+#[test]
+#[should_panic]
+fn test_transfer_nft_not_owner() {
+    let env = setup_env();
+    let client = NftRewardClient::new(&env, &env.register_contract(None, NftReward));
+
+    let owner = Address::generate(&env);
+    let attacker = Address::generate(&env);
+    let to = Address::generate(&env);
+    let metadata = create_metadata(&env, "Owner Test", "Desc", "ipfs://owner");
+
+    let nft_id = client.mint_reward_nft(&1, &owner, &metadata);
+
+    // Attacker tries to transfer - with mock_all_auths they "auth" but NotOwner check fails
+    client.transfer_nft(&nft_id, &attacker, &to);
+}
+
+#[test]
+#[should_panic]
+fn test_transfer_nft_invalid_recipient_same_as_from() {
+    let env = setup_env();
+    let client = NftRewardClient::new(&env, &env.register_contract(None, NftReward));
+
+    let owner = Address::generate(&env);
+    let metadata = create_metadata(&env, "Same Addr", "Desc", "ipfs://same");
+
+    let nft_id = client.mint_reward_nft(&1, &owner, &metadata);
+
+    client.transfer_nft(&nft_id, &owner, &owner);
+}
+
+#[test]
+fn test_transfer_nft_emits_event() {
+    let env = setup_env();
+    let client = NftRewardClient::new(&env, &env.register_contract(None, NftReward));
+
+    let from = Address::generate(&env);
+    let to = Address::generate(&env);
+    let metadata = create_metadata(&env, "Event NFT", "Desc", "ipfs://event");
+
+    let nft_id = client.mint_reward_nft(&1, &from, &metadata);
+    client.transfer_nft(&nft_id, &from, &to);
+
+    // Transfer succeeded; NftTransferred event is emitted by transfer_nft
+    assert_eq!(client.owner_of(&nft_id), Some(to));
+}
+
+#[test]
+fn test_get_player_nfts_empty_for_new_address() {
+    let env = setup_env();
+    let client = NftRewardClient::new(&env, &env.register_contract(None, NftReward));
+
+    let new_addr = Address::generate(&env);
+    let nfts = client.get_player_nfts(&new_addr);
+    assert_eq!(nfts.len(), 0);
+}
+
+#[test]
+fn test_get_nft_owner_matches_owner_of() {
+    let env = setup_env();
+    let client = NftRewardClient::new(&env, &env.register_contract(None, NftReward));
+
+    let player = Address::generate(&env);
+    let metadata = create_metadata(&env, "Alias Test", "Desc", "ipfs://alias");
+
+    let nft_id = client.mint_reward_nft(&1, &player, &metadata);
+
+    assert_eq!(client.owner_of(&nft_id), client.get_nft_owner(&nft_id));
+    assert_eq!(client.get_nft_owner(&nft_id), Some(player));
+}

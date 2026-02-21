@@ -1,7 +1,7 @@
 #![cfg_attr(not(test), no_std)]
-use soroban_sdk::{
-    contract, contractimpl, contracttype, Address, Env, String, Symbol,
-};
+use soroban_sdk::{contract, contractimpl, contracttype, Address, Env, String, Symbol, Vec};
+
+use crate::errors::NftErrorCode;
 
 /// Metadata for an NFT (title, description, image URI).
 /// Supports off-chain storage references to keep gas costs low.
@@ -35,6 +35,16 @@ pub struct NftMintedEvent {
     pub minted_at: u64,
 }
 
+/// Event emitted when an NFT is transferred.
+#[contracttype]
+#[derive(Clone, Debug)]
+pub struct NftTransferredEvent {
+    pub nft_id: u64,
+    pub from: Address,
+    pub to: Address,
+}
+
+mod errors;
 mod storage;
 use storage::Storage;
 
@@ -112,6 +122,65 @@ impl NftReward {
     /// Returns the owner of an NFT.
     pub fn owner_of(env: Env, nft_id: u64) -> Option<Address> {
         Storage::get_nft(&env, nft_id).map(|nft| nft.owner)
+    }
+
+    /// Alias for owner_of. Returns the owner of an NFT.
+    pub fn get_nft_owner(env: Env, nft_id: u64) -> Option<Address> {
+        Storage::get_nft(&env, nft_id).map(|nft| nft.owner)
+    }
+
+    /// Returns all NFT IDs owned by an address.
+    pub fn get_player_nfts(env: Env, owner: Address) -> Vec<u64> {
+        Storage::get_owner_nfts(&env, &owner)
+    }
+
+    /// Transfers an NFT from one address to another.
+    ///
+    /// # Arguments
+    /// * `nft_id` - The NFT to transfer
+    /// * `from_address` - Current owner (must authorize the call)
+    /// * `to_address` - New owner
+    ///
+    /// # Authorization
+    /// The `from_address` must authorize this call via `require_auth`.
+    /// For automatic transfers during reward distribution, the contract may be
+    /// the `from_address` when invoked by an authorized party.
+    pub fn transfer_nft(
+        env: Env,
+        nft_id: u64,
+        from_address: Address,
+        to_address: Address,
+    ) -> Result<(), NftErrorCode> {
+        from_address.require_auth();
+
+        let mut nft = Storage::get_nft(&env, nft_id).ok_or(NftErrorCode::NftNotFound)?;
+
+        if nft.owner != from_address {
+            return Err(NftErrorCode::NotOwner);
+        }
+
+        if to_address == from_address {
+            return Err(NftErrorCode::InvalidRecipient);
+        }
+
+        // Update NFT owner
+        nft.owner = to_address.clone();
+        Storage::save_nft(&env, &nft);
+
+        // Update ownership mapping: remove from old owner, add to new owner
+        Storage::remove_nft_from_owner(&env, &from_address, nft_id);
+        Storage::add_nft_to_owner(&env, &to_address, nft_id);
+
+        // Emit NftTransferred event
+        let event = NftTransferredEvent {
+            nft_id,
+            from: from_address,
+            to: to_address,
+        };
+        env.events()
+            .publish((Symbol::new(&env, "NftTransferred"), nft_id), event);
+
+        Ok(())
     }
 }
 

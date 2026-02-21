@@ -56,4 +56,27 @@ impl Storage {
         nft_ids.push_back(nft_id);
         env.storage().persistent().set(&key, &nft_ids);
     }
+
+    /// Removes an NFT ID from the owner's list.
+    pub fn remove_nft_from_owner(env: &Env, owner: &Address, nft_id: u64) {
+        let key = Self::owner_nfts_key(owner);
+        let mut nft_ids = env
+            .storage()
+            .persistent()
+            .get(&key)
+            .unwrap_or_else(|| Vec::new(env));
+        if let Some(idx) = nft_ids.first_index_of(nft_id) {
+            nft_ids.remove(idx);
+        }
+        env.storage().persistent().set(&key, &nft_ids);
+    }
+
+    /// Gets all NFT IDs owned by an address.
+    pub fn get_owner_nfts(env: &Env, owner: &Address) -> Vec<u64> {
+        let key = Self::owner_nfts_key(owner);
+        env.storage()
+            .persistent()
+            .get(&key)
+            .unwrap_or_else(|| Vec::new(env))
+    }
 }
