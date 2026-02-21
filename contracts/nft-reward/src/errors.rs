@@ -5,5 +5,7 @@ use soroban_sdk::contracterror;
 #[repr(u32)]
 pub enum NftErrorCode {
     NftNotFound = 1,
-    NotOwner = 2,
+    Unauthorized = 2,
+    NotOwner = 3,
+    InvalidRecipient = 4,
 }
