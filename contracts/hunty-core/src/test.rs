@@ -12,7 +12,10 @@ mod test {
     use crate::storage::Storage;
     use crate::types::HuntStatus;
     use crate::HuntyCore;
+    use nft_reward::{NftMetadata, NftReward};
+    use reward_manager::RewardManager;
     use soroban_sdk::testutils::{Address as _, Ledger as _, Register as _};
+    use soroban_sdk::{token, String as SorobanString};
 
     /// Runs a closure inside a registered HuntyCore contract context so storage is accessible.
     fn with_core_contract<T>(env: &Env, f: impl FnOnce(&Env, &Address) -> T) -> T {
@@ -24,6 +27,26 @@ mod test {
     /// the same storage; call once per step that uses require_auth (Soroban allows one auth per frame).
     fn as_core_contract<T>(env: &Env, contract_id: &Address, f: impl FnOnce(&Env) -> T) -> T {
         env.as_contract(contract_id, || f(env))
+    }
+
+    /// Helper to set up RewardManager with XLM token and optional default NFT contract.
+    fn setup_reward_manager(
+        env: &Env,
+        nft_contract: Option<&Address>,
+    ) -> (Address, Address, Address) {
+        let reward_manager_id = env.register(RewardManager, ());
+        let token_admin = Address::generate(env);
+        let token_contract = env.register_stellar_asset_contract_v2(token_admin.clone());
+        let token_address = token_contract.address();
+
+        env.as_contract(&reward_manager_id, || {
+            RewardManager::initialize(env.clone(), token_address.clone());
+            if let Some(nft) = nft_contract {
+                RewardManager::set_nft_reward_contract(env.clone(), nft.clone());
+            }
+        });
+
+        (reward_manager_id, token_address, token_admin)
     }
 
     #[test]
@@ -1929,6 +1952,314 @@ mod test {
         });
 
         (hunt_id, contract_id)
+    }
+
+    // ========== Cross-Contract Integration Tests ==========
+
+    #[test]
+    fn test_complete_hunt_with_reward_manager_and_nft_reward_full_flow() {
+        let env = Env::default();
+        env.ledger().set_timestamp(1_700_000_000);
+        env.mock_all_auths();
+
+        let creator = Address::generate(&env);
+        let player = Address::generate(&env);
+        let funder = Address::generate(&env);
+
+        // Register contracts
+        let core_id = env.register_contract(None, HuntyCore);
+        let nft_contract_id = env.register_contract(None, NftReward);
+
+        // Setup RewardManager with XLM token and default NFT contract
+        let (reward_manager_id, token_address, token_admin) =
+            setup_reward_manager(&env, Some(&nft_contract_id));
+
+        // Mint XLM to funder
+        let sac_client = token::StellarAssetClient::new(&env, &token_address);
+        sac_client.mint(&funder, &10_000);
+
+        // Create hunt, add required clue, configure rewards, activate, register player, complete clues
+        let hunt_id = as_core_contract(&env, &core_id, |env| {
+            let hunt_id = HuntyCore::create_hunt(
+                env.clone(),
+                creator.clone(),
+                SorobanString::from_str(env, "Integrated Hunt"),
+                SorobanString::from_str(env, "Hunt with XLM + NFT rewards"),
+                None,
+                None,
+            )
+            .unwrap();
+
+            HuntyCore::add_clue(
+                env.clone(),
+                hunt_id,
+                SorobanString::from_str(env, "What is 1+1?"),
+                SorobanString::from_str(env, "2"),
+                10,
+                true,
+            )
+            .unwrap();
+
+            // Configure rewards on the hunt: 3 winners sharing 9_000 XLM
+            let mut hunt = Storage::get_hunt(env, hunt_id).unwrap();
+            hunt.reward_config = crate::types::RewardConfig::new(
+                9_000,
+                true,
+                Some(nft_contract_id.clone()),
+                3,
+            );
+            Storage::save_hunt(env, &hunt);
+
+            HuntyCore::activate_hunt(env.clone(), hunt_id, creator.clone()).unwrap();
+
+            hunt_id
+        });
+
+        // Fund RewardManager pool for this hunt
+        env.as_contract(&reward_manager_id, || {
+            RewardManager::fund_reward_pool(env.clone(), funder.clone(), hunt_id, 9_000).unwrap();
+        });
+
+        // Wire HuntyCore -> RewardManager
+        env.mock_all_auths();
+        as_core_contract(&env, &core_id, |env| {
+            HuntyCore::set_reward_manager(env.clone(), reward_manager_id.clone());
+        });
+
+        // Register player and complete hunt
+        env.mock_all_auths();
+        as_core_contract(&env, &core_id, |env| {
+            HuntyCore::register_player(env.clone(), hunt_id, player.clone()).unwrap();
+        });
+        env.mock_all_auths();
+        as_core_contract(&env, &core_id, |env| {
+            HuntyCore::submit_answer(
+                env.clone(),
+                hunt_id,
+                1,
+                player.clone(),
+                SorobanString::from_str(env, "2"),
+            )
+            .unwrap();
+        });
+
+        // Player claims completion and triggers cross-contract reward distribution
+        env.mock_all_auths();
+        as_core_contract(&env, &core_id, |env| {
+            HuntyCore::complete_hunt(env.clone(), hunt_id, player.clone()).unwrap();
+        });
+
+        // Verify player progress updated in HuntyCore
+        let progress = as_core_contract(&env, &core_id, |env| {
+            HuntyCore::get_player_progress(env.clone(), hunt_id, player.clone()).unwrap()
+        });
+        assert!(progress.reward_claimed);
+
+        // Verify hunt claimed_count incremented
+        let hunt = as_core_contract(&env, &core_id, |env| {
+            HuntyCore::get_hunt_info(env.clone(), hunt_id).unwrap()
+        });
+        assert_eq!(hunt.reward_config.claimed_count, 1);
+
+        // Verify RewardManager XLM pool and balances
+        let rm_balance = {
+            let client = token::Client::new(&env, &token_address);
+            client.balance(&reward_manager_id)
+        };
+        let player_balance = {
+            let client = token::Client::new(&env, &token_address);
+            client.balance(&player)
+        };
+
+        // reward_per_winner = 9_000 / 3 = 3_000
+        assert_eq!(player_balance, 3_000);
+
+        env.as_contract(&reward_manager_id, || {
+            assert_eq!(RewardManager::get_pool_balance(env.clone(), hunt_id), 6_000);
+        });
+        assert_eq!(rm_balance, 6_000);
+
+        // Verify RewardManager distribution status (includes NFT id)
+        let status = env.as_contract(&reward_manager_id, || {
+            RewardManager::get_distribution_status(env.clone(), hunt_id, player.clone())
+        });
+        assert!(status.distributed);
+        assert_eq!(status.xlm_amount, 3_000);
+        assert!(status.nft_id.is_some());
+
+        // Verify NFT was minted to the player with correct metadata
+        let minted_nft_id = status.nft_id.unwrap();
+        let nft_client =
+            nft_reward::NftRewardClient::new(&env, &nft_contract_id);
+        let owned_nfts = nft_client.get_player_nfts(&player);
+        assert!(owned_nfts.len() >= 1);
+        assert!(owned_nfts.iter().any(|id| id == minted_nft_id));
+
+        let nft = nft_client.get_nft(&minted_nft_id).unwrap();
+        assert_eq!(nft.hunt_id, hunt_id);
+        assert_eq!(nft.owner, player);
+        assert_eq!(
+            nft.metadata.title,
+            SorobanString::from_str(&env, "Integrated Hunt")
+        );
+    }
+
+    #[test]
+    fn test_complete_hunt_reward_manager_failure_is_propagated() {
+        let env = Env::default();
+        env.ledger().set_timestamp(1_700_000_000);
+        env.mock_all_auths();
+
+        let creator = Address::generate(&env);
+        let player = Address::generate(&env);
+
+        // Create a completed hunt with rewards configured (but no RewardManager funding/initialization)
+        let (hunt_id, core_id) =
+            setup_completed_hunt_with_rewards(&env, &creator, &player, 5, 1_000);
+
+        // Deploy RewardManager but DO NOT call initialize or fund_reward_pool so distribution fails
+        let reward_manager_id = env.register(RewardManager, ());
+
+        // Wire HuntyCore -> RewardManager
+        env.mock_all_auths();
+        as_core_contract(&env, &core_id, |env| {
+            HuntyCore::set_reward_manager(env.clone(), reward_manager_id.clone());
+        });
+
+        // Attempt to complete hunt - RewardManager::distribute_rewards should fail
+        env.mock_all_auths();
+        let result = as_core_contract(&env, &core_id, |env| {
+            HuntyCore::complete_hunt(env.clone(), hunt_id, player.clone())
+        });
+
+        // HuntyCore must surface a generic RewardDistributionFailed error
+        assert_eq!(result, Err(HuntErrorCode::RewardDistributionFailed));
+    }
+
+    #[test]
+    fn test_complete_hunt_multiple_players_shared_reward_manager() {
+        let env = Env::default();
+        env.ledger().set_timestamp(1_700_000_000);
+        env.mock_all_auths();
+
+        let creator = Address::generate(&env);
+        let player1 = Address::generate(&env);
+        let player2 = Address::generate(&env);
+        let player3 = Address::generate(&env);
+        let funder = Address::generate(&env);
+
+        // Register contracts
+        let core_id = env.register_contract(None, HuntyCore);
+        let nft_contract_id = env.register_contract(None, NftReward);
+
+        // Setup RewardManager with XLM token and default NFT contract
+        let (reward_manager_id, token_address, _) =
+            setup_reward_manager(&env, Some(&nft_contract_id));
+
+        // Mint XLM to funder: 3 players * 2_000 each = 6_000
+        let sac_client = token::StellarAssetClient::new(&env, &token_address);
+        sac_client.mint(&funder, &6_000);
+
+        // Create hunt, add required clue, configure rewards, activate
+        let hunt_id = as_core_contract(&env, &core_id, |env| {
+            let hunt_id = HuntyCore::create_hunt(
+                env.clone(),
+                creator.clone(),
+                SorobanString::from_str(env, "Multi Hunt"),
+                SorobanString::from_str(env, "Multiple winners"),
+                None,
+                None,
+            )
+            .unwrap();
+
+            HuntyCore::add_clue(
+                env.clone(),
+                hunt_id,
+                SorobanString::from_str(env, "What is 1+1?"),
+                SorobanString::from_str(env, "2"),
+                10,
+                true,
+            )
+            .unwrap();
+
+            // Configure rewards: xlm_pool = 6_000, max_winners = 3
+            let mut hunt = Storage::get_hunt(env, hunt_id).unwrap();
+            hunt.reward_config = crate::types::RewardConfig::new(
+                6_000,
+                true,
+                Some(nft_contract_id.clone()),
+                3,
+            );
+            Storage::save_hunt(env, &hunt);
+
+            HuntyCore::activate_hunt(env.clone(), hunt_id, creator.clone()).unwrap();
+
+            hunt_id
+        });
+
+        // Fund RewardManager pool
+        env.as_contract(&reward_manager_id, || {
+            RewardManager::fund_reward_pool(env.clone(), funder.clone(), hunt_id, 6_000).unwrap();
+        });
+
+        // Wire HuntyCore -> RewardManager
+        env.mock_all_auths();
+        as_core_contract(&env, &core_id, |env| {
+            HuntyCore::set_reward_manager(env.clone(), reward_manager_id.clone());
+        });
+
+        // Helper closure to register, answer, and claim for a player
+        let claim_for = |env: &Env, player: &Address| {
+            env.mock_all_auths();
+            as_core_contract(env, &core_id, |env| {
+                HuntyCore::register_player(env.clone(), hunt_id, player.clone()).unwrap();
+            });
+            env.mock_all_auths();
+            as_core_contract(env, &core_id, |env| {
+                HuntyCore::submit_answer(
+                    env.clone(),
+                    hunt_id,
+                    1,
+                    player.clone(),
+                    SorobanString::from_str(env, "2"),
+                )
+                .unwrap();
+            });
+            env.mock_all_auths();
+            as_core_contract(env, &core_id, |env| {
+                HuntyCore::complete_hunt(env.clone(), hunt_id, player.clone()).unwrap();
+            });
+        };
+
+        // Three players complete and claim
+        claim_for(&env, &player1);
+        claim_for(&env, &player2);
+        claim_for(&env, &player3);
+
+        // Each winner should have received 2_000 XLM and one NFT
+        let token_client = token::Client::new(&env, &token_address);
+        assert_eq!(token_client.balance(&player1), 2_000);
+        assert_eq!(token_client.balance(&player2), 2_000);
+        assert_eq!(token_client.balance(&player3), 2_000);
+
+        // Pool should now be empty for this hunt
+        env.as_contract(&reward_manager_id, || {
+            assert_eq!(RewardManager::get_pool_balance(env.clone(), hunt_id), 0);
+        });
+
+        let nft_client = nft_reward::NftRewardClient::new(&env, &nft_contract_id);
+        let nfts1 = nft_client.get_player_nfts(&player1);
+        let nfts2 = nft_client.get_player_nfts(&player2);
+        let nfts3 = nft_client.get_player_nfts(&player3);
+        assert!(nfts1.len() >= 1);
+        assert!(nfts2.len() >= 1);
+        assert!(nfts3.len() >= 1);
+
+        // HuntyCore claimed_count should be 3
+        let hunt = as_core_contract(&env, &core_id, |env| {
+            HuntyCore::get_hunt_info(env.clone(), hunt_id).unwrap()
+        });
+        assert_eq!(hunt.reward_config.claimed_count, 3);
     }
 
     #[test]

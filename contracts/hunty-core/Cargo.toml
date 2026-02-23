@@ -14,4 +14,5 @@ reward_manager = { path = "../reward-manager", package = "reward-manager" }
 
 [dev-dependencies]
 soroban-sdk = { workspace = true, features = ["testutils"] }
+nft_reward = { path = "../nft-reward", package = "nft-reward" }
 

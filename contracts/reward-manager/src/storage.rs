@@ -6,6 +6,7 @@ pub struct Storage;
 
 impl Storage {
     const XLM_TOKEN_KEY: soroban_sdk::Symbol = symbol_short!("XLMTKN");
+    const NFT_CONTRACT_KEY: soroban_sdk::Symbol = symbol_short!("NFTADR");
     const DISTRIBUTION_KEY: soroban_sdk::Symbol = symbol_short!("DIST");
     const DIST_RECORD_KEY: soroban_sdk::Symbol = symbol_short!("DREC");
     const POOL_KEY: soroban_sdk::Symbol = symbol_short!("POOL");
@@ -18,6 +19,18 @@ impl Storage {
 
     pub fn get_xlm_token(env: &Env) -> Option<Address> {
         env.storage().persistent().get(&Self::XLM_TOKEN_KEY)
+    }
+
+    // ========== Default NFT Contract Address ==========
+
+    pub fn set_nft_contract(env: &Env, address: &Address) {
+        env.storage()
+            .persistent()
+            .set(&Self::NFT_CONTRACT_KEY, address);
+    }
+
+    pub fn get_nft_contract(env: &Env) -> Option<Address> {
+        env.storage().persistent().get(&Self::NFT_CONTRACT_KEY)
     }
 
     // ========== Distribution Tracking ==========

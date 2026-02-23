@@ -660,6 +660,7 @@ dependencies = [
 name = "hunty-core"
 version = "0.0.0"
 dependencies = [
+ "nft-reward",
  "reward-manager",
  "soroban-sdk",
 ]

@@ -28,6 +28,12 @@ impl RewardManager {
         Storage::set_xlm_token(&env, &xlm_token);
     }
 
+    /// Sets the default NftReward contract address used for NFT distributions
+    /// when a per-call NFT contract is not provided.
+    pub fn set_nft_reward_contract(env: Env, nft_contract: Address) {
+        Storage::set_nft_contract(&env, &nft_contract);
+    }
+
     /// Funds the reward pool for a specific hunt.
     /// Transfers XLM from the funder to this contract and records the pool balance.
     ///
@@ -133,10 +139,16 @@ impl RewardManager {
 
         // Route to NFT handler if configured
         if reward_config.has_nft() {
-            let nft_contract = reward_config.nft_contract.as_ref().unwrap();
+            let nft_contract = reward_config
+                .nft_contract
+                .as_ref()
+                .cloned()
+                .or_else(|| Storage::get_nft_contract(&env))
+                .ok_or(RewardErrorCode::InvalidConfig)?;
+
             nft_id = Some(NftHandler::distribute_nft(
                 &env,
-                nft_contract,
+                &nft_contract,
                 hunt_id,
                 &player_address,
                 reward_config.nft_title.clone(),

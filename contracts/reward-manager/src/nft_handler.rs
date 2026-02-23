@@ -55,7 +55,7 @@ impl NftHandler {
 
         env.invoke_contract(
             nft_contract,
-            &Symbol::new(env, "mint_reward_nft"),
+            &Symbol::new(env, "mint_reward_nft_from_map"),
             args,
         )
     }
