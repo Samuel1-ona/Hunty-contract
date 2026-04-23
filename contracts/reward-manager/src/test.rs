@@ -59,7 +59,7 @@ mod test {
     #[test]
     fn test_create_reward_pool_success() {
         let env = Env::default();
-        env.mock_all_auths();
+        env.mock_all_auths_allowing_non_root_auth();
         let (contract_id, _, _) = setup(&env);
         let creator = Address::generate(&env);
 
@@ -82,7 +82,7 @@ mod test {
     #[test]
     fn test_create_reward_pool_with_minimum() {
         let env = Env::default();
-        env.mock_all_auths();
+        env.mock_all_auths_allowing_non_root_auth();
         let (contract_id, _, _) = setup(&env);
         let creator = Address::generate(&env);
 
@@ -97,7 +97,7 @@ mod test {
     #[test]
     fn test_create_reward_pool_duplicate_fails() {
         let env = Env::default();
-        env.mock_all_auths();
+        env.mock_all_auths_allowing_non_root_auth();
         let (contract_id, _, _) = setup(&env);
         let creator = Address::generate(&env);
 
@@ -112,7 +112,7 @@ mod test {
     #[test]
     fn test_create_reward_pool_negative_minimum_fails() {
         let env = Env::default();
-        env.mock_all_auths();
+        env.mock_all_auths_allowing_non_root_auth();
         let (contract_id, _, _) = setup(&env);
         let creator = Address::generate(&env);
 
@@ -127,7 +127,7 @@ mod test {
     #[test]
     fn test_fund_reward_pool() {
         let env = Env::default();
-        env.mock_all_auths();
+        env.mock_all_auths_allowing_non_root_auth();
         let (contract_id, token_address, token_admin) = setup(&env);
         let creator = Address::generate(&env);
 
@@ -152,7 +152,7 @@ mod test {
     #[test]
     fn test_fund_reward_pool_invalid_amount() {
         let env = Env::default();
-        env.mock_all_auths();
+        env.mock_all_auths_allowing_non_root_auth();
         let (contract_id, token_address, _) = setup(&env);
         let creator = Address::generate(&env);
 
@@ -167,7 +167,7 @@ mod test {
     #[test]
     fn test_fund_reward_pool_not_initialized() {
         let env = Env::default();
-        env.mock_all_auths();
+        env.mock_all_auths_allowing_non_root_auth();
         let (contract_id, _, _) = setup(&env);
         let creator = Address::generate(&env);
 
@@ -182,7 +182,7 @@ mod test {
     #[test]
     fn test_fund_reward_pool_not_created() {
         let env = Env::default();
-        env.mock_all_auths();
+        env.mock_all_auths_allowing_non_root_auth();
         let (contract_id, token_address, _) = setup(&env);
         let funder = Address::generate(&env);
 
@@ -197,7 +197,7 @@ mod test {
     #[test]
     fn test_fund_reward_pool_unauthorized_funder() {
         let env = Env::default();
-        env.mock_all_auths();
+        env.mock_all_auths_allowing_non_root_auth();
         let (contract_id, token_address, token_admin) = setup(&env);
         let creator = Address::generate(&env);
         let attacker = Address::generate(&env);
@@ -220,7 +220,7 @@ mod test {
     #[test]
     fn test_fund_reward_pool_additive() {
         let env = Env::default();
-        env.mock_all_auths();
+        env.mock_all_auths_allowing_non_root_auth();
         let (contract_id, token_address, token_admin) = setup(&env);
         let creator = Address::generate(&env);
 
@@ -240,7 +240,7 @@ mod test {
     #[test]
     fn test_fund_reward_pool_updates_total_deposited() {
         let env = Env::default();
-        env.mock_all_auths();
+        env.mock_all_auths_allowing_non_root_auth();
         let (contract_id, token_address, token_admin) = setup(&env);
         let creator = Address::generate(&env);
 
@@ -263,7 +263,7 @@ mod test {
     #[test]
     fn test_get_reward_pool_none_before_creation() {
         let env = Env::default();
-        env.mock_all_auths();
+        env.mock_all_auths_allowing_non_root_auth();
         let (contract_id, _, _) = setup(&env);
 
         env.as_contract(&contract_id, || {
@@ -274,7 +274,7 @@ mod test {
     #[test]
     fn test_get_reward_pool_tracks_all_fields() {
         let env = Env::default();
-        env.mock_all_auths();
+        env.mock_all_auths_allowing_non_root_auth();
         let (contract_id, token_address, token_admin) = setup(&env);
         let creator = Address::generate(&env);
         let player = Address::generate(&env);
@@ -307,7 +307,7 @@ mod test {
     #[test]
     fn test_validate_pool_valid() {
         let env = Env::default();
-        env.mock_all_auths();
+        env.mock_all_auths_allowing_non_root_auth();
         let (contract_id, token_address, token_admin) = setup(&env);
         let creator = Address::generate(&env);
 
@@ -328,7 +328,7 @@ mod test {
     #[test]
     fn test_validate_pool_insufficient_funds() {
         let env = Env::default();
-        env.mock_all_auths();
+        env.mock_all_auths_allowing_non_root_auth();
         let (contract_id, token_address, token_admin) = setup(&env);
         let creator = Address::generate(&env);
 
@@ -349,7 +349,7 @@ mod test {
     #[test]
     fn test_validate_pool_below_minimum() {
         let env = Env::default();
-        env.mock_all_auths();
+        env.mock_all_auths_allowing_non_root_auth();
         let (contract_id, token_address, token_admin) = setup(&env);
         let creator = Address::generate(&env);
 
@@ -374,7 +374,7 @@ mod test {
     #[test]
     fn test_validate_pool_not_created() {
         let env = Env::default();
-        env.mock_all_auths();
+        env.mock_all_auths_allowing_non_root_auth();
         let (contract_id, _, _) = setup(&env);
 
         env.as_contract(&contract_id, || {
@@ -387,7 +387,7 @@ mod test {
     #[test]
     fn test_validate_pool_zero_required_fails() {
         let env = Env::default();
-        env.mock_all_auths();
+        env.mock_all_auths_allowing_non_root_auth();
         let (contract_id, token_address, token_admin) = setup(&env);
         let creator = Address::generate(&env);
 
@@ -409,7 +409,7 @@ mod test {
     #[test]
     fn test_distribute_rewards_success() {
         let env = Env::default();
-        env.mock_all_auths();
+        env.mock_all_auths_allowing_non_root_auth();
         let (contract_id, token_address, token_admin) = setup(&env);
         let creator = Address::generate(&env);
         let player = Address::generate(&env);
@@ -445,7 +445,7 @@ mod test {
     #[test]
     fn test_distribute_rewards_insufficient_pool() {
         let env = Env::default();
-        env.mock_all_auths();
+        env.mock_all_auths_allowing_non_root_auth();
         let (contract_id, token_address, token_admin) = setup(&env);
         let creator = Address::generate(&env);
         let player = Address::generate(&env);
@@ -470,7 +470,7 @@ mod test {
     #[test]
     fn test_distribute_rewards_below_minimum() {
         let env = Env::default();
-        env.mock_all_auths();
+        env.mock_all_auths_allowing_non_root_auth();
         let (contract_id, token_address, token_admin) = setup(&env);
         let creator = Address::generate(&env);
         let player = Address::generate(&env);
@@ -495,7 +495,7 @@ mod test {
     #[test]
     fn test_distribute_rewards_meets_minimum() {
         let env = Env::default();
-        env.mock_all_auths();
+        env.mock_all_auths_allowing_non_root_auth();
         let (contract_id, token_address, token_admin) = setup(&env);
         let creator = Address::generate(&env);
         let player = Address::generate(&env);
@@ -519,7 +519,7 @@ mod test {
     #[test]
     fn test_distribute_rewards_double_distribution() {
         let env = Env::default();
-        env.mock_all_auths();
+        env.mock_all_auths_allowing_non_root_auth();
         let (contract_id, token_address, token_admin) = setup(&env);
         let creator = Address::generate(&env);
         let player = Address::generate(&env);
@@ -551,7 +551,7 @@ mod test {
     #[test]
     fn test_distribute_rewards_invalid_config() {
         let env = Env::default();
-        env.mock_all_auths();
+        env.mock_all_auths_allowing_non_root_auth();
         let (contract_id, token_address, _) = setup(&env);
         let player = Address::generate(&env);
 
@@ -578,7 +578,7 @@ mod test {
     #[test]
     fn test_distribute_rewards_invalid_amount() {
         let env = Env::default();
-        env.mock_all_auths();
+        env.mock_all_auths_allowing_non_root_auth();
         let (contract_id, token_address, _) = setup(&env);
         let player = Address::generate(&env);
 
@@ -605,7 +605,7 @@ mod test {
     #[test]
     fn test_distribute_rewards_not_initialized() {
         let env = Env::default();
-        env.mock_all_auths();
+        env.mock_all_auths_allowing_non_root_auth();
         let (contract_id, _, _) = setup(&env);
         let player = Address::generate(&env);
 
@@ -620,7 +620,7 @@ mod test {
     #[test]
     fn test_distribute_rewards_multiple_players() {
         let env = Env::default();
-        env.mock_all_auths();
+        env.mock_all_auths_allowing_non_root_auth();
         let (contract_id, token_address, token_admin) = setup(&env);
         let creator = Address::generate(&env);
         let player1 = Address::generate(&env);
@@ -675,7 +675,7 @@ mod test {
     #[test]
     fn test_get_pool_balance_after_fund_and_distribute() {
         let env = Env::default();
-        env.mock_all_auths();
+        env.mock_all_auths_allowing_non_root_auth();
         let (contract_id, token_address, token_admin) = setup(&env);
         let creator = Address::generate(&env);
         let player = Address::generate(&env);
@@ -703,7 +703,7 @@ mod test {
     #[test]
     fn test_separate_hunt_pools() {
         let env = Env::default();
-        env.mock_all_auths();
+        env.mock_all_auths_allowing_non_root_auth();
         let (contract_id, token_address, token_admin) = setup(&env);
         let creator = Address::generate(&env);
         let player = Address::generate(&env);
@@ -749,7 +749,7 @@ mod test {
     #[test]
     fn test_get_distribution_status() {
         let env = Env::default();
-        env.mock_all_auths();
+        env.mock_all_auths_allowing_non_root_auth();
         let (contract_id, token_address, token_admin) = setup(&env);
         let creator = Address::generate(&env);
         let player = Address::generate(&env);
@@ -781,7 +781,7 @@ mod test {
     #[test]
     fn test_distribute_rewards_legacy() {
         let env = Env::default();
-        env.mock_all_auths();
+        env.mock_all_auths_allowing_non_root_auth();
         let (contract_id, token_address, token_admin) = setup(&env);
         let creator = Address::generate(&env);
         let player = Address::generate(&env);
@@ -810,7 +810,7 @@ mod test {
     fn test_over_distribution_prevented() {
         // Verify that validate_pool correctly identifies when a pool would be over-spent
         let env = Env::default();
-        env.mock_all_auths();
+        env.mock_all_auths_allowing_non_root_auth();
         let (contract_id, token_address, token_admin) = setup(&env);
         let creator = Address::generate(&env);
         let player1 = Address::generate(&env);
@@ -844,5 +844,48 @@ mod test {
         // Only player1 received tokens
         assert_eq!(get_balance(&env, &token_address, &player1), 2_000);
         assert_eq!(get_balance(&env, &token_address, &player2), 0);
+    }
+
+    #[test]
+    fn test_refund_pool_transfers_remaining_balance_to_creator() {
+        let env = Env::default();
+        env.mock_all_auths_allowing_non_root_auth();
+        let (contract_id, token_address, token_admin) = setup(&env);
+        let creator = Address::generate(&env);
+
+        mint_tokens(&env, &token_address, &token_admin, &creator, 10_000);
+
+        env.as_contract(&contract_id, || {
+            RewardManager::initialize(env.clone(), token_address.clone());
+            RewardManager::create_reward_pool(env.clone(), creator.clone(), 77, 0).unwrap();
+            RewardManager::fund_reward_pool(env.clone(), creator.clone(), 77, 6_000).unwrap();
+            RewardManager::refund_pool(env.clone(), creator.clone(), 77).unwrap();
+
+            assert_eq!(RewardManager::get_pool_balance(env.clone(), 77), 0);
+        });
+
+        assert_eq!(get_balance(&env, &token_address, &creator), 10_000);
+        assert_eq!(get_balance(&env, &token_address, &contract_id), 0);
+    }
+
+    #[test]
+    fn test_refund_pool_unauthorized_fails() {
+        let env = Env::default();
+        env.mock_all_auths_allowing_non_root_auth();
+        let (contract_id, token_address, token_admin) = setup(&env);
+        let creator = Address::generate(&env);
+        let attacker = Address::generate(&env);
+
+        mint_tokens(&env, &token_address, &token_admin, &creator, 10_000);
+
+        env.as_contract(&contract_id, || {
+            RewardManager::initialize(env.clone(), token_address.clone());
+            RewardManager::create_reward_pool(env.clone(), creator.clone(), 88, 0).unwrap();
+            RewardManager::fund_reward_pool(env.clone(), creator.clone(), 88, 1_500).unwrap();
+
+            let result = RewardManager::refund_pool(env.clone(), attacker.clone(), 88);
+            assert_eq!(result, Err(RewardErrorCode::Unauthorized));
+            assert_eq!(RewardManager::get_pool_balance(env.clone(), 88), 1_500);
+        });
     }
 }
