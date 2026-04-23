@@ -328,8 +328,33 @@ impl HuntyCore {
             return Err(HuntErrorCode::InvalidHuntStatus);
         }
 
-        // Handle refunds if reward pool was funded
-        // TODO - HANDLE REFUND
+        // Handle refunds for any remaining funded reward pool balance.
+        if let Some(reward_manager_addr) = Storage::get_reward_manager(&env) {
+            let mut balance_args: Vec<Val> = Vec::new(&env);
+            balance_args.push_back(hunt_id.into_val(&env));
+            let pool_balance = match env.try_invoke_contract::<i128, RewardErrorCode>(
+                &reward_manager_addr,
+                &Symbol::new(&env, "get_pool_balance"),
+                balance_args,
+            ) {
+                Ok(Ok(balance)) => balance,
+                _ => return Err(HuntErrorCode::RefundFailed),
+            };
+
+            if pool_balance > 0 {
+                let mut refund_args: Vec<Val> = Vec::new(&env);
+                refund_args.push_back(caller.clone().into_val(&env));
+                refund_args.push_back(hunt_id.into_val(&env));
+                let refund_result = env.try_invoke_contract::<(), RewardErrorCode>(
+                    &reward_manager_addr,
+                    &Symbol::new(&env, "refund_pool"),
+                    refund_args,
+                );
+                if !matches!(refund_result, Ok(Ok(()))) {
+                    return Err(HuntErrorCode::RefundFailed);
+                }
+            }
+        }
 
         // Cancel hunt
         hunt.status = HuntStatus::Cancelled;
@@ -463,12 +488,12 @@ impl HuntyCore {
                 args.push_back(player.clone().into_val(&env));
                 args.push_back(rm_reward_config.into_val(&env));
 
-                let result: Result<(), RewardErrorCode> = env.invoke_contract(
+                let result = env.try_invoke_contract::<(), RewardErrorCode>(
                     &reward_manager_addr,
                     &Symbol::new(&env, "distribute_rewards"),
                     args,
                 );
-                if result.is_err() {
+                if !matches!(result, Ok(Ok(()))) {
                     return Err(HuntErrorCode::RewardDistributionFailed);
                 }
             }

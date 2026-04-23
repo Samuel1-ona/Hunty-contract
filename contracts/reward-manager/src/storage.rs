@@ -5,6 +5,7 @@ use crate::types::{DistributionRecord, RewardPoolConfig};
 pub struct Storage;
 
 impl Storage {
+    const ADMIN_KEY: soroban_sdk::Symbol = symbol_short!("ADMIN");
     const XLM_TOKEN_KEY: soroban_sdk::Symbol = symbol_short!("XLMTKN");
     const NFT_CONTRACT_KEY: soroban_sdk::Symbol = symbol_short!("NFTADR");
     const DISTRIBUTION_KEY: soroban_sdk::Symbol = symbol_short!("DIST");
@@ -15,6 +16,14 @@ impl Storage {
     const POOL_DST_KEY: soroban_sdk::Symbol = symbol_short!("PDST");
 
     // ========== XLM Token Address ==========
+
+    pub fn set_admin(env: &Env, address: &Address) {
+        env.storage().persistent().set(&Self::ADMIN_KEY, address);
+    }
+
+    pub fn get_admin(env: &Env) -> Option<Address> {
+        env.storage().persistent().get(&Self::ADMIN_KEY)
+    }
 
     pub fn set_xlm_token(env: &Env, address: &Address) {
         env.storage().persistent().set(&Self::XLM_TOKEN_KEY, address);

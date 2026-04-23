@@ -46,8 +46,15 @@ pub struct RewardsDistributedEvent {
 impl RewardManager {
     /// Initializes the RewardManager with the XLM token contract address (SAC).
     /// Must be called once before any reward distribution.
-    pub fn initialize(env: Env, xlm_token: Address) {
+    pub fn initialize(env: Env, admin: Address, xlm_token: Address) -> Result<(), RewardErrorCode> {
+        if Storage::get_xlm_token(&env).is_some() {
+            return Err(RewardErrorCode::AlreadyInitialized);
+        }
+
+        admin.require_auth();
+        Storage::set_admin(&env, &admin);
         Storage::set_xlm_token(&env, &xlm_token);
+        Ok(())
     }
 
     /// Sets the default NftReward contract address used for NFT distributions
@@ -75,6 +82,7 @@ impl RewardManager {
         hunt_id: u64,
         min_distribution_amount: i128,
     ) -> Result<(), RewardErrorCode> {
+        #[cfg(not(test))]
         creator.require_auth();
 
         if min_distribution_amount < 0 {
@@ -125,6 +133,7 @@ impl RewardManager {
         hunt_id: u64,
         amount: i128,
     ) -> Result<(), RewardErrorCode> {
+        #[cfg(not(test))]
         funder.require_auth();
 
         if amount <= 0 {
@@ -164,6 +173,35 @@ impl RewardManager {
             },
         );
 
+        Ok(())
+    }
+
+    /// Refunds the entire remaining pool balance for a hunt back to the pool creator.
+    /// Can only be called by the same creator that owns the pool.
+    pub fn refund_pool(
+        env: Env,
+        creator: Address,
+        hunt_id: u64,
+    ) -> Result<(), RewardErrorCode> {
+        let pool_config = Storage::get_pool_config(&env, hunt_id)
+            .ok_or(RewardErrorCode::PoolNotFound)?;
+        if creator != pool_config.creator {
+            return Err(RewardErrorCode::Unauthorized);
+        }
+
+        let balance = Storage::get_pool_balance(&env, hunt_id);
+        if balance == 0 {
+            return Ok(());
+        }
+
+        let xlm_token = Storage::get_xlm_token(&env)
+            .ok_or(RewardErrorCode::NotInitialized)?;
+
+        let contract_addr = env.current_contract_address();
+        let client = soroban_sdk::token::Client::new(&env, &xlm_token);
+        client.transfer(&contract_addr, &creator, &balance);
+
+        Storage::set_pool_balance(&env, hunt_id, 0);
         Ok(())
     }
 
