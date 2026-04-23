@@ -78,6 +78,31 @@ mod test {
         });
     }
 
+    #[test]
+    fn test_set_nft_reward_contract_admin_only() {
+        let env = Env::default();
+        env.mock_all_auths_allowing_non_root_auth();
+        let (contract_id, token_address, _) = setup(&env);
+        let admin = Address::generate(&env);
+        let attacker = Address::generate(&env);
+        let nft_contract = Address::generate(&env);
+
+        env.as_contract(&contract_id, || {
+            RewardManager::initialize(env.clone(), admin.clone(), token_address).unwrap();
+        });
+        env.mock_all_auths_allowing_non_root_auth();
+        env.as_contract(&contract_id, || {
+            let unauthorized =
+                RewardManager::set_nft_reward_contract(env.clone(), attacker, nft_contract.clone());
+            assert_eq!(unauthorized, Err(RewardErrorCode::Unauthorized));
+        });
+        env.mock_all_auths_allowing_non_root_auth();
+        env.as_contract(&contract_id, || {
+            RewardManager::set_nft_reward_contract(env.clone(), admin, nft_contract.clone()).unwrap();
+            assert_eq!(Storage::get_nft_contract(&env), Some(nft_contract));
+        });
+    }
+
     // ========== create_reward_pool ==========
 
     #[test]

@@ -59,8 +59,18 @@ impl RewardManager {
 
     /// Sets the default NftReward contract address used for NFT distributions
     /// when a per-call NFT contract is not provided.
-    pub fn set_nft_reward_contract(env: Env, nft_contract: Address) {
+    pub fn set_nft_reward_contract(
+        env: Env,
+        admin: Address,
+        nft_contract: Address,
+    ) -> Result<(), RewardErrorCode> {
+        admin.require_auth();
+        let configured_admin = Storage::get_admin(&env).ok_or(RewardErrorCode::NotInitialized)?;
+        if configured_admin != admin {
+            return Err(RewardErrorCode::Unauthorized);
+        }
         Storage::set_nft_contract(&env, &nft_contract);
+        Ok(())
     }
 
     /// Creates a reward pool for a specific hunt.
