@@ -40,7 +40,7 @@ mod test {
         let token_address = token_contract.address();
 
         env.as_contract(&reward_manager_id, || {
-            RewardManager::initialize(env.clone(), token_address.clone());
+            RewardManager::initialize(env.clone(), token_admin.clone(), token_address.clone()).unwrap();
             if let Some(nft) = nft_contract {
                 RewardManager::set_nft_reward_contract(env.clone(), nft.clone());
             }

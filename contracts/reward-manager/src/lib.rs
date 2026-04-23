@@ -46,8 +46,15 @@ pub struct RewardsDistributedEvent {
 impl RewardManager {
     /// Initializes the RewardManager with the XLM token contract address (SAC).
     /// Must be called once before any reward distribution.
-    pub fn initialize(env: Env, xlm_token: Address) {
+    pub fn initialize(env: Env, admin: Address, xlm_token: Address) -> Result<(), RewardErrorCode> {
+        if Storage::get_xlm_token(&env).is_some() {
+            return Err(RewardErrorCode::AlreadyInitialized);
+        }
+
+        admin.require_auth();
+        Storage::set_admin(&env, &admin);
         Storage::set_xlm_token(&env, &xlm_token);
+        Ok(())
     }
 
     /// Sets the default NftReward contract address used for NFT distributions

@@ -19,4 +19,6 @@ pub enum RewardErrorCode {
     Unauthorized = 10,
     /// Distribution amount is below the pool's minimum distribution threshold.
     BelowMinimumAmount = 11,
+    /// Contract initialization can only happen once.
+    AlreadyInitialized = 12,
 }
