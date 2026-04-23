@@ -17,6 +17,9 @@ const MAX_ANSWER_LENGTH: u32 = 256;
 const MAX_CLUES_PER_HUNT: u32 = 100;
 /// Maximum number of leaderboard entries returned (gas and UX limit).
 const MAX_LEADERBOARD_SIZE: u32 = 20;
+/// Maximum number of player records scanned when building leaderboard responses.
+/// This prevents unbounded gas growth for large hunts.
+const MAX_LEADERBOARD_SCAN_SIZE: u32 = 200;
 
 #[contract]
 pub struct HuntyCore;
@@ -746,8 +749,9 @@ impl HuntyCore {
         let _ = Storage::get_hunt(&env, hunt_id).ok_or(HuntErrorCode::HuntNotFound)?;
         let effective_limit = core::cmp::min(limit, MAX_LEADERBOARD_SIZE);
         let players = Storage::get_hunt_players(&env, hunt_id);
+        let scan_limit = core::cmp::min(players.len(), MAX_LEADERBOARD_SCAN_SIZE);
         let mut entries = Vec::new(&env);
-        for i in 0..players.len() {
+        for i in 0..scan_limit {
             let p = players.get(i).unwrap();
             entries.push_back((
                 p.player.clone(),
