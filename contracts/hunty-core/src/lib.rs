@@ -748,6 +748,7 @@ impl HuntyCore {
     ) -> Result<Vec<LeaderboardEntry>, HuntErrorCode> {
         let _ = Storage::get_hunt(&env, hunt_id).ok_or(HuntErrorCode::HuntNotFound)?;
         let effective_limit = core::cmp::min(limit, MAX_LEADERBOARD_SIZE);
+        let queried_at = env.ledger().timestamp();
         let players = Storage::get_hunt_players(&env, hunt_id);
         let scan_limit = core::cmp::min(players.len(), MAX_LEADERBOARD_SCAN_SIZE);
         let mut entries = Vec::new(&env);
@@ -772,6 +773,7 @@ impl HuntyCore {
                     score,
                     completed_at,
                     is_completed,
+                    queried_at,
                 });
             } else {
                 break;

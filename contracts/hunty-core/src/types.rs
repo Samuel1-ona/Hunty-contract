@@ -246,6 +246,9 @@ pub struct AnswerIncorrectEvent {
 }
 
 /// Leaderboard entry for a single player in a hunt (read-only query result).
+/// `queried_at` is the ledger timestamp at the moment the leaderboard was fetched,
+/// giving frontend caches a reliable "last refreshed" anchor distinct from
+/// the per-player `completed_at`.
 #[contracttype]
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct LeaderboardEntry {
@@ -254,6 +257,7 @@ pub struct LeaderboardEntry {
     pub score: u32,
     pub completed_at: u64,
     pub is_completed: bool,
+    pub queried_at: u64,
 }
 
 /// Aggregate statistics for a hunt (read-only query result).
