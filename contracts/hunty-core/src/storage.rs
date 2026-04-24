@@ -12,8 +12,10 @@ impl Storage {
     const HUNT_KEY: soroban_sdk::Symbol = symbol_short!("HUNT");
     const CLUE_KEY: soroban_sdk::Symbol = symbol_short!("CLUE");
     const PROGRESS_KEY: soroban_sdk::Symbol = symbol_short!("PROG");
-    const PLAYERS_LIST_KEY: soroban_sdk::Symbol = symbol_short!("PLRS");
-    const CLUES_LIST_KEY: soroban_sdk::Symbol = symbol_short!("CLST");
+    const PLAYER_ENTRY_KEY: soroban_sdk::Symbol = symbol_short!("PLRS");
+    const PLAYER_COUNT_KEY: soroban_sdk::Symbol = symbol_short!("PLCT");
+    const CLUE_ENTRY_KEY: soroban_sdk::Symbol = symbol_short!("CLST");
+    const CLUE_LIST_COUNT_KEY: soroban_sdk::Symbol = symbol_short!("CLCT");
     const HUNT_COUNTER_KEY: soroban_sdk::Symbol = symbol_short!("CNTR");
     const CLUE_COUNTER_KEY: soroban_sdk::Symbol = symbol_short!("CCNT");
     const REWARD_MGR_KEY: soroban_sdk::Symbol = symbol_short!("RWDMGR");
@@ -225,10 +227,14 @@ impl Storage {
         (Self::PROGRESS_KEY, hunt_id, player.clone())
     }
 
-    /// Generates a storage key for the list of clue IDs for a hunt.
-    /// Uses tuple key (CLUES_LIST_KEY, hunt_id) for efficient storage access.
-    fn clues_list_key(hunt_id: u64) -> (soroban_sdk::Symbol, u64) {
-        (Self::CLUES_LIST_KEY, hunt_id)
+    /// Key for a single clue-list entry: (CLST, hunt_id, index)
+    fn clue_entry_key(hunt_id: u64, index: u32) -> (soroban_sdk::Symbol, u64, u32) {
+        (Self::CLUE_ENTRY_KEY, hunt_id, index)
+    }
+
+    /// Key for the number of entries in the clue list for a hunt.
+    fn clue_list_count_key(hunt_id: u64) -> (soroban_sdk::Symbol, u64) {
+        (Self::CLUE_LIST_COUNT_KEY, hunt_id)
     }
 
     /// Generates a storage key for the clue counter per hunt.
@@ -236,84 +242,82 @@ impl Storage {
         (Self::CLUE_COUNTER_KEY, hunt_id)
     }
 
-    /// Generates a storage key for the list of player addresses for a hunt.
-    /// Uses tuple key (PLAYERS_LIST_KEY, hunt_id) for efficient storage access.
-    fn players_list_key(hunt_id: u64) -> (soroban_sdk::Symbol, u64) {
-        (Self::PLAYERS_LIST_KEY, hunt_id)
+    /// Key for a single player-list entry: (PLRS, hunt_id, index)
+    fn player_entry_key(hunt_id: u64, index: u32) -> (soroban_sdk::Symbol, u64, u32) {
+        (Self::PLAYER_ENTRY_KEY, hunt_id, index)
+    }
+
+    /// Key for the number of entries in the player list for a hunt.
+    fn player_count_key(hunt_id: u64) -> (soroban_sdk::Symbol, u64) {
+        (Self::PLAYER_COUNT_KEY, hunt_id)
     }
 
     // ========== Internal Helper Functions ==========
 
-    /// Adds a clue ID to the list of clues for a hunt.
-    /// This maintains an index for efficient listing.
+    /// Adds a clue ID to the per-hunt clue index.
+    /// Each entry is stored at its own key so no single entry grows unboundedly.
     fn add_clue_to_list(env: &Env, hunt_id: u64, clue_id: u32) {
-        let key = Self::clues_list_key(hunt_id);
-        let mut clue_ids = env
-            .storage()
-            .persistent()
-            .get(&key)
-            .unwrap_or_else(|| Vec::new(env));
+        let count_key = Self::clue_list_count_key(hunt_id);
+        let count: u32 = env.storage().persistent().get(&count_key).unwrap_or(0);
 
-        // Check if clue_id already exists to avoid duplicates
-        let mut exists = false;
-        for i in 0..clue_ids.len() {
-            if let Some(id) = clue_ids.get(i) {
-                if id == clue_id {
-                    exists = true;
-                    break;
-                }
+        // Scan existing entries to avoid duplicates
+        for i in 0..count {
+            let entry_key = Self::clue_entry_key(hunt_id, i);
+            let stored: u32 = env.storage().persistent().get(&entry_key).unwrap_or(u32::MAX);
+            if stored == clue_id {
+                return;
             }
         }
 
-        if !exists {
-            clue_ids.push_back(clue_id);
-            env.storage().persistent().set(&key, &clue_ids);
-        }
+        env.storage().persistent().set(&Self::clue_entry_key(hunt_id, count), &clue_id);
+        env.storage().persistent().set(&count_key, &(count + 1));
     }
 
-    /// Retrieves the list of clue IDs for a hunt.
+    /// Retrieves all clue IDs for a hunt by reading individual entries.
     fn get_clue_ids_for_hunt(env: &Env, hunt_id: u64) -> Vec<u32> {
-        let key = Self::clues_list_key(hunt_id);
-        env.storage()
-            .persistent()
-            .get(&key)
-            .unwrap_or_else(|| Vec::new(env))
+        let count_key = Self::clue_list_count_key(hunt_id);
+        let count: u32 = env.storage().persistent().get(&count_key).unwrap_or(0);
+        let mut ids = Vec::new(env);
+        for i in 0..count {
+            let entry_key = Self::clue_entry_key(hunt_id, i);
+            if let Some(id) = env.storage().persistent().get(&entry_key) {
+                ids.push_back(id);
+            }
+        }
+        ids
     }
 
-    /// Adds a player address to the list of players for a hunt.
-    /// This maintains an index for efficient listing.
+    /// Adds a player address to the per-hunt player index.
+    /// Each entry is stored at its own key so no single entry grows unboundedly.
     fn add_player_to_list(env: &Env, hunt_id: u64, player: &Address) {
-        let key = Self::players_list_key(hunt_id);
-        let mut players = env
-            .storage()
-            .persistent()
-            .get(&key)
-            .unwrap_or_else(|| Vec::new(env));
+        let count_key = Self::player_count_key(hunt_id);
+        let count: u32 = env.storage().persistent().get(&count_key).unwrap_or(0);
 
-        // Check if player already exists to avoid duplicates
-        let mut exists = false;
-        for i in 0..players.len() {
-            if let Some(addr) = players.get(i) {
-                if addr == *player {
-                    exists = true;
-                    break;
-                }
+        // Scan existing entries to avoid duplicates
+        for i in 0..count {
+            let entry_key = Self::player_entry_key(hunt_id, i);
+            let stored: Option<Address> = env.storage().persistent().get(&entry_key);
+            if stored.as_ref() == Some(player) {
+                return;
             }
         }
 
-        if !exists {
-            players.push_back(player.clone());
-            env.storage().persistent().set(&key, &players);
-        }
+        env.storage().persistent().set(&Self::player_entry_key(hunt_id, count), player);
+        env.storage().persistent().set(&count_key, &(count + 1));
     }
 
-    /// Retrieves the list of player addresses for a hunt.
+    /// Retrieves all player addresses for a hunt by reading individual entries.
     fn get_player_addresses_for_hunt(env: &Env, hunt_id: u64) -> Vec<Address> {
-        let key = Self::players_list_key(hunt_id);
-        env.storage()
-            .persistent()
-            .get(&key)
-            .unwrap_or_else(|| Vec::new(env))
+        let count_key = Self::player_count_key(hunt_id);
+        let count: u32 = env.storage().persistent().get(&count_key).unwrap_or(0);
+        let mut addrs = Vec::new(env);
+        for i in 0..count {
+            let entry_key = Self::player_entry_key(hunt_id, i);
+            if let Some(addr) = env.storage().persistent().get(&entry_key) {
+                addrs.push_back(addr);
+            }
+        }
+        addrs
     }
 
     // ========== Hunt Counter Functions ==========
