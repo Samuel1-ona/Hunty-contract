@@ -1,5 +1,5 @@
 #![cfg_attr(not(test), no_std)]
-use soroban_sdk::{contract, contractimpl, contracttype, Address, Env, Symbol};
+use soroban_sdk::{contract, contractimpl, contracttype, symbol_short, Address, Env};
 
 pub use crate::errors::RewardErrorCode;
 pub use crate::types::{
@@ -110,7 +110,7 @@ impl RewardManager {
         Storage::set_pool_config(&env, hunt_id, &config);
 
         env.events().publish(
-            (Symbol::new(&env, "RewardPoolCreated"), hunt_id),
+            (symbol_short!("POOL_CRT"), hunt_id),
             RewardPoolCreatedEvent {
                 hunt_id,
                 creator,
@@ -174,7 +174,7 @@ impl RewardManager {
         Storage::set_pool_total_deposited(&env, hunt_id, total_deposited);
 
         env.events().publish(
-            (Symbol::new(&env, "RewardPoolFunded"), hunt_id),
+            (symbol_short!("POOL_FND"), hunt_id),
             RewardPoolFundedEvent {
                 hunt_id,
                 funder,
@@ -383,7 +383,7 @@ impl RewardManager {
             nft_id,
         };
         env.events()
-            .publish((Symbol::new(&env, "RewardsDistributed"), hunt_id), event);
+            .publish((symbol_short!("RWD_DIST"), hunt_id), event);
 
         Ok(())
     }
