@@ -454,12 +454,16 @@ impl HuntyCore {
             } else {
                 None
             };
+            // description is intentionally excluded from NFT metadata: a creator could
+            // accidentally embed an answer or salt in the hunt description, which would
+            // then be permanently exposed on-chain via the cross-contract call.
+            // Only the title (already fully public) is forwarded.
             let (nft_contract, nft_title, nft_desc, nft_uri, nft_hunt_title) = if nft_awarded {
                 hunt.reward_config.nft_contract.clone().map(|nft_contract| {
                     (
                         Some(nft_contract),
                         hunt.title.clone(),
-                        hunt.description.clone(),
+                        String::from_str(&env, ""),
                         String::from_str(&env, ""),
                         hunt.title.clone(),
                     )
