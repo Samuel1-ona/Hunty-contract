@@ -228,7 +228,7 @@ impl HuntyCore {
         if n > MAX_ANSWER_LENGTH {
             return Err(HuntError::InvalidAnswer);
         }
-        let mut buf = [0u8; 256];
+        let mut buf = [0u8; MAX_ANSWER_LENGTH as usize];
         answer.copy_into_slice(&mut buf[..n as usize]);
         let mut start = 0usize;
         let mut end = n as usize;
