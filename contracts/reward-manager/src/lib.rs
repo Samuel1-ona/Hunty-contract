@@ -42,6 +42,15 @@ pub struct RewardsDistributedEvent {
     pub nft_id: Option<u64>,
 }
 
+/// Event emitted when admin withdraws unclaimed rewards from a pool.
+#[contracttype]
+#[derive(Clone, Debug)]
+pub struct AdminWithdrawEvent {
+    pub hunt_id: u64,
+    pub admin: Address,
+    pub amount: i128,
+}
+
 #[contractimpl]
 impl RewardManager {
     /// Initializes the RewardManager with the XLM token contract address (SAC).
@@ -448,6 +457,63 @@ impl RewardManager {
     /// Returns whether a reward has been distributed to a player for a hunt.
     pub fn is_reward_distributed(env: Env, hunt_id: u64, player: Address) -> bool {
         Storage::is_distributed(&env, hunt_id, &player)
+    }
+
+    /// Allows the admin to withdraw any unclaimed (surplus) XLM remaining in a reward pool.
+    ///
+    /// This is needed when a hunt concludes with fewer winners than anticipated,
+    /// leaving unspent XLM locked in the pool. Only the contract admin may call this.
+    ///
+    /// # Arguments
+    /// * `admin` - The contract admin address (must match the stored admin)
+    /// * `hunt_id` - The hunt whose remaining pool balance to withdraw
+    /// * `recipient` - The address that will receive the withdrawn XLM
+    ///
+    /// # Errors
+    /// * `NotInitialized` - Contract has not been initialized (no admin set)
+    /// * `Unauthorized` - Caller is not the contract admin
+    /// * `PoolNotFound` - No pool exists for this hunt_id
+    /// * `InvalidAmount` - Pool balance is zero (nothing to withdraw)
+    pub fn admin_withdraw_unclaimed(
+        env: Env,
+        admin: Address,
+        hunt_id: u64,
+        recipient: Address,
+    ) -> Result<(), RewardErrorCode> {
+        #[cfg(not(test))]
+        admin.require_auth();
+
+        let configured_admin = Storage::get_admin(&env).ok_or(RewardErrorCode::NotInitialized)?;
+        if configured_admin != admin {
+            return Err(RewardErrorCode::Unauthorized);
+        }
+
+        // Ensure the pool exists
+        Storage::get_pool_config(&env, hunt_id).ok_or(RewardErrorCode::PoolNotFound)?;
+
+        let balance = Storage::get_pool_balance(&env, hunt_id);
+        if balance == 0 {
+            return Err(RewardErrorCode::InvalidAmount);
+        }
+
+        let xlm_token = Storage::get_xlm_token(&env).ok_or(RewardErrorCode::NotInitialized)?;
+
+        let contract_addr = env.current_contract_address();
+        let client = soroban_sdk::token::Client::new(&env, &xlm_token);
+        client.transfer(&contract_addr, &recipient, &balance);
+
+        Storage::set_pool_balance(&env, hunt_id, 0);
+
+        env.events().publish(
+            (symbol_short!("ADM_WDR"), hunt_id),
+            AdminWithdrawEvent {
+                hunt_id,
+                admin,
+                amount: balance,
+            },
+        );
+
+        Ok(())
     }
 }
 
