@@ -900,6 +900,7 @@ mod test {
         let env = Env::default();
         env.mock_all_auths_allowing_non_root_auth();
         let (contract_id, token_address, token_admin) = setup(&env);
+        let admin = Address::generate(&env);
         let creator = Address::generate(&env);
 
         mint_tokens(&env, &token_address, &token_admin, &creator, 10_000);
@@ -922,6 +923,7 @@ mod test {
         let env = Env::default();
         env.mock_all_auths_allowing_non_root_auth();
         let (contract_id, token_address, token_admin) = setup(&env);
+        let admin = Address::generate(&env);
         let creator = Address::generate(&env);
         let attacker = Address::generate(&env);
 
@@ -935,6 +937,155 @@ mod test {
             let result = RewardManager::refund_pool(env.clone(), attacker.clone(), 88);
             assert_eq!(result, Err(RewardErrorCode::Unauthorized));
             assert_eq!(RewardManager::get_pool_balance(env.clone(), 88), 1_500);
+        });
+    }
+
+    // ========== admin_withdraw_unclaimed ==========
+
+    #[test]
+    fn test_admin_withdraw_unclaimed_success() {
+        let env = Env::default();
+        env.mock_all_auths_allowing_non_root_auth();
+        let (contract_id, token_address, token_admin) = setup(&env);
+        let admin = Address::generate(&env);
+        let creator = Address::generate(&env);
+        let recipient = Address::generate(&env);
+
+        // Fund creator and mint tokens
+        mint_tokens(&env, &token_address, &token_admin, &creator, 10_000);
+
+        env.as_contract(&contract_id, || {
+            RewardManager::initialize(env.clone(), admin.clone(), token_address.clone()).unwrap();
+            RewardManager::create_reward_pool(env.clone(), creator.clone(), 1, 0).unwrap();
+            RewardManager::fund_reward_pool(env.clone(), creator.clone(), 1, 6_000).unwrap();
+
+            // Distribute to one player, leaving 4_000 unclaimed
+            let player = Address::generate(&env);
+            RewardManager::distribute_rewards(env.clone(), 1, player, xlm_only_config(&env, 2_000)).unwrap();
+
+            // Admin withdraws the remaining 4_000 to recipient
+            let result = RewardManager::admin_withdraw_unclaimed(
+                env.clone(),
+                admin.clone(),
+                1,
+                recipient.clone(),
+            );
+            assert!(result.is_ok());
+
+            // Pool balance should now be 0
+            assert_eq!(RewardManager::get_pool_balance(env.clone(), 1), 0);
+        });
+
+        // Recipient should have received 4_000
+        assert_eq!(get_balance(&env, &token_address, &recipient), 4_000);
+    }
+
+    #[test]
+    fn test_admin_withdraw_unclaimed_unauthorized() {
+        let env = Env::default();
+        env.mock_all_auths_allowing_non_root_auth();
+        let (contract_id, token_address, token_admin) = setup(&env);
+        let admin = Address::generate(&env);
+        let non_admin = Address::generate(&env);
+        let creator = Address::generate(&env);
+
+        mint_tokens(&env, &token_address, &token_admin, &creator, 5_000);
+
+        env.as_contract(&contract_id, || {
+            RewardManager::initialize(env.clone(), admin.clone(), token_address.clone()).unwrap();
+            RewardManager::create_reward_pool(env.clone(), creator.clone(), 1, 0).unwrap();
+            RewardManager::fund_reward_pool(env.clone(), creator.clone(), 1, 5_000).unwrap();
+
+            // Non-admin tries to withdraw
+            let result = RewardManager::admin_withdraw_unclaimed(
+                env.clone(),
+                non_admin.clone(),
+                1,
+                non_admin.clone(),
+            );
+            assert_eq!(result, Err(RewardErrorCode::Unauthorized));
+
+            // Pool balance unchanged
+            assert_eq!(RewardManager::get_pool_balance(env.clone(), 1), 5_000);
+        });
+    }
+
+    #[test]
+    fn test_admin_withdraw_unclaimed_pool_not_found() {
+        let env = Env::default();
+        env.mock_all_auths_allowing_non_root_auth();
+        let (contract_id, token_address, _) = setup(&env);
+        let admin = Address::generate(&env);
+        let recipient = Address::generate(&env);
+
+        env.as_contract(&contract_id, || {
+            RewardManager::initialize(env.clone(), admin.clone(), token_address.clone()).unwrap();
+
+            // No pool created for hunt_id 99
+            let result = RewardManager::admin_withdraw_unclaimed(
+                env.clone(),
+                admin.clone(),
+                99,
+                recipient.clone(),
+            );
+            assert_eq!(result, Err(RewardErrorCode::PoolNotFound));
+        });
+    }
+
+    #[test]
+    fn test_admin_withdraw_unclaimed_empty_pool() {
+        let env = Env::default();
+        env.mock_all_auths_allowing_non_root_auth();
+        let (contract_id, token_address, token_admin) = setup(&env);
+        let admin = Address::generate(&env);
+        let creator = Address::generate(&env);
+        let player = Address::generate(&env);
+        let recipient = Address::generate(&env);
+
+        mint_tokens(&env, &token_address, &token_admin, &creator, 3_000);
+
+        env.as_contract(&contract_id, || {
+            RewardManager::initialize(env.clone(), admin.clone(), token_address.clone()).unwrap();
+            RewardManager::create_reward_pool(env.clone(), creator.clone(), 1, 0).unwrap();
+            RewardManager::fund_reward_pool(env.clone(), creator.clone(), 1, 3_000).unwrap();
+
+            // Distribute all funds
+            RewardManager::distribute_rewards(
+                env.clone(), 1, player.clone(), xlm_only_config(&env, 3_000),
+            )
+            .unwrap();
+
+            // Admin tries to withdraw from an empty pool
+            let result = RewardManager::admin_withdraw_unclaimed(
+                env.clone(),
+                admin.clone(),
+                1,
+                recipient.clone(),
+            );
+            assert_eq!(result, Err(RewardErrorCode::InvalidAmount));
+        });
+
+        // Recipient received nothing
+        assert_eq!(get_balance(&env, &token_address, &recipient), 0);
+    }
+
+    #[test]
+    fn test_admin_withdraw_unclaimed_not_initialized() {
+        let env = Env::default();
+        env.mock_all_auths_allowing_non_root_auth();
+        let (contract_id, _, _) = setup(&env);
+        let admin = Address::generate(&env);
+        let recipient = Address::generate(&env);
+
+        env.as_contract(&contract_id, || {
+            // Contract not initialized — no admin set
+            let result = RewardManager::admin_withdraw_unclaimed(
+                env.clone(),
+                admin.clone(),
+                1,
+                recipient.clone(),
+            );
+            assert_eq!(result, Err(RewardErrorCode::NotInitialized));
         });
     }
 }
