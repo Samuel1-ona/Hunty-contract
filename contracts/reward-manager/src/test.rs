@@ -905,7 +905,7 @@ mod test {
         mint_tokens(&env, &token_address, &token_admin, &creator, 10_000);
 
         env.as_contract(&contract_id, || {
-            RewardManager::initialize(env.clone(), token_address.clone());
+            RewardManager::initialize(env.clone(), token_admin.clone(), token_address.clone());
             RewardManager::create_reward_pool(env.clone(), creator.clone(), 77, 0).unwrap();
             RewardManager::fund_reward_pool(env.clone(), creator.clone(), 77, 6_000).unwrap();
             RewardManager::refund_pool(env.clone(), creator.clone(), 77).unwrap();
@@ -928,7 +928,7 @@ mod test {
         mint_tokens(&env, &token_address, &token_admin, &creator, 10_000);
 
         env.as_contract(&contract_id, || {
-            RewardManager::initialize(env.clone(), token_address.clone());
+            RewardManager::initialize(env.clone(), token_admin.clone(), token_address.clone());
             RewardManager::create_reward_pool(env.clone(), creator.clone(), 88, 0).unwrap();
             RewardManager::fund_reward_pool(env.clone(), creator.clone(), 88, 1_500).unwrap();
 

@@ -2538,4 +2538,28 @@ mod test {
         });
         assert_eq!(result, Err(HuntErrorCode::PlayerNotRegistered));
     }
+
+    #[test]
+    fn test_complete_hunt_invalid_status() {
+        let env = Env::default();
+        env.ledger().set_timestamp(1_700_000_000);
+        let creator = Address::generate(&env);
+        let player = Address::generate(&env);
+
+        let (hunt_id, contract_id) =
+            setup_completed_hunt_with_rewards(&env, &creator, &player, 5, 1000);
+
+        // Cancel the hunt to change its status to Cancelled
+        env.mock_all_auths();
+        as_core_contract(&env, &contract_id, |env| {
+            HuntyCore::cancel_hunt(env.clone(), hunt_id, creator.clone()).unwrap();
+        });
+
+        // Try to complete the hunt — should fail with InvalidHuntStatus
+        env.mock_all_auths();
+        let result = as_core_contract(&env, &contract_id, |env| {
+            HuntyCore::complete_hunt(env.clone(), hunt_id, player.clone())
+        });
+        assert_eq!(result, Err(HuntErrorCode::InvalidHuntStatus));
+    }
 }

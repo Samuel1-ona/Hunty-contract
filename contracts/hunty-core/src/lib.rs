@@ -421,6 +421,10 @@ impl HuntyCore {
         let mut hunt =
             Storage::get_hunt_or_error(&env, hunt_id).map_err(HuntErrorCode::from)?;
 
+        if hunt.status != HuntStatus::Active {
+            return Err(HuntErrorCode::InvalidHuntStatus);
+        }
+
         let mut progress = Storage::get_player_progress_or_error(&env, hunt_id, &player)
             .map_err(HuntErrorCode::from)?;
 
