@@ -17,6 +17,10 @@ pub struct RewardConfig {
     pub nft_contract: Option<Address>,
     pub max_winners: u32,
     pub claimed_count: u32,
+    /// NFT rarity: 0 = default, 1-5 = common to legendary.
+    pub nft_rarity: u32,
+    /// NFT tier: 0 = none, custom tier value.
+    pub nft_tier: u32,
 }
 
 #[contracttype]
@@ -153,6 +157,8 @@ impl RewardConfig {
         nft_enabled: bool,
         nft_contract: Option<Address>,
         max_winners: u32,
+        nft_rarity: u32,
+        nft_tier: u32,
     ) -> Self {
         Self {
             xlm_pool,
@@ -160,6 +166,8 @@ impl RewardConfig {
             nft_contract,
             max_winners,
             claimed_count: 0,
+            nft_rarity,
+            nft_tier,
         }
     }
 

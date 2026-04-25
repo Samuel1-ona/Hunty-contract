@@ -83,6 +83,8 @@ impl HuntyCore {
             false, // nft_enabled: false initially
             None,  // nft_contract: None initially
             0,     // max_winners: 0 initially
+            0,     // nft_rarity: 0 initially
+            0,     // nft_tier: 0 initially
         );
 
         // Create the hunt with Draft status
@@ -495,8 +497,8 @@ impl HuntyCore {
                 nft_description: nft_desc,
                 nft_image_uri: nft_uri,
                 nft_hunt_title,
-                nft_rarity: 0,
-                nft_tier: 0,
+                nft_rarity: hunt.reward_config.nft_rarity,
+                nft_tier: hunt.reward_config.nft_tier,
             };
 
             // Only call RewardManager when there is at least one reward type

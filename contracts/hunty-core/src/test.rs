@@ -2020,6 +2020,8 @@ mod test {
                 false,
                 None,
                 max_winners,
+                0,
+                0,
             );
             Storage::save_hunt(env, &hunt);
 
@@ -2101,6 +2103,8 @@ mod test {
                 true,
                 Some(nft_contract_id.clone()),
                 3,
+                0,
+                0,
             );
             Storage::save_hunt(env, &hunt);
 
@@ -2287,6 +2291,8 @@ mod test {
                 true,
                 Some(nft_contract_id.clone()),
                 3,
+                0,
+                0,
             );
             Storage::save_hunt(env, &hunt);
 
@@ -2437,7 +2443,7 @@ mod test {
 
             let mut hunt = Storage::get_hunt(env, hunt_id).unwrap();
             hunt.reward_config =
-                crate::types::RewardConfig::new(1000, false, None, 5);
+                crate::types::RewardConfig::new(1000, false, None, 5, 0, 0);
             Storage::save_hunt(env, &hunt);
 
             HuntyCore::activate_hunt(env.clone(), hunt_id, creator.clone()).unwrap();
