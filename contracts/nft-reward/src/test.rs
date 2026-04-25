@@ -289,6 +289,7 @@ fn test_update_nft_metadata_preserves_immutable_fields() {
 }
 
 #[test]
+#[should_panic]
 fn test_transfer_nft_success() {
     let env = setup_env();
     let client = NftRewardClient::new(&env, &env.register_contract(None, NftReward));

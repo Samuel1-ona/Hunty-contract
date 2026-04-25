@@ -426,15 +426,48 @@ impl HuntyCore {
     /// * `RewardDistributionFailed` - Cross-contract call failed
     pub fn complete_hunt(env: Env, hunt_id: u64, player: Address) -> Result<(), HuntErrorCode> {
         player.require_auth();
+        Self::process_reward_distribution(&env, hunt_id, player)
+    }
 
-        let mut hunt =
-            Storage::get_hunt_or_error(&env, hunt_id).map_err(HuntErrorCode::from)?;
+    /// Allows the hunt creator to distribute rewards to multiple players in batch.
+    /// This is more gas-efficient than individual claims when many players finish at once.
+    pub fn batch_complete_hunt(
+        env: Env,
+        hunt_id: u64,
+        creator: Address,
+        players: Vec<Address>,
+    ) -> Result<(), HuntErrorCode> {
+        creator.require_auth();
+
+        let hunt = Storage::get_hunt_or_error(&env, hunt_id).map_err(HuntErrorCode::from)?;
+
+        if hunt.creator != creator {
+            return Err(HuntErrorCode::Unauthorized);
+        }
+
+        for i in 0..players.len() {
+            let player = players.get(i).unwrap();
+            // Process each player; we use a best-effort approach where one failure
+            // doesn't block the entire batch, though creators should verify results via events.
+            let _ = Self::process_reward_distribution(&env, hunt_id, player);
+        }
+
+        Ok(())
+    }
+
+    /// Internal helper to handle the core reward distribution logic.
+    fn process_reward_distribution(
+        env: &Env,
+        hunt_id: u64,
+        player: Address,
+    ) -> Result<(), HuntErrorCode> {
+        let mut hunt = Storage::get_hunt_or_error(env, hunt_id).map_err(HuntErrorCode::from)?;
 
         if hunt.status != HuntStatus::Active {
             return Err(HuntErrorCode::InvalidHuntStatus);
         }
 
-        let mut progress = Storage::get_player_progress_or_error(&env, hunt_id, &player)
+        let mut progress = Storage::get_player_progress_or_error(env, hunt_id, &player)
             .map_err(HuntErrorCode::from)?;
 
         // Verify the player has completed all required clues
@@ -461,7 +494,7 @@ impl HuntyCore {
         let nft_awarded = hunt.reward_config.nft_enabled;
 
         // Call RewardManager if configured and there are rewards to distribute
-        if let Some(reward_manager_addr) = Storage::get_reward_manager(&env) {
+        if let Some(reward_manager_addr) = Storage::get_reward_manager(env) {
             let xlm_amount = if reward_amount > 0 {
                 Some(reward_amount)
             } else {
@@ -472,23 +505,33 @@ impl HuntyCore {
             // then be permanently exposed on-chain via the cross-contract call.
             // Only the title (already fully public) is forwarded.
             let (nft_contract, nft_title, nft_desc, nft_uri, nft_hunt_title) = if nft_awarded {
-                hunt.reward_config.nft_contract.clone().map(|nft_contract| {
-                    (
-                        Some(nft_contract),
-                        hunt.title.clone(),
-                        String::from_str(&env, ""),
-                        String::from_str(&env, ""),
-                        hunt.title.clone(),
-                    )
-                }).unwrap_or((
-                    None,
-                    String::from_str(&env, ""),
-                    String::from_str(&env, ""),
-                    String::from_str(&env, ""),
-                    String::from_str(&env, ""),
-                ))
+                hunt.reward_config
+                    .nft_contract
+                    .clone()
+                    .map(|nft_contract| {
+                        (
+                            Some(nft_contract),
+                            hunt.title.clone(),
+                            String::from_str(env, ""),
+                            String::from_str(env, ""),
+                            hunt.title.clone(),
+                        )
+                    })
+                    .unwrap_or((
+                        None,
+                        String::from_str(env, ""),
+                        String::from_str(env, ""),
+                        String::from_str(env, ""),
+                        String::from_str(env, ""),
+                    ))
             } else {
-                (None, String::from_str(&env, ""), String::from_str(&env, ""), String::from_str(&env, ""), String::from_str(&env, ""))
+                (
+                    None,
+                    String::from_str(env, ""),
+                    String::from_str(env, ""),
+                    String::from_str(env, ""),
+                    String::from_str(env, ""),
+                )
             };
             let rm_reward_config = reward_manager::RewardConfig {
                 xlm_amount,
@@ -503,14 +546,14 @@ impl HuntyCore {
 
             // Only call RewardManager when there is at least one reward type
             if rm_reward_config.is_valid() {
-                let mut args: Vec<Val> = Vec::new(&env);
-                args.push_back(hunt_id.into_val(&env));
-                args.push_back(player.clone().into_val(&env));
-                args.push_back(rm_reward_config.into_val(&env));
+                let mut args: Vec<Val> = Vec::new(env);
+                args.push_back(hunt_id.into_val(env));
+                args.push_back(player.clone().into_val(env));
+                args.push_back(rm_reward_config.into_val(env));
 
                 let result = env.try_invoke_contract::<(), RewardErrorCode>(
                     &reward_manager_addr,
-                    &Symbol::new(&env, "distribute_rewards"),
+                    &Symbol::new(env, "distribute_rewards"),
                     args,
                 );
                 if !matches!(result, Ok(Ok(()))) {
@@ -521,11 +564,11 @@ impl HuntyCore {
 
         // Update player progress
         progress.reward_claimed = true;
-        Storage::save_player_progress(&env, &progress);
+        Storage::save_player_progress(env, &progress);
 
         // Update hunt reward config
         hunt.reward_config.claimed_count += 1;
-        Storage::save_hunt(&env, &hunt);
+        Storage::save_hunt(env, &hunt);
 
         // Emit RewardClaimedEvent
         let event = RewardClaimedEvent {
@@ -535,7 +578,7 @@ impl HuntyCore {
             nft_awarded,
         };
         env.events()
-            .publish((Symbol::new(&env, "RewardClaimed"), hunt_id), event);
+            .publish((Symbol::new(env, "RewardClaimed"), hunt_id), event);
 
         Ok(())
     }

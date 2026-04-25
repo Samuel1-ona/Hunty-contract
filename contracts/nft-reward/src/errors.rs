@@ -8,4 +8,5 @@ pub enum NftErrorCode {
     Unauthorized = 2,
     NotOwner = 3,
     InvalidRecipient = 4,
+    SoulboundNft = 5,
 }

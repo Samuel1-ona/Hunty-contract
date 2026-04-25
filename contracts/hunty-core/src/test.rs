@@ -2400,6 +2400,84 @@ mod test {
     }
 
     #[test]
+    fn test_batch_complete_hunt_success() {
+        let env = Env::default();
+        env.ledger().set_timestamp(1_700_000_000);
+        let creator = Address::generate(&env);
+        let player1 = Address::generate(&env);
+        let player2 = Address::generate(&env);
+        let player3 = Address::generate(&env);
+
+        let contract_id = env.register_contract(None, HuntyCore);
+
+        // Setup hunt and players
+        let hunt_id = as_core_contract(&env, &contract_id, |env| {
+            let hid = HuntyCore::create_hunt(
+                env.clone(),
+                creator.clone(),
+                String::from_str(env, "Batch Hunt"),
+                String::from_str(env, "Desc"),
+                None,
+                None,
+            )
+            .unwrap();
+
+            HuntyCore::add_clue(
+                env.clone(),
+                hid,
+                String::from_str(env, "Q"),
+                String::from_str(env, "a"),
+                10,
+                true,
+            )
+            .unwrap();
+
+            let mut hunt = Storage::get_hunt(env, hid).unwrap();
+            hunt.reward_config = crate::types::RewardConfig::new(1000, false, None, 10, 0, 0);
+            Storage::save_hunt(env, &hunt);
+
+            HuntyCore::activate_hunt(env.clone(), hid, creator.clone()).unwrap();
+            hid
+        });
+
+        // Register and complete for all players
+        env.mock_all_auths();
+        as_core_contract(&env, &contract_id, |env| {
+            for p in [&player1, &player2, &player3] {
+                HuntyCore::register_player(env.clone(), hunt_id, (*p).clone()).unwrap();
+                HuntyCore::submit_answer(
+                    env.clone(),
+                    hunt_id,
+                    1,
+                    (*p).clone(),
+                    String::from_str(env, "a"),
+                )
+                .unwrap();
+            }
+        });
+
+        // Batch complete by creator
+        as_core_contract(&env, &contract_id, |env| {
+            let players = Vec::from_array(env, [player1.clone(), player2.clone(), player3.clone()]);
+            HuntyCore::batch_complete_hunt(env.clone(), hunt_id, creator.clone(), players).unwrap();
+        });
+
+        // Verify all players claimed
+        for p in [player1, player2, player3] {
+            let progress = as_core_contract(&env, &contract_id, |env| {
+                HuntyCore::get_player_progress(env.clone(), hunt_id, p).unwrap()
+            });
+            assert!(progress.reward_claimed);
+        }
+
+        // Verify hunt claimed_count
+        let hunt = as_core_contract(&env, &contract_id, |env| {
+            HuntyCore::get_hunt_info(env.clone(), hunt_id).unwrap()
+        });
+        assert_eq!(hunt.reward_config.claimed_count, 3);
+    }
+
+    #[test]
     fn test_complete_hunt_not_completed() {
         let env = Env::default();
         env.ledger().set_timestamp(1_700_000_000);
