@@ -279,41 +279,12 @@ impl NftReward {
     /// For automatic transfers during reward distribution, the contract may be
     /// the `from_address` when invoked by an authorized party.
     pub fn transfer_nft(
-        env: Env,
-        nft_id: u64,
-        from_address: Address,
-        to_address: Address,
+        _env: Env,
+        _nft_id: u64,
+        _from_address: Address,
+        _to_address: Address,
     ) -> Result<(), crate::errors::NftErrorCode> {
-        from_address.require_auth();
-
-        let mut nft = Storage::get_nft(&env, nft_id).ok_or(crate::errors::NftErrorCode::NftNotFound)?;
-
-        if nft.owner != from_address {
-            return Err(crate::errors::NftErrorCode::NotOwner);
-        }
-
-        if to_address == from_address {
-            return Err(crate::errors::NftErrorCode::InvalidRecipient);
-        }
-
-        // Update NFT owner
-        nft.owner = to_address.clone();
-        Storage::save_nft(&env, &nft);
-
-        // Update ownership mapping: remove from old owner, add to new owner
-        Storage::remove_nft_from_owner(&env, &from_address, nft_id);
-        Storage::add_nft_to_owner(&env, &to_address, nft_id);
-
-        // Emit NftTransferred event
-        let event = NftTransferredEvent {
-            nft_id,
-            from: from_address,
-            to: to_address,
-        };
-        env.events()
-            .publish((Symbol::new(&env, "NftTransferred"), nft_id), event);
-
-        Ok(())
+        Err(crate::errors::NftErrorCode::SoulboundNft)
     }
 }
 
