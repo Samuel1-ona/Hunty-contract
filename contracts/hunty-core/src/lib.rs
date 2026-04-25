@@ -172,6 +172,9 @@ impl HuntyCore {
         Storage::save_clue(&env, hunt_id, &clue);
         let mut updated = hunt;
         updated.total_clues += 1;
+        if is_required {
+            updated.required_clues += 1;
+        }
         Storage::save_hunt(&env, &updated);
         let event = ClueAddedEvent {
             hunt_id,
@@ -267,6 +270,10 @@ impl HuntyCore {
 
         if hunt.total_clues == 0 {
             return Err(HuntErrorCode::NoCluesAdded);
+        }
+
+        if hunt.required_clues == 0 {
+            return Err(HuntErrorCode::NoRequiredClues);
         }
 
         let current_time = env.ledger().timestamp();
