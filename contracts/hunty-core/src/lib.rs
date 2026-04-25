@@ -83,6 +83,8 @@ impl HuntyCore {
             false, // nft_enabled: false initially
             None,  // nft_contract: None initially
             0,     // max_winners: 0 initially
+            0,     // nft_rarity: 0 initially
+            0,     // nft_tier: 0 initially
         );
 
         // Create the hunt with Draft status
@@ -172,6 +174,9 @@ impl HuntyCore {
         Storage::save_clue(&env, hunt_id, &clue);
         let mut updated = hunt;
         updated.total_clues += 1;
+        if is_required {
+            updated.required_clues += 1;
+        }
         Storage::save_hunt(&env, &updated);
         let event = ClueAddedEvent {
             hunt_id,
@@ -267,6 +272,10 @@ impl HuntyCore {
 
         if hunt.total_clues == 0 {
             return Err(HuntErrorCode::NoCluesAdded);
+        }
+
+        if hunt.required_clues == 0 {
+            return Err(HuntErrorCode::NoRequiredClues);
         }
 
         let current_time = env.ledger().timestamp();
@@ -421,6 +430,10 @@ impl HuntyCore {
         let mut hunt =
             Storage::get_hunt_or_error(&env, hunt_id).map_err(HuntErrorCode::from)?;
 
+        if hunt.status != HuntStatus::Active {
+            return Err(HuntErrorCode::InvalidHuntStatus);
+        }
+
         let mut progress = Storage::get_player_progress_or_error(&env, hunt_id, &player)
             .map_err(HuntErrorCode::from)?;
 
@@ -484,8 +497,8 @@ impl HuntyCore {
                 nft_description: nft_desc,
                 nft_image_uri: nft_uri,
                 nft_hunt_title,
-                nft_rarity: 0,
-                nft_tier: 0,
+                nft_rarity: hunt.reward_config.nft_rarity,
+                nft_tier: hunt.reward_config.nft_tier,
             };
 
             // Only call RewardManager when there is at least one reward type
