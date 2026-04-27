@@ -397,17 +397,17 @@ impl RewardManager {
         Ok(())
     }
 
-    /// Legacy entry point for XLM-only or XLM + NFT (placeholder) distribution.
-    /// Kept for backward compatibility with HuntyCore. For full config support use distribute_rewards.
+    /// Legacy entry point for XLM-only distribution.
+    /// Kept for backward compatibility with HuntyCore. For NFT or full config support use distribute_rewards.
     ///
-    /// Note: When nft_enabled is true, NFT distribution is NOT performed by this legacy path
-    /// (metadata/contract not available). Use distribute_rewards with RewardConfig for NFT support.
+    /// Note: `nft_enabled` is ignored — NFT distribution requires metadata and a contract address
+    /// that are not available on this path. Use `distribute_rewards` with `RewardConfig` instead.
     pub fn distribute_rewards_legacy(
         env: Env,
         player: Address,
         hunt_id: u64,
         xlm_amount: i128,
-        _nft_enabled: bool,
+        _nft_enabled: bool, // ignored: NFT not supported on legacy path
     ) -> bool {
         let config = RewardConfig {
             xlm_amount: if xlm_amount > 0 {
