@@ -260,17 +260,15 @@ impl Storage {
         let count_key = Self::clue_list_count_key(hunt_id);
         let count: u32 = env.storage().instance().get(&count_key).unwrap_or(0);
 
-        // Scan existing entries to avoid duplicates
-        for i in 0..count {
-            let entry_key = Self::clue_entry_key(hunt_id, i);
-            let stored: u32 = env.storage().instance().get(&entry_key).unwrap_or(u32::MAX);
-            if stored == clue_id {
-                return;
-            }
+        // O(1) existence check
+        let exist_key = (symbol_short!("CLEX"), hunt_id, clue_id);
+        if env.storage().instance().has(&exist_key) {
+            return;
         }
 
         env.storage().instance().set(&Self::clue_entry_key(hunt_id, count), &clue_id);
         env.storage().instance().set(&count_key, &(count + 1));
+        env.storage().instance().set(&exist_key, &());
     }
 
     /// Retrieves all clue IDs for a hunt by reading individual entries.
@@ -293,17 +291,15 @@ impl Storage {
         let count_key = Self::player_count_key(hunt_id);
         let count: u32 = env.storage().persistent().get(&count_key).unwrap_or(0);
 
-        // Scan existing entries to avoid duplicates
-        for i in 0..count {
-            let entry_key = Self::player_entry_key(hunt_id, i);
-            let stored: Option<Address> = env.storage().persistent().get(&entry_key);
-            if stored.as_ref() == Some(player) {
-                return;
-            }
+        // O(1) existence check
+        let exist_key = (symbol_short!("PLEX"), hunt_id, player.clone());
+        if env.storage().persistent().has(&exist_key) {
+            return;
         }
 
         env.storage().persistent().set(&Self::player_entry_key(hunt_id, count), player);
         env.storage().persistent().set(&count_key, &(count + 1));
+        env.storage().persistent().set(&exist_key, &());
     }
 
     /// Retrieves all player addresses for a hunt by reading individual entries.
