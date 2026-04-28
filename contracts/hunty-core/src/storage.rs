@@ -1,5 +1,5 @@
 use crate::errors::HuntError;
-use crate::types::{Clue, Hunt, PlayerProgress};
+use crate::types::{Clue, Hunt, PlayerProgress, StoredPlayerProgress};
 use soroban_sdk::{symbol_short, Address, Env, Vec};
 
 /// Storage access layer for hunts, clues, and player progress.
@@ -139,9 +139,9 @@ impl Storage {
     /// * `env` - The Soroban environment
     /// * `progress` - The PlayerProgress struct to store
     pub fn save_player_progress(env: &Env, progress: &PlayerProgress) {
-        // Store the progress with composite key (hunt_id + player address)
+        // Store only the compact form — player and hunt_id are already the key
         let key = Self::progress_key(progress.hunt_id, &progress.player);
-        env.storage().persistent().set(&key, progress);
+        env.storage().persistent().set(&key, &progress.to_stored());
 
         // Update the list of players for this hunt
         Self::add_player_to_list(env, progress.hunt_id, &progress.player);
@@ -162,7 +162,10 @@ impl Storage {
         player: &Address,
     ) -> Option<PlayerProgress> {
         let key = Self::progress_key(hunt_id, player);
-        env.storage().persistent().get(&key)
+        env.storage()
+            .persistent()
+            .get::<_, StoredPlayerProgress>(&key)
+            .map(|stored| PlayerProgress::from_stored(stored, player.clone(), hunt_id))
     }
 
     /// Retrieves player progress or returns an error if not found.
