@@ -1309,6 +1309,52 @@ mod test {
     }
 
     #[test]
+    fn test_register_player_allowed_after_reactivation() {
+        // A player who registered in a previous activation cycle must be able to
+        // re-register after the hunt is deactivated and reactivated.
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let creator = Address::generate(&env);
+        let player = Address::generate(&env);
+        let question = String::from_str(&env, "Q");
+        let answer = String::from_str(&env, "a");
+
+        with_core_contract(&env, |env, _cid| {
+            env.ledger().set_timestamp(1_000);
+            let hunt_id = HuntyCore::create_hunt(
+                env.clone(),
+                creator.clone(),
+                String::from_str(env, "Hunt"),
+                String::from_str(env, "Desc"),
+                None,
+                None,
+            )
+            .unwrap();
+            HuntyCore::add_clue(env.clone(), hunt_id, question, answer, 1, true).unwrap();
+
+            // First activation — player registers
+            HuntyCore::activate_hunt(env.clone(), hunt_id, creator.clone()).unwrap();
+            HuntyCore::register_player(env.clone(), hunt_id, player.clone()).unwrap();
+
+            // Creator deactivates then reactivates (new cycle)
+            HuntyCore::deactivate_hunt(env.clone(), hunt_id, creator.clone()).unwrap();
+            env.ledger().set_timestamp(2_000);
+            HuntyCore::activate_hunt(env.clone(), hunt_id, creator.clone()).unwrap();
+
+            // Player should be able to register again — old progress is stale
+            HuntyCore::register_player(env.clone(), hunt_id, player.clone()).unwrap();
+
+            // But a second call in the same cycle must still be rejected
+            let err =
+                HuntyCore::register_player(env.clone(), hunt_id, player.clone()).unwrap_err();
+            assert_eq!(err, HuntErrorCode::DuplicateRegistration);
+
+            Ok(())
+        });
+    }
+
+    #[test]
     fn test_register_player_hunt_not_found() {
         let env = Env::default();
         env.ledger().set_timestamp(1_700_000_000);
