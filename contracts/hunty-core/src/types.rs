@@ -97,6 +97,20 @@ impl Default for Location {
     }
 }
 
+/// Internal storage representation of player progress.
+/// Does not store `player` or `hunt_id` — those are already the storage key.
+#[contracttype]
+#[derive(Clone, Debug)]
+pub struct StoredPlayerProgress {
+    pub completed_clues: Vec<u32>,
+    pub total_score: u32,
+    pub started_at: u64,
+    pub completed_at: u64,
+    pub is_completed: bool,
+    pub reward_claimed: bool,
+}
+
+/// Public view of player progress, with `player` and `hunt_id` reconstructed from the key.
 #[contracttype]
 #[derive(Clone, Debug)]
 pub struct PlayerProgress {
@@ -121,6 +135,32 @@ impl PlayerProgress {
             completed_at: 0,
             is_completed: false,
             reward_claimed: false,
+        }
+    }
+
+    /// Convert to the compact form stored on-chain (drops redundant key fields).
+    pub fn to_stored(&self) -> StoredPlayerProgress {
+        StoredPlayerProgress {
+            completed_clues: self.completed_clues.clone(),
+            total_score: self.total_score,
+            started_at: self.started_at,
+            completed_at: self.completed_at,
+            is_completed: self.is_completed,
+            reward_claimed: self.reward_claimed,
+        }
+    }
+
+    /// Reconstruct from stored form plus the key fields.
+    pub fn from_stored(stored: StoredPlayerProgress, player: Address, hunt_id: u64) -> Self {
+        Self {
+            player,
+            hunt_id,
+            completed_clues: stored.completed_clues,
+            total_score: stored.total_score,
+            started_at: stored.started_at,
+            completed_at: stored.completed_at,
+            is_completed: stored.is_completed,
+            reward_claimed: stored.reward_claimed,
         }
     }
 
