@@ -615,8 +615,13 @@ impl HuntyCore {
             return Err(HuntErrorCode::HuntNotActive);
         }
 
-        if Storage::get_player_progress(&env, hunt_id, &player).is_some() {
-            return Err(HuntErrorCode::DuplicateRegistration);
+        if let Some(existing) = Storage::get_player_progress(&env, hunt_id, &player) {
+            // Allow re-registration only if the existing progress is from a previous
+            // activation cycle (i.e. the hunt was deactivated and reactivated since
+            // the player registered). Otherwise reject as a duplicate.
+            if existing.started_at >= hunt.activated_at {
+                return Err(HuntErrorCode::DuplicateRegistration);
+            }
         }
 
         let progress = PlayerProgress::new(&env, player.clone(), hunt_id, current_time);
