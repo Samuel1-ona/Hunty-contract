@@ -490,10 +490,28 @@ impl HuntyCore {
             return Err(HuntErrorCode::InsufficientRewardPool);
         }
 
-        let reward_amount = hunt.reward_config.reward_per_winner();
         let nft_awarded = hunt.reward_config.nft_enabled;
 
         // Call RewardManager if configured and there are rewards to distribute
+        let reward_amount = if let Some(reward_manager_addr) = Storage::get_reward_manager(env) {
+            let mut balance_args: Vec<Val> = Vec::new(env);
+            balance_args.push_back(hunt_id.into_val(env));
+
+            let pool_balance = env
+                .try_invoke_contract::<i128, RewardErrorCode>(
+                    &reward_manager_addr,
+                    &Symbol::new(env, "get_pool_balance"),
+                    balance_args,
+                )
+                .map_err(|_| HuntErrorCode::RewardDistributionFailed)?
+                .map_err(|_| HuntErrorCode::RewardDistributionFailed)?;
+
+            hunt.reward_config.xlm_pool = pool_balance;
+            hunt.reward_config.reward_per_winner()
+        } else {
+            hunt.reward_config.reward_per_winner()
+        };
+
         if let Some(reward_manager_addr) = Storage::get_reward_manager(env) {
             let xlm_amount = if reward_amount > 0 {
                 Some(reward_amount)

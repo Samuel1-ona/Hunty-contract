@@ -1350,7 +1350,7 @@ mod test {
                 HuntyCore::register_player(env.clone(), hunt_id, player.clone()).unwrap_err();
             assert_eq!(err, HuntErrorCode::DuplicateRegistration);
 
-            Ok(())
+            
         });
     }
 
@@ -2250,6 +2250,98 @@ mod test {
             nft.metadata.title,
             SorobanString::from_str(&env, "Integrated Hunt")
         );
+    }
+
+    #[test]
+    fn test_complete_hunt_uses_reward_manager_pool_balance_when_local_pool_is_zero() {
+        let env = Env::default();
+        env.ledger().set_timestamp(1_700_000_000);
+
+        let creator = Address::generate(&env);
+        let player = Address::generate(&env);
+        let funder = Address::generate(&env);
+
+        let (reward_manager_id, token_address, token_admin) = setup_reward_manager(&env, None);
+        let core_id = env.register_contract(None, HuntyCore);
+
+        let hunt_id = as_core_contract(&env, &core_id, |env| {
+            let hunt_id = HuntyCore::create_hunt(
+                env.clone(),
+                creator.clone(),
+                SorobanString::from_str(env, "Pool-backed hunt"),
+                SorobanString::from_str(env, "Uses reward manager balance"),
+                None,
+                None,
+            )
+            .unwrap();
+
+            HuntyCore::add_clue(
+                env.clone(),
+                hunt_id,
+                SorobanString::from_str(env, "1+1?"),
+                SorobanString::from_str(env, "2"),
+                10,
+                true,
+            )
+            .unwrap();
+
+            let mut hunt = Storage::get_hunt(env, hunt_id).unwrap();
+            hunt.reward_config = crate::types::RewardConfig::new(0, false, None, 3, 0, 0);
+            Storage::save_hunt(env, &hunt);
+
+            HuntyCore::activate_hunt(env.clone(), hunt_id, creator.clone()).unwrap();
+
+            hunt_id
+        });
+
+        let token_client = token::StellarAssetClient::new(&env, &token_address);
+        token_client.mint(&funder, &9_000);
+        let _ = token_admin;
+
+        env.as_contract(&reward_manager_id, || {
+            RewardManager::create_reward_pool(env.clone(), funder.clone(), hunt_id, 0).unwrap();
+        });
+        env.mock_all_auths();
+        env.as_contract(&reward_manager_id, || {
+            RewardManager::fund_reward_pool(env.clone(), funder.clone(), hunt_id, 9_000).unwrap();
+        });
+
+        env.mock_all_auths();
+        as_core_contract(&env, &core_id, |env| {
+            HuntyCore::set_reward_manager(env.clone(), reward_manager_id.clone());
+        });
+
+        env.mock_all_auths();
+        as_core_contract(&env, &core_id, |env| {
+            HuntyCore::register_player(env.clone(), hunt_id, player.clone()).unwrap();
+        });
+        env.mock_all_auths();
+        as_core_contract(&env, &core_id, |env| {
+            HuntyCore::submit_answer(
+                env.clone(),
+                hunt_id,
+                1,
+                player.clone(),
+                SorobanString::from_str(env, "2"),
+            )
+            .unwrap();
+        });
+        env.mock_all_auths();
+        as_core_contract(&env, &core_id, |env| {
+            HuntyCore::complete_hunt(env.clone(), hunt_id, player.clone()).unwrap();
+        });
+
+        let player_balance = token::Client::new(&env, &token_address).balance(&player);
+        assert_eq!(player_balance, 3_000);
+
+        env.as_contract(&reward_manager_id, || {
+            assert_eq!(RewardManager::get_pool_balance(env.clone(), hunt_id), 6_000);
+        });
+
+        let hunt = as_core_contract(&env, &core_id, |env| {
+            HuntyCore::get_hunt_info(env.clone(), hunt_id).unwrap()
+        });
+        assert_eq!(hunt.reward_config.xlm_pool, 9_000);
     }
 
     #[test]
