@@ -794,6 +794,41 @@ mod test {
     }
 
     #[test]
+    fn test_add_clue_after_activation_fails() {
+        let env = Env::default();
+        env.ledger().set_timestamp(1_700_000_000);
+        env.mock_all_auths();
+        let creator = Address::generate(&env);
+        let title = String::from_str(&env, "Hunt");
+        let description = String::from_str(&env, "Desc");
+        let question = String::from_str(&env, "Q");
+        let answer = String::from_str(&env, "a");
+
+        let err = with_core_contract(&env, |env, _cid| {
+            let hid = HuntyCore::create_hunt(
+                env.clone(),
+                creator.clone(),
+                title,
+                description,
+                None,
+                None,
+            )
+            .unwrap();
+
+            // Add a required clue to allow activation
+            HuntyCore::add_clue(env.clone(), hid, question.clone(), answer.clone(), 1, true).unwrap();
+
+            // Activate the hunt
+            HuntyCore::activate_hunt(env.clone(), hid, creator.clone()).unwrap();
+
+            // Attempt to add a clue after activation (should fail)
+            HuntyCore::add_clue(env.clone(), hid, question, answer, 1, false).unwrap_err()
+        });
+
+        assert_eq!(err, HuntErrorCode::InvalidHuntStatus);
+    }
+
+    #[test]
     fn test_add_clue_invalid_question_too_long() {
         let env = Env::default();
         env.ledger().set_timestamp(1_700_000_000);
