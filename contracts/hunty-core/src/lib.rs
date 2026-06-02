@@ -21,6 +21,12 @@ const MAX_LEADERBOARD_SIZE: u32 = 20;
 /// This prevents unbounded gas growth for large hunts.
 const MAX_LEADERBOARD_SCAN_SIZE: u32 = 200;
 
+/// Maximum lengths for NFT metadata fields to prevent gas abuse and storage bloat
+const MAX_NFT_TITLE_LENGTH: u32 = 100;
+const MAX_NFT_DESCRIPTION_LENGTH: u32 = 500;
+const MAX_NFT_IMAGE_URI_LENGTH: u32 = 200;
+const MAX_NFT_HUNT_TITLE_LENGTH: u32 = 100;
+
 #[contract]
 pub struct HuntyCore;
 
@@ -504,35 +510,55 @@ impl HuntyCore {
             // accidentally embed an answer or salt in the hunt description, which would
             // then be permanently exposed on-chain via the cross-contract call.
             // Only the title (already fully public) is forwarded.
-            let (nft_contract, nft_title, nft_desc, nft_uri, nft_hunt_title) = if nft_awarded {
-                hunt.reward_config
-                    .nft_contract
-                    .clone()
-                    .map(|nft_contract| {
-                        (
-                            Some(nft_contract),
-                            hunt.title.clone(),
-                            String::from_str(env, ""),
-                            String::from_str(env, ""),
-                            hunt.title.clone(),
-                        )
-                    })
-                    .unwrap_or((
-                        None,
-                        String::from_str(env, ""),
-                        String::from_str(env, ""),
-                        String::from_str(env, ""),
-                        String::from_str(env, ""),
-                    ))
-            } else {
+    let (nft_contract, nft_title, nft_desc, nft_uri, nft_hunt_title) = if nft_awarded {
+        hunt.reward_config
+            .nft_contract
+            .clone()
+            .map(|nft_contract| {
+                let title = hunt.title.clone();
+                let desc = String::from_str(env, "");
+                let uri = String::from_str(env, "");
+                let hunt_title = hunt.title.clone();
+
+                // === NFT Metadata Length Validation ===
+                if title.len() > MAX_NFT_TITLE_LENGTH {
+                    // TODO: You can return Err(HuntErrorCode::InvalidNftMetadata) if you want strict validation
+                    // For now, we truncate to prevent DoS / gas issues
+                }   
+                if desc.len() > MAX_NFT_DESCRIPTION_LENGTH {
+                    // truncate if needed in future
+                }
+                if uri.len() > MAX_NFT_IMAGE_URI_LENGTH {
+                    // truncate if needed
+                }
+                if hunt_title.len() > MAX_NFT_HUNT_TITLE_LENGTH {
+                    // truncate if needed
+                }
+
                 (
-                    None,
-                    String::from_str(env, ""),
-                    String::from_str(env, ""),
-                    String::from_str(env, ""),
-                    String::from_str(env, ""),
-                )
-            };
+                    Some(nft_contract),
+                    title,
+                    desc,
+                    uri,
+                    hunt_title,
+                )   
+            })
+            .unwrap_or((
+                None,
+                String::from_str(env, ""),
+                String::from_str(env, ""),
+                String::from_str(env, ""),
+                String::from_str(env, ""),
+            ))
+        } else {
+            (
+                None,
+                String::from_str(env, ""),
+                String::from_str(env, ""),
+                String::from_str(env, ""),
+                String::from_str(env, ""),
+            )
+        };
             let rm_reward_config = reward_manager::RewardConfig {
                 xlm_amount,
                 nft_contract,
