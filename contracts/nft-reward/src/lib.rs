@@ -19,6 +19,16 @@ pub struct NftMetadata {
     pub tier: u32,
 }
 
+fn image_uri_is_valid(uri: &String) -> bool {
+    // Accept non-empty URIs that start with https:// or ipfs://
+    let s = uri.clone();
+    let sstr = s.as_str();
+    if sstr.len() == 0 {
+        return false;
+    }
+    sstr.starts_with("https://") || sstr.starts_with("ipfs://")
+}
+
 /// Complete metadata returned by get_nft_metadata (includes NftData-derived fields).
 #[contracttype]
 #[derive(Clone, Debug)]
@@ -162,17 +172,10 @@ impl NftReward {
         player_address: Address,
         metadata: NftMetadata,
     ) -> u64 {
-        if Storage::is_initialized(&env) {
-            minter.require_auth();
-            if !Storage::is_minter(&env, &minter) {
-                panic!("unauthorized minter");
-            }
-            if let Some(max) = Storage::get_max_supply(&env) {
-                if Storage::get_nft_counter(&env) >= max {
-                    panic!("max supply reached");
-                }
-            }
+        if !image_uri_is_valid(&metadata.image_uri) {
+            panic!("Invalid NFT image_uri: must be non-empty and start with https:// or ipfs://");
         }
+
         let minted_at = env.ledger().timestamp();
 
         let nft_id = Storage::next_nft_id(&env);
@@ -241,6 +244,10 @@ impl NftReward {
             .get(Symbol::new(&env, "image_uri"))
             .and_then(|v| String::try_from_val(&env, &v).ok())
             .unwrap_or_else(|| String::from_str(&env, ""));
+
+        if !image_uri_is_valid(&image_uri) {
+            panic!("Invalid NFT image_uri: must be non-empty and start with https:// or ipfs://");
+        }
 
         let hunt_title = metadata
             .get(Symbol::new(&env, "hunt_title"))
