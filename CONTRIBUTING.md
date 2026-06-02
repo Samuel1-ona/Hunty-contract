@@ -89,6 +89,7 @@ Head over to [GitHub Issues](https://github.com/Samuel1-ona/Hunty-contract/issue
 - **documentation** 📝 - Help us explain things better - great for writers!
 - **refactor** 🔧 - Making code cleaner and more maintainable
 
+
 ### Still Not Sure?
 
 If you're feeling overwhelmed, start with:
