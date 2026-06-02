@@ -274,6 +274,24 @@ mod test {
     }
 
     #[test]
+    #[should_panic]
+    fn test_fund_reward_pool_requires_creator_auth() {
+        let env = Env::default();
+        // Do NOT mock auths here to test require_auth rejection
+        let (contract_id, token_address, _) = setup(&env);
+        let creator = Address::generate(&env);
+
+        env.as_contract(&contract_id, || {
+            initialize_contract(&env, &token_address);
+            crate::storage::Storage::set_pool_config(&env, 1, &crate::types::RewardPoolConfig {
+                creator: creator.clone(),
+                min_distribution_amount: 0,
+            });
+            let _ = RewardManager::fund_reward_pool(env.clone(), creator.clone(), 1, 1_000);
+        });
+    }
+
+    #[test]
     fn test_fund_reward_pool_additive() {
         let env = Env::default();
         env.mock_all_auths_allowing_non_root_auth();
