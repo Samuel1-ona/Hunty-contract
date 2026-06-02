@@ -803,13 +803,16 @@ impl HuntyCore {
         }
     }
 
-    /// Returns the top N players by score for a hunt (read-only).
+    /// Returns ranked players for a hunt with pagination support (read-only).
     /// Sorted by score descending, then by completion time ascending (earlier = better).
-    /// Limit is capped at 20 to control gas. Returns error if hunt does not exist.
+    /// `offset` skips that many top-ranked entries; `limit` is capped at MAX_LEADERBOARD_SIZE.
+    /// Returned `rank` values are absolute (offset+1, offset+2, …).
+    /// Returns error if hunt does not exist.
     pub fn get_hunt_leaderboard(
         env: Env,
         hunt_id: u64,
         limit: u32,
+        offset: u32,
     ) -> Result<Vec<LeaderboardEntry>, HuntErrorCode> {
         let _ = Storage::get_hunt(&env, hunt_id).ok_or(HuntErrorCode::HuntNotFound)?;
         let effective_limit = core::cmp::min(limit, MAX_LEADERBOARD_SIZE);
@@ -827,13 +830,21 @@ impl HuntyCore {
             ));
         }
         let mut selected = Vec::new(&env);
+        // Skip `offset` top-ranked entries
+        for _ in 0..offset {
+            if let Some(best_idx) = Self::leaderboard_best_index(&entries, &selected) {
+                selected.push_back(best_idx);
+            } else {
+                break;
+            }
+        }
         let mut result = Vec::new(&env);
-        for rank in 1..=effective_limit {
+        for rank_offset in 1..=effective_limit {
             if let Some(best_idx) = Self::leaderboard_best_index(&entries, &selected) {
                 selected.push_back(best_idx);
                 let (player, score, completed_at, is_completed) = entries.get(best_idx).unwrap();
                 result.push_back(LeaderboardEntry {
-                    rank,
+                    rank: offset + rank_offset,
                     player,
                     score,
                     completed_at,
