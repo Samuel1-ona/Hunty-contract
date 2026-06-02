@@ -2194,7 +2194,7 @@ mod test {
             let err = HuntyCore::register_player(env.clone(), hunt_id, player.clone()).unwrap_err();
             assert_eq!(err, HuntErrorCode::DuplicateRegistration);
 
-            Ok::<(), HuntErrorCode>(())
+            Ok::<(), soroban_sdk::Error>(())
         });
     }
 
