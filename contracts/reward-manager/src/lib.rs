@@ -30,6 +30,7 @@ pub struct RewardPoolFundedEvent {
     pub funder: Address,
     pub amount: i128,
     pub new_balance: i128,
+    pub total_deposited: i128,
 }
 
 /// Event emitted when rewards are successfully distributed.
@@ -189,6 +190,7 @@ impl RewardManager {
                 funder,
                 amount,
                 new_balance,
+                total_deposited,
             },
         );
 
@@ -347,6 +349,9 @@ impl RewardManager {
             // Track cumulative distributed amount
             let total_distributed = Storage::get_pool_total_distributed(&env, hunt_id) + amount;
             Storage::set_pool_total_distributed(&env, hunt_id, total_distributed);
+            // Update protocol-level global total distributed
+            let global_total = Storage::get_total_xlm_distributed(&env) + amount;
+            Storage::set_total_xlm_distributed(&env, global_total);
         }
 
         // Route to NFT handler if configured
@@ -394,6 +399,13 @@ impl RewardManager {
         env.events()
             .publish((symbol_short!("RWD_DIST"), hunt_id), event);
 
+        Ok(())
+
+
+    /// Returns the total XLM distributed across all hunts (protocol-level metric).
+    pub fn get_total_xlm_distributed(env: Env) -> i128 {
+        Storage::get_total_xlm_distributed(&env)
+    }
         Ok(())
     }
 
