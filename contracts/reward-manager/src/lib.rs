@@ -101,7 +101,6 @@ impl RewardManager {
         hunt_id: u64,
         min_distribution_amount: i128,
     ) -> Result<(), RewardErrorCode> {
-        #[cfg(not(test))]
         creator.require_auth();
 
         if min_distribution_amount < 0 {
@@ -152,7 +151,6 @@ impl RewardManager {
         hunt_id: u64,
         amount: i128,
     ) -> Result<(), RewardErrorCode> {
-        #[cfg(not(test))]
         funder.require_auth();
 
         if amount <= 0 {
@@ -202,6 +200,9 @@ impl RewardManager {
         creator: Address,
         hunt_id: u64,
     ) -> Result<(), RewardErrorCode> {
+        #[cfg(not(test))]
+        creator.require_auth();
+
         let pool_config = Storage::get_pool_config(&env, hunt_id)
             .ok_or(RewardErrorCode::PoolNotFound)?;
         if creator != pool_config.creator {
@@ -351,6 +352,9 @@ impl RewardManager {
 
         // Route to NFT handler if configured
         if reward_config.has_nft() {
+            if reward_config.nft_rarity > 5 {
+                return Err(RewardErrorCode::InvalidConfig);
+            }
             let nft_contract = reward_config
                 .nft_contract
                 .as_ref()
@@ -369,7 +373,7 @@ impl RewardManager {
                 reward_config.nft_hunt_title.clone(),
                 reward_config.nft_rarity,
                 reward_config.nft_tier,
-            ));
+            )?);
         }
 
         // All operations succeeded — update state atomically
@@ -480,7 +484,6 @@ impl RewardManager {
         hunt_id: u64,
         recipient: Address,
     ) -> Result<(), RewardErrorCode> {
-        #[cfg(not(test))]
         admin.require_auth();
 
         let configured_admin = Storage::get_admin(&env).ok_or(RewardErrorCode::NotInitialized)?;

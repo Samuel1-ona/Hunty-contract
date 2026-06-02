@@ -1,5 +1,7 @@
 use soroban_sdk::{Address, Env, IntoVal, Map, Symbol};
 
+use crate::errors::RewardErrorCode;
+
 pub struct NftHandler;
 
 impl NftHandler {
@@ -30,7 +32,7 @@ impl NftHandler {
         hunt_title: soroban_sdk::String,
         rarity: u32,
         tier: u32,
-    ) -> u64 {
+    ) -> Result<u64, RewardErrorCode> {
         let mut metadata: Map<soroban_sdk::Symbol, soroban_sdk::Val> = Map::new(env);
         metadata.set(soroban_sdk::Symbol::new(env, "title"), title.into_val(env));
         metadata.set(
@@ -53,10 +55,12 @@ impl NftHandler {
         args.push_back(player.clone().into_val(env));
         args.push_back(metadata.into_val(env));
 
-        env.invoke_contract(
+        env.try_invoke_contract(
             nft_contract,
             &Symbol::new(env, "mint_reward_nft_from_map"),
             args,
         )
+        .map_err(|_| RewardErrorCode::NftMintFailed)?
+        .map_err(|_| RewardErrorCode::NftMintFailed)
     }
 }
