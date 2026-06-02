@@ -2,16 +2,19 @@
 
 Hey there! 👋 Thanks for wanting to contribute to Hunty. We're excited to have you on board! This guide will help you get started and make your first contribution smooth and enjoyable.
 
+
 ## First Things First
 
 Before diving in, let's make sure you have everything you need to get started. Don't worry if you're new to Soroban or Rust - we've all been there, and we're here to help!
 
 ### What You'll Need
 
+
 - **Rust** - We're using the latest stable version, so make sure yours is up to date
 - **Stellar CLI** - You'll need the `stellar` command installed for building contracts
 - **Git** - For version control (you probably already have this!)
 - **Basic Soroban knowledge** - Don't worry if you're still learning! We have good first issues that are perfect for getting your feet wet
+
 
 ### Getting Your Environment Ready
 

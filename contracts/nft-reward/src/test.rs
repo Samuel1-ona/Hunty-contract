@@ -4,7 +4,7 @@ extern crate std;
 use crate::{NftMetadata, NftMintedEvent, NftReward, NftRewardClient};
 use soroban_sdk::{
     testutils::{Address as _, Events as _, Ledger as _},
-    Address, Env, String, Symbol, TryFromVal, Val, Vec,
+    Address, Env, IntoVal, Map, String, Symbol, Val,
 };
 
 fn setup_env() -> Env {
@@ -69,6 +69,18 @@ fn test_mint_reward_nft() {
     assert_eq!(nft.metadata.description, metadata.description);
     assert_eq!(nft.metadata.image_uri, metadata.image_uri);
     assert_eq!(nft.minted_at, 1000);
+}
+
+fn create_transferable_metadata(env: &Env, title: &str, desc: &str, image_uri: &str) -> Map<Symbol, Val> {
+    let mut metadata: Map<Symbol, Val> = Map::new(env);
+    metadata.set(Symbol::new(env, "title"), String::from_str(env, title).into_val(env));
+    metadata.set(Symbol::new(env, "description"), String::from_str(env, desc).into_val(env));
+    metadata.set(Symbol::new(env, "image_uri"), String::from_str(env, image_uri).into_val(env));
+    metadata.set(Symbol::new(env, "hunt_title"), String::from_str(env, title).into_val(env));
+    metadata.set(Symbol::new(env, "rarity"), 0u32.into_val(env));
+    metadata.set(Symbol::new(env, "tier"), 0u32.into_val(env));
+    metadata.set(Symbol::new(env, "transferable"), true.into_val(env));
+    metadata
 }
 
 #[test]
@@ -313,16 +325,15 @@ fn test_update_nft_metadata_preserves_immutable_fields() {
 }
 
 #[test]
-#[should_panic]
 fn test_transfer_nft_success() {
     let env = setup_env();
     let client = NftRewardClient::new(&env, &env.register_contract(None, NftReward));
 
     let from = Address::generate(&env);
     let to = Address::generate(&env);
-    let metadata = create_metadata(&env, "Transfer NFT", "Test transfer", "ipfs://transfer");
+    let metadata = create_transferable_metadata(&env, "Transfer NFT", "Test transfer", "ipfs://transfer");
 
-    let nft_id = client.mint_reward_nft(&1, &from, &metadata);
+    let nft_id = client.mint_reward_nft_from_map(&1, &from, &metadata);
     assert_eq!(client.owner_of(&nft_id), Some(from.clone()));
 
     client.transfer_nft(&nft_id, &from, &to);
@@ -341,10 +352,9 @@ fn test_transfer_nft_updates_player_nfts() {
 
     let alice = Address::generate(&env);
     let bob = Address::generate(&env);
-    let metadata1 = create_metadata(&env, "NFT 1", "Desc 1", "ipfs://1");
     let metadata2 = create_metadata(&env, "NFT 2", "Desc 2", "ipfs://2");
-
-    let nft1 = client.mint_reward_nft(&1, &alice, &metadata1);
+    let metadata1 = create_transferable_metadata(&env, "NFT 1", "Desc 1", "ipfs://1");
+    let nft1 = client.mint_reward_nft_from_map(&1, &alice, &metadata1);
     let nft2 = client.mint_reward_nft(&2, &alice, &metadata2);
 
     let alice_nfts = client.get_player_nfts(&alice);
@@ -430,9 +440,9 @@ fn test_transfer_nft_emits_event() {
 
     let from = Address::generate(&env);
     let to = Address::generate(&env);
-    let metadata = create_metadata(&env, "Event NFT", "Desc", "ipfs://event");
+    let metadata = create_transferable_metadata(&env, "Event NFT", "Desc", "ipfs://event");
 
-    let nft_id = client.mint_reward_nft(&1, &from, &metadata);
+    let nft_id = client.mint_reward_nft_from_map(&1, &from, &metadata);
     client.transfer_nft(&nft_id, &from, &to);
 
     // Transfer succeeded; NftTransferred event is emitted by transfer_nft
@@ -461,4 +471,48 @@ fn test_get_nft_owner_matches_owner_of() {
 
     assert_eq!(client.owner_of(&nft_id), client.get_nft_owner(&nft_id));
     assert_eq!(client.get_nft_owner(&nft_id), Some(player));
+}
+
+#[test]
+fn test_burn_removes_nft_and_clears_owner_list() {
+    let env = setup_env();
+    let client = NftRewardClient::new(&env, &env.register_contract(None, NftReward));
+
+    let owner = Address::generate(&env);
+    let metadata = create_metadata(&env, "Burn Me", "Desc", "ipfs://burn");
+
+    let nft_id = client.mint_reward_nft(&1, &owner, &metadata);
+    assert!(client.get_nft(&nft_id).is_some());
+
+    client.burn(&nft_id, &owner).unwrap();
+
+    assert!(client.get_nft(&nft_id).is_none());
+    assert_eq!(client.get_player_nfts(&owner).len(), 0);
+}
+
+#[test]
+fn test_burn_fails_if_not_owner() {
+    let env = setup_env();
+    let client = NftRewardClient::new(&env, &env.register_contract(None, NftReward));
+
+    let owner = Address::generate(&env);
+    let other = Address::generate(&env);
+    let metadata = create_metadata(&env, "Not Yours", "Desc", "ipfs://notyours");
+
+    let nft_id = client.mint_reward_nft(&1, &owner, &metadata);
+
+    let result = client.try_burn(&nft_id, &other);
+    assert!(result.is_err());
+    // NFT must still exist
+    assert!(client.get_nft(&nft_id).is_some());
+}
+
+#[test]
+fn test_burn_fails_for_nonexistent_nft() {
+    let env = setup_env();
+    let client = NftRewardClient::new(&env, &env.register_contract(None, NftReward));
+
+    let owner = Address::generate(&env);
+    let result = client.try_burn(&999u64, &owner);
+    assert!(result.is_err());
 }

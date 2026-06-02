@@ -79,6 +79,13 @@ impl Storage {
         Self::add_clue_to_list(env, hunt_id, clue.clue_id);
     }
 
+    /// Removes a clue and its per-hunt index entry.
+    pub fn remove_clue(env: &Env, hunt_id: u64, clue_id: u32) {
+        let key = Self::clue_key(hunt_id, clue_id);
+        env.storage().instance().remove(&key);
+        Self::remove_clue_from_list(env, hunt_id, clue_id);
+    }
+
     /// Retrieves an individual clue by hunt_id and clue_id.
     ///
     /// # Arguments
@@ -264,7 +271,7 @@ impl Storage {
         let count: u32 = env.storage().instance().get(&count_key).unwrap_or(0);
 
         // O(1) existence check
-        let exist_key = (symbol_short!("CLEX"), hunt_id, clue_id);
+        let exist_key = Self::clue_exists_key(hunt_id, clue_id);
         if env.storage().instance().has(&exist_key) {
             return;
         }
@@ -272,6 +279,41 @@ impl Storage {
         env.storage().instance().set(&Self::clue_entry_key(hunt_id, count), &clue_id);
         env.storage().instance().set(&count_key, &(count + 1));
         env.storage().instance().set(&exist_key, &());
+    }
+
+    /// Removes a clue ID from the per-hunt clue index, preserving remaining order.
+    fn remove_clue_from_list(env: &Env, hunt_id: u64, clue_id: u32) {
+        let count_key = Self::clue_list_count_key(hunt_id);
+        let count: u32 = env.storage().instance().get(&count_key).unwrap_or(0);
+        let mut found = false;
+
+        for i in 0..count {
+            let entry_key = Self::clue_entry_key(hunt_id, i);
+            if found {
+                let prev_key = Self::clue_entry_key(hunt_id, i - 1);
+                if let Some(id) = env.storage().instance().get::<_, u32>(&entry_key) {
+                    env.storage().instance().set(&prev_key, &id);
+                } else {
+                    env.storage().instance().remove(&prev_key);
+                }
+                continue;
+            }
+
+            if env.storage().instance().get::<_, u32>(&entry_key) == Some(clue_id) {
+                found = true;
+            }
+        }
+
+        if found {
+            let new_count = count - 1;
+            env.storage()
+                .instance()
+                .remove(&Self::clue_entry_key(hunt_id, new_count));
+            env.storage().instance().set(&count_key, &new_count);
+            env.storage()
+                .instance()
+                .remove(&Self::clue_exists_key(hunt_id, clue_id));
+        }
     }
 
     /// Retrieves all clue IDs for a hunt by reading individual entries.
@@ -317,6 +359,10 @@ impl Storage {
             }
         }
         addrs
+    }
+
+    fn clue_exists_key(hunt_id: u64, clue_id: u32) -> (soroban_sdk::Symbol, u64, u32) {
+        (symbol_short!("CLEX"), hunt_id, clue_id)
     }
 
     // ========== Hunt Counter Functions ==========

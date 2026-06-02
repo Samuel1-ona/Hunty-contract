@@ -46,6 +46,7 @@ pub struct NftData {
     /// Player who completed the hunt (preserved after transfers).
     pub completion_player: Address,
     pub metadata: NftMetadata,
+    pub transferable: bool,
     pub minted_at: u64,
 }
 
@@ -104,6 +105,9 @@ impl NftReward {
         player_address: Address,
         metadata: NftMetadata,
     ) -> u64 {
+        if metadata.rarity > 5 {
+            panic!("InvalidRarity");
+        }
         let minted_at = env.ledger().timestamp();
 
         let nft_id = Storage::next_nft_id(&env);
@@ -114,6 +118,7 @@ impl NftReward {
             owner: player_address.clone(),
             completion_player: player_address.clone(),
             metadata: metadata.clone(),
+            transferable: false,
             minted_at,
         };
 
@@ -146,6 +151,7 @@ impl NftReward {
     /// - "hunt_title": String (defaults to title when omitted/empty)
     /// - "rarity": u32
     /// - "tier": u32
+    /// - "transferable": bool
     pub fn mint_reward_nft_from_map(
         env: Env,
         hunt_id: u64,
@@ -179,10 +185,19 @@ impl NftReward {
             .and_then(|v| u32::try_from_val(&env, &v).ok())
             .unwrap_or(0u32);
 
+        if rarity > 5 {
+            panic!("InvalidRarity");
+        }
+
         let tier = metadata
             .get(Symbol::new(&env, "tier"))
             .and_then(|v| u32::try_from_val(&env, &v).ok())
             .unwrap_or(0u32);
+
+        let transferable = metadata
+            .get(Symbol::new(&env, "transferable"))
+            .and_then(|v| bool::try_from_val(&env, &v).ok())
+            .unwrap_or(false);
 
         let meta = NftMetadata {
             title,
@@ -193,7 +208,33 @@ impl NftReward {
             tier,
         };
 
-        Self::mint_reward_nft(env, hunt_id, player_address, meta)
+        let minted_at = env.ledger().timestamp();
+        let nft_id = Storage::next_nft_id(&env);
+
+        let nft_data = NftData {
+            nft_id,
+            hunt_id,
+            owner: player_address.clone(),
+            completion_player: player_address.clone(),
+            metadata: meta.clone(),
+            transferable,
+            minted_at,
+        };
+
+        Storage::save_nft(&env, &nft_data);
+        Storage::add_nft_to_owner(&env, &player_address, nft_id);
+
+        let event = NftMintedEvent {
+            nft_id,
+            hunt_id,
+            owner: player_address,
+            metadata: meta,
+            minted_at,
+        };
+        env.events()
+            .publish((Symbol::new(&env, "NftMinted"), nft_id), event);
+
+        nft_id
     }
 
     /// Retrieves NFT data by ID.
@@ -271,6 +312,33 @@ impl NftReward {
         Storage::get_owner_nfts(&env, &owner)
     }
 
+    /// Burns (permanently destroys) an NFT, removing it from storage and the owner's list.
+    ///
+    /// # Authorization
+    /// The `owner` must authorize this call. The caller must also be the current owner.
+    pub fn burn(
+        env: Env,
+        nft_id: u64,
+        owner: Address,
+    ) -> Result<(), crate::errors::NftErrorCode> {
+        owner.require_auth();
+
+        let nft = Storage::get_nft(&env, nft_id)
+            .ok_or(crate::errors::NftErrorCode::NftNotFound)?;
+
+        if nft.owner != owner {
+            return Err(crate::errors::NftErrorCode::NotOwner);
+        }
+
+        Storage::remove_nft(&env, nft_id);
+        Storage::remove_nft_from_owner(&env, &owner, nft_id);
+
+        env.events()
+            .publish((Symbol::new(&env, "NftBurned"), nft_id), (nft_id, owner));
+
+        Ok(())
+    }
+
     /// Transfers an NFT from one address to another.
     ///
     /// # Arguments
@@ -283,12 +351,43 @@ impl NftReward {
     /// For automatic transfers during reward distribution, the contract may be
     /// the `from_address` when invoked by an authorized party.
     pub fn transfer_nft(
-        _env: Env,
-        _nft_id: u64,
-        _from_address: Address,
-        _to_address: Address,
+        env: Env,
+        nft_id: u64,
+        from_address: Address,
+        to_address: Address,
     ) -> Result<(), crate::errors::NftErrorCode> {
-        Err(crate::errors::NftErrorCode::SoulboundNft)
+        from_address.require_auth();
+
+        let mut nft = Storage::get_nft(&env, nft_id)
+            .ok_or(crate::errors::NftErrorCode::NftNotFound)?;
+
+        if nft.owner != from_address {
+            return Err(crate::errors::NftErrorCode::NotOwner);
+        }
+
+        if nft.owner == to_address {
+            return Err(crate::errors::NftErrorCode::InvalidRecipient);
+        }
+
+        if !nft.transferable {
+            return Err(crate::errors::NftErrorCode::SoulboundNft);
+        }
+
+        Storage::remove_nft_from_owner(&env, &from_address, nft_id);
+        nft.owner = to_address.clone();
+        Storage::save_nft(&env, &nft);
+        Storage::add_nft_to_owner(&env, &to_address, nft_id);
+
+        env.events().publish(
+            (Symbol::new(&env, "NftTransferred"), nft_id),
+            NftTransferredEvent {
+                nft_id,
+                from: from_address,
+                to: to_address,
+            },
+        );
+
+        Ok(())
     }
 }
 
