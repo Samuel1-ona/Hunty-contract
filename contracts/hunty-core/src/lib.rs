@@ -373,6 +373,33 @@ impl HuntyCore {
             return Err(HuntErrorCode::NoRequiredClues);
         }
 
+        // Check rewards are configured
+        if hunt.reward_config.max_winners == 0 {
+            return Err(HuntErrorCode::NoRewardsConfigured);
+        }
+
+        // Check reward pool has sufficient balance if reward manager is configured
+        if let Some(reward_manager_addr) = Storage::get_reward_manager(&env) {
+            let mut balance_args: Vec<Val> = Vec::new(&env);
+            balance_args.push_back(hunt_id.into_val(&env));
+            let pool_balance = match env.try_invoke_contract::<i128, RewardErrorCode>(
+                &reward_manager_addr,
+                &Symbol::new(&env, "get_pool_balance"),
+                balance_args,
+            ) {
+                Ok(Ok(balance)) => balance,
+                _ => return Err(HuntErrorCode::InsufficientRewardPool),
+            };
+
+            // Update the stored xlm_pool with the actual balance from reward manager
+            hunt.reward_config.xlm_pool = pool_balance;
+
+            // Check if pool has sufficient balance for the configured rewards
+            if !hunt.has_rewards_available() {
+                return Err(HuntErrorCode::InsufficientRewardPool);
+            }
+        }
+
         let current_time = env.ledger().timestamp();
         // Enforce configured start_time: cannot activate before start_time
         if hunt.start_time != 0 && current_time < hunt.start_time {
