@@ -2724,4 +2724,32 @@ mod test {
         });
         assert_eq!(result, Err(HuntErrorCode::InvalidHuntStatus));
     }
+
+    #[test]
+    fn test_reward_per_winner_when_pool_less_than_winners() {
+        let config = crate::types::RewardConfig::new(5, false, None, 10, 0, 0);
+        let amount = config.reward_per_winner();
+        assert_eq!(amount, 0, "xlm_pool=5 / max_winners=10 must be 0 (integer division)");
+    }
+
+    #[test]
+    fn test_reward_per_winner_zero_max_winners() {
+        let config = crate::types::RewardConfig::new(100, false, None, 0, 0, 0);
+        let amount = config.reward_per_winner();
+        assert_eq!(amount, 0, "max_winners=0 must return 0");
+    }
+
+    #[test]
+    fn test_reward_per_winner_exact_division() {
+        let config = crate::types::RewardConfig::new(100, false, None, 10, 0, 0);
+        let amount = config.reward_per_winner();
+        assert_eq!(amount, 10, "xlm_pool=100 / max_winners=10 must be 10");
+    }
+
+    #[test]
+    fn test_reward_per_winner_rounds_down() {
+        let config = crate::types::RewardConfig::new(7, false, None, 3, 0, 0);
+        let amount = config.reward_per_winner();
+        assert_eq!(amount, 2, "xlm_pool=7 / max_winners=3 must round down to 2");
+    }
 }
