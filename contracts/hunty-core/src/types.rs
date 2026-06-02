@@ -297,6 +297,7 @@ pub struct ClueAddedEvent {
     pub creator: Address,
     pub points: u32,
     pub is_required: bool,
+    pub public_question: bool,
 }
 
 /// Emitted when a clue is removed from a draft hunt.
