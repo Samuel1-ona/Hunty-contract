@@ -51,6 +51,7 @@ impl NftHandler {
         metadata.set(soroban_sdk::Symbol::new(env, "tier"), tier.into_val(env));
 
         let mut args = soroban_sdk::Vec::new(env);
+        args.push_back(env.current_contract_address().into_val(env));
         args.push_back(hunt_id.into_val(env));
         args.push_back(player.clone().into_val(env));
         args.push_back(metadata.into_val(env));

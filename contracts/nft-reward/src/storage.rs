@@ -7,7 +7,10 @@ pub struct Storage;
 impl Storage {
     const NFT_KEY: soroban_sdk::Symbol = symbol_short!("NFT");
     const NFT_COUNTER_KEY: soroban_sdk::Symbol = symbol_short!("CNTR");
-    const OWNER_NFT_COUNT_KEY: soroban_sdk::Symbol = symbol_short!("ONFC");
+    const OWNER_NFTS_KEY: soroban_sdk::Symbol = symbol_short!("ONFT");
+    const ADMIN_KEY: soroban_sdk::Symbol = symbol_short!("ADMIN");
+    const MAX_SUPPLY_KEY: soroban_sdk::Symbol = symbol_short!("MXSUP");
+    const MINTER_KEY: soroban_sdk::Symbol = symbol_short!("MINTER");
 
     fn nft_key(nft_id: u64) -> (soroban_sdk::Symbol, u64) {
         (Self::NFT_KEY, nft_id)
@@ -32,6 +35,54 @@ impl Storage {
     pub fn remove_nft(env: &Env, nft_id: u64) {
         let key = Self::nft_key(nft_id);
         env.storage().persistent().remove(&key);
+    }
+
+    fn minter_key(minter: &Address) -> (soroban_sdk::Symbol, Address) {
+        (Self::MINTER_KEY, minter.clone())
+    }
+
+    // --- Admin / initialization ---
+
+    pub fn is_initialized(env: &Env) -> bool {
+        env.storage().instance().has(&Self::ADMIN_KEY)
+    }
+
+    pub fn save_admin(env: &Env, admin: &Address) {
+        env.storage().instance().set(&Self::ADMIN_KEY, admin);
+    }
+
+    pub fn get_admin(env: &Env) -> Option<Address> {
+        env.storage().instance().get(&Self::ADMIN_KEY)
+    }
+
+    // --- Max supply ---
+
+    /// Stores max supply. Passing None is a no-op (absence of the key means unlimited).
+    pub fn save_max_supply(env: &Env, max_supply: Option<u64>) {
+        if let Some(supply) = max_supply {
+            env.storage().instance().set(&Self::MAX_SUPPLY_KEY, &supply);
+        }
+    }
+
+    pub fn get_max_supply(env: &Env) -> Option<u64> {
+        env.storage().instance().get(&Self::MAX_SUPPLY_KEY)
+    }
+
+    // --- Minter whitelist ---
+
+    pub fn add_minter(env: &Env, minter: &Address) {
+        let key = Self::minter_key(minter);
+        env.storage().persistent().set(&key, &true);
+    }
+
+    pub fn remove_minter(env: &Env, minter: &Address) {
+        let key = Self::minter_key(minter);
+        env.storage().persistent().remove(&key);
+    }
+
+    pub fn is_minter(env: &Env, minter: &Address) -> bool {
+        let key = Self::minter_key(minter);
+        env.storage().persistent().get(&key).unwrap_or(false)
     }
 
     /// Saves an NFT to persistent storage.
