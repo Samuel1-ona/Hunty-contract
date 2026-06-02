@@ -102,6 +102,9 @@ impl NftReward {
         player_address: Address,
         metadata: NftMetadata,
     ) -> u64 {
+        if metadata.rarity > 5 {
+            panic!("InvalidRarity");
+        }
         let minted_at = env.ledger().timestamp();
 
         let nft_id = Storage::next_nft_id(&env);
@@ -174,6 +177,10 @@ impl NftReward {
             .get(Symbol::new(&env, "rarity"))
             .and_then(|v| u32::try_from_val(&env, &v).ok())
             .unwrap_or(0u32);
+
+        if rarity > 5 {
+            panic!("InvalidRarity");
+        }
 
         let tier = metadata
             .get(Symbol::new(&env, "tier"))

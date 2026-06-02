@@ -351,6 +351,9 @@ impl RewardManager {
 
         // Route to NFT handler if configured
         if reward_config.has_nft() {
+            if reward_config.nft_rarity > 5 {
+                return Err(RewardErrorCode::InvalidConfig);
+            }
             let nft_contract = reward_config
                 .nft_contract
                 .as_ref()
