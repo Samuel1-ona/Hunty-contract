@@ -29,7 +29,7 @@ pub enum HuntErrorCode {
     RewardDistributionFailed = 20,
     NoRewardsConfigured = 21,
     NoRequiredClues = 22,
-    InvalidDifficulty = 23,
+    ContractPaused = 23,
 }
 
 #[derive(Debug)]
@@ -56,7 +56,7 @@ pub enum HuntError {
     RewardDistributionFailed { hunt_id: u64 },
     NoRewardsConfigured { hunt_id: u64 },
     NoRequiredClues { hunt_id: u64 },
-    InvalidDifficulty,
+    ContractPaused,
 }
 
 impl fmt::Display for HuntError {
@@ -135,8 +135,8 @@ impl fmt::Display for HuntError {
             HuntError::NoRequiredClues { hunt_id } => {
                 write!(f, "Hunt {} has no required clues; at least one required clue must exist before activation", hunt_id)
             }
-            HuntError::InvalidDifficulty => {
-                write!(f, "Invalid difficulty (must be between 1 and 10)")
+            HuntError::ContractPaused => {
+                write!(f, "Contract is paused")
             }
         }
     }
@@ -167,7 +167,7 @@ impl From<HuntError> for HuntErrorCode {
             HuntError::RewardDistributionFailed { .. } => HuntErrorCode::RewardDistributionFailed,
             HuntError::NoRewardsConfigured { .. } => HuntErrorCode::NoRewardsConfigured,
             HuntError::NoRequiredClues { .. } => HuntErrorCode::NoRequiredClues,
-            HuntError::InvalidDifficulty => HuntErrorCode::InvalidDifficulty,
+            HuntError::ContractPaused => HuntErrorCode::ContractPaused,
         }
     }
 }

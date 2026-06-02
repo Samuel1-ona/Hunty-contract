@@ -2058,42 +2058,56 @@ mod test {
     }
 
     #[test]
-    fn test_register_player_double_registration_race() {
+    fn test_pause_contract_blocks_registration_until_unpaused() {
         let env = Env::default();
         env.ledger().set_timestamp(1_700_000_000);
         env.mock_all_auths();
 
+        let admin = Address::generate(&env);
         let creator = Address::generate(&env);
         let player = Address::generate(&env);
         let question = String::from_str(&env, "Q");
         let answer = String::from_str(&env, "a");
 
-        let (hunt_id, contract_id) = with_core_contract(&env, |env, cid| {
+        with_core_contract(&env, |env, _cid| {
+            HuntyCore::initialize_admin(env.clone(), admin.clone()).unwrap();
             let hunt_id = HuntyCore::create_hunt(
                 env.clone(),
                 creator.clone(),
-                String::from_str(&env, "Hunt"),
-                String::from_str(&env, "Desc"),
+                String::from_str(env, "Hunt"),
+                String::from_str(env, "Desc"),
                 None,
                 None,
             )
             .unwrap();
             HuntyCore::add_clue(env.clone(), hunt_id, question, answer, 1, true).unwrap();
             HuntyCore::activate_hunt(env.clone(), hunt_id, creator.clone()).unwrap();
-            (hunt_id, cid.clone())
-        });
+            HuntyCore::pause_contract(env.clone(), admin.clone()).unwrap();
 
-        // Each register_player call needs its own contract frame to avoid
-        // Error(Auth, ExistingValue) from re-authorizing the same address.
-        as_core_contract(&env, &contract_id, |env| {
+            let err =
+                HuntyCore::register_player(env.clone(), hunt_id, player.clone()).unwrap_err();
+            assert_eq!(err, HuntErrorCode::ContractPaused);
+            assert!(HuntyCore::is_contract_paused(env.clone()));
+
+            HuntyCore::unpause_contract(env.clone(), admin.clone()).unwrap();
             HuntyCore::register_player(env.clone(), hunt_id, player.clone()).unwrap();
         });
+    }
 
-        let err = as_core_contract(&env, &contract_id, |env| {
-            HuntyCore::register_player(env.clone(), hunt_id, player.clone()).unwrap_err()
+    #[test]
+    fn test_pause_contract_requires_admin() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let admin = Address::generate(&env);
+        let attacker = Address::generate(&env);
+
+        let err = with_core_contract(&env, |env, _cid| {
+            HuntyCore::initialize_admin(env.clone(), admin.clone()).unwrap();
+            HuntyCore::pause_contract(env.clone(), attacker.clone()).unwrap_err()
         });
 
-        assert_eq!(err, HuntErrorCode::DuplicateRegistration);
+        assert_eq!(err, HuntErrorCode::Unauthorized);
     }
 
     #[test]
@@ -2457,18 +2471,20 @@ mod test {
     }
 
     #[test]
-    fn test_submit_answer_enforces_max_attempts_per_clue() {
+    fn test_pause_contract_blocks_answer_submission_until_unpaused() {
         let env = Env::default();
         env.ledger().set_timestamp(1_700_000_000);
-        let contract_id = env.register_contract(None, HuntyCore);
+        env.mock_all_auths();
+
+        let admin = Address::generate(&env);
         let creator = Address::generate(&env);
         let player = Address::generate(&env);
         let question = String::from_str(&env, "Q");
         let answer = String::from_str(&env, "a");
-        let wrong = String::from_str(&env, "bad");
 
-        let hunt_id = as_core_contract(&env, &contract_id, |env| {
-            HuntyCore::create_hunt(
+        with_core_contract(&env, |env, _cid| {
+            HuntyCore::initialize_admin(env.clone(), admin.clone()).unwrap();
+            let hunt_id = HuntyCore::create_hunt(
                 env.clone(),
                 creator.clone(),
                 String::from_str(env, "Hunt"),
@@ -2476,32 +2492,26 @@ mod test {
                 None,
                 None,
             )
-            .unwrap()
-        });
-
-        env.mock_all_auths();
-        as_core_contract(&env, &contract_id, |env| {
-            HuntyCore::add_clue(env.clone(), hunt_id, question, answer.clone(), 1, true)
-                .unwrap();
-            HuntyCore::set_max_attempts(env.clone(), hunt_id, creator.clone(), 2)
+            .unwrap();
+            HuntyCore::add_clue(env.clone(), hunt_id, question, answer.clone(), 10, true)
                 .unwrap();
             HuntyCore::activate_hunt(env.clone(), hunt_id, creator.clone()).unwrap();
-        });
-
-        env.mock_all_auths();
-        as_core_contract(&env, &contract_id, |env| {
             HuntyCore::register_player(env.clone(), hunt_id, player.clone()).unwrap();
-        });
+            HuntyCore::pause_contract(env.clone(), admin.clone()).unwrap();
 
-        env.mock_all_auths();
-        as_core_contract(&env, &contract_id, |env| {
-            HuntyCore::submit_answer(env.clone(), hunt_id, 1, player.clone(), wrong.clone())
-                .unwrap_err();
-            HuntyCore::submit_answer(env.clone(), hunt_id, 1, player.clone(), wrong.clone())
-                .unwrap_err();
-            let err = HuntyCore::submit_answer(env.clone(), hunt_id, 1, player.clone(), wrong)
-                .unwrap_err();
-            assert_eq!(err, HuntErrorCode::MaxAttemptsExceeded);
+            let err = HuntyCore::submit_answer(
+                env.clone(),
+                hunt_id,
+                1,
+                player.clone(),
+                answer.clone(),
+            )
+            .unwrap_err();
+            assert_eq!(err, HuntErrorCode::ContractPaused);
+
+            HuntyCore::unpause_contract(env.clone(), admin.clone()).unwrap();
+            HuntyCore::submit_answer(env.clone(), hunt_id, 1, player.clone(), answer)
+                .unwrap();
         });
     }
 

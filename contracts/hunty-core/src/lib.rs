@@ -37,6 +37,56 @@ pub struct HuntyCore;
 
 #[contractimpl]
 impl HuntyCore {
+    /// Sets the contract admin once. The admin can pause or unpause player activity.
+    pub fn initialize_admin(env: Env, admin: Address) -> Result<(), HuntErrorCode> {
+        admin.require_auth();
+
+        if Storage::get_admin(&env).is_some() {
+            return Err(HuntErrorCode::Unauthorized);
+        }
+
+        Storage::set_admin(&env, &admin);
+        Ok(())
+    }
+
+    /// Pauses new player registrations and answer submissions.
+    pub fn pause_contract(env: Env, admin: Address) -> Result<(), HuntErrorCode> {
+        Self::require_admin(&env, &admin)?;
+        Storage::set_contract_paused(&env, true);
+        Ok(())
+    }
+
+    /// Resumes player registrations and answer submissions.
+    pub fn unpause_contract(env: Env, admin: Address) -> Result<(), HuntErrorCode> {
+        Self::require_admin(&env, &admin)?;
+        Storage::set_contract_paused(&env, false);
+        Ok(())
+    }
+
+    /// Returns whether contract-level emergency pause is active.
+    pub fn is_contract_paused(env: Env) -> bool {
+        Storage::is_contract_paused(&env)
+    }
+
+    fn require_admin(env: &Env, admin: &Address) -> Result<(), HuntErrorCode> {
+        admin.require_auth();
+
+        let stored_admin = Storage::get_admin(env).ok_or(HuntErrorCode::Unauthorized)?;
+        if stored_admin != admin.clone() {
+            return Err(HuntErrorCode::Unauthorized);
+        }
+
+        Ok(())
+    }
+
+    fn ensure_not_paused(env: &Env) -> Result<(), HuntErrorCode> {
+        if Storage::is_contract_paused(env) {
+            return Err(HuntErrorCode::ContractPaused);
+        }
+
+        Ok(())
+    }
+
     /// Creates a new scavenger hunt with the provided metadata.
     ///
     /// # Arguments
@@ -783,6 +833,7 @@ impl HuntyCore {
     /// * `DuplicateRegistration` - Player is already registered for this hunt
     pub fn register_player(env: Env, hunt_id: u64, player: Address) -> Result<(), HuntErrorCode> {
         player.require_auth();
+        Self::ensure_not_paused(&env)?;
 
         let hunt = Storage::get_hunt(&env, hunt_id).ok_or(HuntErrorCode::HuntNotFound)?;
 
@@ -884,6 +935,7 @@ impl HuntyCore {
     ) -> Result<(), HuntErrorCode> {
         // Require player authorization
         player.require_auth();
+        Self::ensure_not_paused(&env)?;
 
         // 1. Verify hunt exists and is active
         let hunt = Storage::get_hunt(&env, hunt_id).ok_or(HuntErrorCode::HuntNotFound)?;
