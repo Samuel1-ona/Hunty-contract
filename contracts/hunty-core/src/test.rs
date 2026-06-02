@@ -1503,18 +1503,23 @@ mod test {
             // First activation — player registers
             HuntyCore::activate_hunt(env.clone(), hunt_id, creator.clone()).unwrap();
             HuntyCore::register_player(env.clone(), hunt_id, player.clone()).unwrap();
+            let first_progress = HuntyCore::get_player_progress(env.clone(), hunt_id, player.clone()).unwrap();
 
             // Creator deactivates then reactivates (new cycle)
             HuntyCore::deactivate_hunt(env.clone(), hunt_id, creator.clone()).unwrap();
             env.ledger().set_timestamp(2_000);
             HuntyCore::activate_hunt(env.clone(), hunt_id, creator.clone()).unwrap();
+            let hunt = Storage::get_hunt(&env, hunt_id).unwrap();
+            assert!(first_progress.started_at < hunt.activated_at);
 
             // Player should be able to register again — old progress is stale
             HuntyCore::register_player(env.clone(), hunt_id, player.clone()).unwrap();
+            let latest_progress = HuntyCore::get_player_progress(env.clone(), hunt_id, player.clone()).unwrap();
+            assert!(latest_progress.started_at >= hunt.activated_at);
+            assert_eq!(latest_progress.completed_clues.len(), 0);
 
             // But a second call in the same cycle must still be rejected
-            let err =
-                HuntyCore::register_player(env.clone(), hunt_id, player.clone()).unwrap_err();
+            let err = HuntyCore::register_player(env.clone(), hunt_id, player.clone()).unwrap_err();
             assert_eq!(err, HuntErrorCode::DuplicateRegistration);
 
             
