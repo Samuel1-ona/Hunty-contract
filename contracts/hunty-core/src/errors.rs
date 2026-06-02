@@ -18,9 +18,11 @@ pub enum HuntErrorCode {
     InvalidTitle = 11,
     InvalidDescription = 12,
     InvalidAddress = 13,
-    TooManyClues = 14,
-    InvalidQuestion = 15,
-    RefundFailed = 16,
+    InvalidMaxAttempts = 14,
+    MaxAttemptsExceeded = 15,
+    TooManyClues = 16,
+    InvalidQuestion = 17,
+    RefundFailed = 18,
     NoCluesAdded = 17,
     HuntNotCompleted = 18,
     RewardAlreadyClaimed = 19,
@@ -45,6 +47,8 @@ pub enum HuntError {
     InvalidTitle { reason: String },
     InvalidDescription { reason: String },
     InvalidAddress,
+    InvalidMaxAttempts,
+    MaxAttemptsExceeded,
     TooManyClues { hunt_id: u64, limit: u32 },
     InvalidQuestion,
     HuntNotCompleted { hunt_id: u64 },
@@ -104,6 +108,12 @@ impl fmt::Display for HuntError {
             HuntError::InvalidAddress => {
                 write!(f, "Invalid address")
             }
+            HuntError::InvalidMaxAttempts => {
+                write!(f, "Invalid max attempts value")
+            }
+            HuntError::MaxAttemptsExceeded => {
+                write!(f, "Max answer attempts exceeded for this clue")
+            }
             HuntError::TooManyClues { hunt_id, limit } => {
                 write!(f, "Too many clues for hunt {} (limit {})", hunt_id, limit)
             }
@@ -148,6 +158,8 @@ impl From<HuntError> for HuntErrorCode {
             HuntError::InvalidTitle { .. } => HuntErrorCode::InvalidTitle,
             HuntError::InvalidDescription { .. } => HuntErrorCode::InvalidDescription,
             HuntError::InvalidAddress => HuntErrorCode::InvalidAddress,
+            HuntError::InvalidMaxAttempts => HuntErrorCode::InvalidMaxAttempts,
+            HuntError::MaxAttemptsExceeded => HuntErrorCode::MaxAttemptsExceeded,
             HuntError::TooManyClues { .. } => HuntErrorCode::TooManyClues,
             HuntError::InvalidQuestion => HuntErrorCode::InvalidQuestion,
             HuntError::HuntNotCompleted { .. } => HuntErrorCode::HuntNotCompleted,

@@ -15,6 +15,7 @@ use soroban_sdk::{
 const MAX_QUESTION_LENGTH: u32 = 2000;
 const MAX_ANSWER_LENGTH: u32 = 256;
 const MAX_CLUES_PER_HUNT: u32 = 100;
+const DEFAULT_MAX_ATTEMPTS_PER_CLUE: u32 = 5;
 /// Maximum number of leaderboard entries returned (gas and UX limit).
 const MAX_LEADERBOARD_SIZE: u32 = 20;
 /// Maximum number of player records scanned when building leaderboard responses.
@@ -100,6 +101,7 @@ impl HuntyCore {
             reward_config,
             total_clues: 0, // Empty clue list initially
             required_clues: 0,
+            max_attempts_per_clue: DEFAULT_MAX_ATTEMPTS_PER_CLUE,
         };
 
         // Store the hunt
@@ -115,6 +117,30 @@ impl HuntyCore {
             .publish((Symbol::new(&env, "HuntCreated"), hunt_id), event);
 
         Ok(hunt_id)
+    }
+
+    /// Sets the maximum number of incorrect answer attempts per clue for a hunt.
+    pub fn set_max_attempts(
+        env: Env,
+        hunt_id: u64,
+        caller: Address,
+        max_attempts_per_clue: u32,
+    ) -> Result<(), HuntErrorCode> {
+        if max_attempts_per_clue == 0 {
+            return Err(HuntErrorCode::InvalidMaxAttempts);
+        }
+
+        let mut hunt = Storage::get_hunt_or_error(&env, hunt_id).map_err(HuntErrorCode::from)?;
+        if hunt.creator != caller {
+            return Err(HuntErrorCode::Unauthorized);
+        }
+        if hunt.status != HuntStatus::Draft {
+            return Err(HuntErrorCode::InvalidHuntStatus);
+        }
+
+        hunt.max_attempts_per_clue = max_attempts_per_clue;
+        Storage::save_hunt(&env, &hunt);
+        Ok(())
     }
 
     /// Adds a clue to a hunt. Only the hunt creator can add clues.
@@ -699,11 +725,17 @@ impl HuntyCore {
             return Err(HuntErrorCode::ClueAlreadyCompleted);
         }
 
+        let attempts = progress.failed_attempts_for_clue(clue_id);
+        if attempts >= hunt.max_attempts_per_clue {
+            return Err(HuntErrorCode::MaxAttemptsExceeded);
+        }
+
         let submitted_hash =
             Self::normalize_and_hash_answer(&env, &answer).map_err(HuntErrorCode::from)?;
 
         if submitted_hash != clue.answer_hash {
-            // Answer is incorrect - emit analytics event and return error
+            progress.record_failed_attempt(clue_id);
+            Storage::save_player_progress(&env, &progress);
             let incorrect_event = AnswerIncorrectEvent {
                 hunt_id,
                 player: player.clone(),
