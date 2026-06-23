@@ -3,7 +3,7 @@ use soroban_sdk::{contracttype, Address, String};
 /// Configuration for distributing rewards. Uses only primitive/Option types for reliable contracttype.
 /// At least one of xlm_amount or nft_contract must be set for a valid distribution.
 #[contracttype]
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct RewardConfig {
     /// XLM amount to distribute. None if no XLM rewards.
     pub xlm_amount: Option<i128>,
@@ -86,9 +86,7 @@ pub struct ValidationResult {
 impl RewardConfig {
     /// Returns true if XLM rewards are configured.
     pub fn has_xlm(&self) -> bool {
-        self.xlm_amount
-            .map(|a| a > 0)
-            .unwrap_or(false)
+        self.xlm_amount.map(|a| a > 0).unwrap_or(false)
     }
 
     /// Returns true if NFT rewards are configured.
