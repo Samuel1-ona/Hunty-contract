@@ -243,6 +243,8 @@ pub struct HuntCreatedEvent {
     pub hunt_id: u64,
     pub creator: Address,
     pub title: String,
+    pub description: String,
+    pub image_uri: String,
 }
 
 #[contracttype]
