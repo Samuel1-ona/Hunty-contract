@@ -174,7 +174,7 @@ impl NftReward {
     /// - "transferable": bool
     pub fn mint_reward_nft_from_map(
         env: Env,
-        minter: Address,
+        _minter: Address,
         hunt_id: u64,
         player_address: Address,
         metadata: Map<Symbol, Val>,

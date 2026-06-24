@@ -724,14 +724,9 @@ fn test_burn_removes_nft_and_clears_owner_list() {
     let env = setup_env();
     let client = setup_nft_reward(&env, None);
 
-#[test]
-fn test_initialize_stores_admin_and_minter() {
-    let (env, contract_id, admin, minter) = setup_initialized();
-    let client = NftRewardClient::new(&env, &contract_id);
-
-    assert_eq!(client.get_admin(), Some(admin));
-
-    let nft_id = client.mint_reward_nft(&1, &owner, &metadata);
+    let owner = Address::generate(&env);
+    let metadata = create_metadata(&env, "Burn Me", "Desc", "ipfs://burn");
+    let nft_id = client.mint_reward_nft(&owner, &1, &owner, &metadata);
     assert!(client.get_nft(&nft_id).is_some());
 
     client.burn(&nft_id, &owner);
@@ -741,22 +736,29 @@ fn test_initialize_stores_admin_and_minter() {
 }
 
 #[test]
+#[should_panic]
 fn test_burn_fails_if_not_owner() {
     let env = setup_env();
     let client = setup_nft_reward(&env, None);
 
-    client.initialize(&admin, &minter, &None);
+    let owner = Address::generate(&env);
+    let attacker = Address::generate(&env);
+    let metadata = create_metadata(&env, "Owned NFT", "Desc", "ipfs://owned");
+    let nft_id = client.mint_reward_nft(&owner, &1, &owner, &metadata);
+
+    // Attacker tries to burn — NotOwner check should fail
+    client.burn(&nft_id, &attacker);
 }
 
 #[test]
+#[should_panic]
 fn test_burn_fails_for_nonexistent_nft() {
     let env = setup_env();
     let client = setup_nft_reward(&env, None);
 
     let rogue = Address::generate(&env);
-    let player = Address::generate(&env);
-    let metadata = create_metadata(&env, "Rogue NFT", "Desc", "ipfs://rogue");
-    client.mint_reward_nft(&rogue, &1, &player, &metadata);
+    // Burn a non-existent NFT — should panic
+    client.burn(&999, &rogue);
 }
 
 #[test]
