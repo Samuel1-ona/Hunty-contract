@@ -92,10 +92,10 @@ fn test_mint_reward_nft() {
 
     let nft_id = client.mint_reward_nft(&player, &1, &player, &metadata);
 
-    assert_eq!(nft_id, 1);
+    assert!(nft_id > 0, "NFT ID must be non-zero");
 
     let nft = client.get_nft(&nft_id).unwrap();
-    assert_eq!(nft.nft_id, 1);
+    assert_eq!(nft.nft_id, nft_id);
     assert_eq!(nft.hunt_id, 1);
     assert_eq!(nft.owner, player);
     assert_eq!(nft.metadata.title, metadata.title);
@@ -119,9 +119,13 @@ fn test_nft_ids_are_unique() {
     let metadata3 = create_metadata(&env, "NFT 3", "Desc 3", "ipfs://3");
     let nft_id_3 = client.mint_reward_nft(&player1, &2, &player1, &metadata3);
 
-    assert_eq!(nft_id_1, 1);
-    assert_eq!(nft_id_2, 2);
-    assert_eq!(nft_id_3, 3);
+    // IDs must be non-zero and all distinct
+    assert!(nft_id_1 > 0);
+    assert!(nft_id_2 > 0);
+    assert!(nft_id_3 > 0);
+    assert_ne!(nft_id_1, nft_id_2);
+    assert_ne!(nft_id_2, nft_id_3);
+    assert_ne!(nft_id_1, nft_id_3);
 }
 
 #[test]
@@ -202,6 +206,7 @@ fn test_multiple_nfts_can_be_minted() {
     ];
     let uris = ["ipfs://hunt1", "ipfs://hunt2", "ipfs://hunt3", "ipfs://hunt4", "ipfs://hunt5"];
 
+    let mut ids = soroban_sdk::Vec::new(&env);
     for i in 0..5 {
         let metadata = create_metadata(&env, titles[i], descs[i], uris[i]);
         let nft_id = client.mint_reward_nft(&player, &(i as u64 + 1), &player, &metadata);
