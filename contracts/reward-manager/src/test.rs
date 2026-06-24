@@ -120,15 +120,20 @@ mod test {
 
         env.as_contract(&contract_id, || {
             RewardManager::initialize(env.clone(), admin.clone(), token_address).unwrap();
-            
-            // Initially, no NFT contract should be set
+        });
+        env.as_contract(&contract_id, || {
             assert_eq!(Storage::get_nft_contract(&env), None);
-            
-            // Set the NFT contract for the first time
-            let result = RewardManager::set_nft_reward_contract(env.clone(), admin.clone(), nft_contract.clone());
+        });
+        env.mock_all_auths_allowing_non_root_auth();
+        env.as_contract(&contract_id, || {
+            let result = RewardManager::set_nft_reward_contract(
+                env.clone(),
+                admin.clone(),
+                nft_contract.clone(),
+            );
             assert!(result.is_ok());
-            
-            // Verify the contract is now set
+        });
+        env.as_contract(&contract_id, || {
             assert_eq!(Storage::get_nft_contract(&env), Some(nft_contract.clone()));
         });
     }
@@ -144,16 +149,29 @@ mod test {
 
         env.as_contract(&contract_id, || {
             RewardManager::initialize(env.clone(), admin.clone(), token_address).unwrap();
-            
-            // Set initial NFT contract
-            RewardManager::set_nft_reward_contract(env.clone(), admin.clone(), nft_contract_1.clone()).unwrap();
+        });
+        env.mock_all_auths_allowing_non_root_auth();
+        env.as_contract(&contract_id, || {
+            RewardManager::set_nft_reward_contract(
+                env.clone(),
+                admin.clone(),
+                nft_contract_1.clone(),
+            )
+            .unwrap();
+        });
+        env.as_contract(&contract_id, || {
             assert_eq!(Storage::get_nft_contract(&env), Some(nft_contract_1.clone()));
-            
-            // Update to a new NFT contract
-            let result = RewardManager::set_nft_reward_contract(env.clone(), admin.clone(), nft_contract_2.clone());
+        });
+        env.mock_all_auths_allowing_non_root_auth();
+        env.as_contract(&contract_id, || {
+            let result = RewardManager::set_nft_reward_contract(
+                env.clone(),
+                admin.clone(),
+                nft_contract_2.clone(),
+            );
             assert!(result.is_ok());
-            
-            // Verify the contract is updated
+        });
+        env.as_contract(&contract_id, || {
             assert_eq!(Storage::get_nft_contract(&env), Some(nft_contract_2.clone()));
         });
     }
@@ -170,17 +188,41 @@ mod test {
 
         env.as_contract(&contract_id, || {
             RewardManager::initialize(env.clone(), admin.clone(), token_address).unwrap();
-            
-            // First update
-            RewardManager::set_nft_reward_contract(env.clone(), admin.clone(), nft_contract_1.clone()).unwrap();
+        });
+        env.mock_all_auths_allowing_non_root_auth();
+        env.as_contract(&contract_id, || {
+            RewardManager::set_nft_reward_contract(
+                env.clone(),
+                admin.clone(),
+                nft_contract_1.clone(),
+            )
+            .unwrap();
+        });
+        env.as_contract(&contract_id, || {
             assert_eq!(Storage::get_nft_contract(&env), Some(nft_contract_1.clone()));
-            
-            // Second update
-            RewardManager::set_nft_reward_contract(env.clone(), admin.clone(), nft_contract_2.clone()).unwrap();
+        });
+        env.mock_all_auths_allowing_non_root_auth();
+        env.as_contract(&contract_id, || {
+            RewardManager::set_nft_reward_contract(
+                env.clone(),
+                admin.clone(),
+                nft_contract_2.clone(),
+            )
+            .unwrap();
+        });
+        env.as_contract(&contract_id, || {
             assert_eq!(Storage::get_nft_contract(&env), Some(nft_contract_2.clone()));
-            
-            // Third update
-            RewardManager::set_nft_reward_contract(env.clone(), admin.clone(), nft_contract_3.clone()).unwrap();
+        });
+        env.mock_all_auths_allowing_non_root_auth();
+        env.as_contract(&contract_id, || {
+            RewardManager::set_nft_reward_contract(
+                env.clone(),
+                admin.clone(),
+                nft_contract_3.clone(),
+            )
+            .unwrap();
+        });
+        env.as_contract(&contract_id, || {
             assert_eq!(Storage::get_nft_contract(&env), Some(nft_contract_3.clone()));
         });
     }
