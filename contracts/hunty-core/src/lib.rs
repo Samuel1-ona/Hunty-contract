@@ -109,6 +109,8 @@ impl HuntyCore {
             hunt_id,
             creator: creator.clone(),
             title: title.clone(),
+            description: description.clone(),
+            image_uri: image_uri.clone(),
         };
         env.events()
             .publish((Symbol::new(&env, "HuntCreated"), hunt_id), event);
