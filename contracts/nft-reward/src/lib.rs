@@ -4,6 +4,26 @@ use soroban_sdk::{
     String, Symbol, Val, Vec,
 };
 
+/// Semantic version of a contract (major.minor.patch).
+/// Breaking changes increment major; new backwards-compatible features increment minor;
+/// bug-fixes increment patch.
+#[contracttype]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SemVer {
+    pub major: u32,
+    pub minor: u32,
+    pub patch: u32,
+}
+
+impl SemVer {
+    /// Returns true if `self` is compatible with `required` (same major, self >= required).
+    pub fn is_compatible_with(&self, required: &SemVer) -> bool {
+        self.major == required.major
+            && (self.minor > required.minor
+                || (self.minor == required.minor && self.patch >= required.patch))
+    }
+}
+
 /// Core display metadata for an NFT (title, description, image URI).
 /// Supports off-chain storage references to keep gas costs low.
 #[contracttype]
@@ -116,8 +136,8 @@ pub struct NftReward;
 
 #[contractimpl]
 impl NftReward {
-    /// Current version of this contract. Bump when making breaking changes.
-    pub const CONTRACT_VERSION: u32 = 1;
+    /// Current semantic version of this contract.
+    pub const CONTRACT_VERSION: SemVer = SemVer { major: 1, minor: 0, patch: 0 };
 
     /// Initializes the NFT reward contract with an optional max supply cap.
     /// Call this once if you want to enforce a finite NFT supply.
@@ -127,7 +147,7 @@ impl NftReward {
         }
 
         Storage::set_max_supply(&env, max_supply);
-        Storage::set_contract_version(&env, Self::CONTRACT_VERSION);
+        Storage::set_contract_version(&env, &Self::CONTRACT_VERSION);
         Ok(())
     }
 
@@ -524,9 +544,9 @@ impl NftReward {
         Ok(())
     }
 
-    /// Returns the on-chain version stored during initialize, or the compiled constant.
-    pub fn contract_version(env: Env) -> u32 {
-        Storage::get_contract_version(&env).unwrap_or(Self::CONTRACT_VERSION)
+    /// Returns the on-chain semantic version stored during initialize.
+    pub fn get_version(env: Env) -> SemVer {
+        Storage::get_contract_version(&env).unwrap_or_else(|| Self::CONTRACT_VERSION.clone())
     }
 
     /// Grants `operator` the ability to manage all NFTs owned by `owner`.

@@ -165,11 +165,11 @@ impl Storage {
 
     // --- Contract version ---
 
-    pub fn set_contract_version(env: &Env, version: u32) {
-        env.storage().instance().set(&symbol_short!("CVER"), &version);
+    pub fn set_contract_version(env: &Env, version: &crate::SemVer) {
+        env.storage().instance().set(&symbol_short!("CVER"), version);
     }
 
-    pub fn get_contract_version(env: &Env) -> Option<u32> {
+    pub fn get_contract_version(env: &Env) -> Option<crate::SemVer> {
         env.storage().instance().get(&symbol_short!("CVER"))
     }
 }

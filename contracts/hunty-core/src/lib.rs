@@ -6,7 +6,7 @@ use crate::types::{
     AnswerIncorrectEvent, Clue, ClueAddedEvent, ClueCompletedEvent, ClueInfo, ClueRemovedEvent,
     Hunt, HuntActivatedEvent, HuntCancelledEvent, HuntCompletedEvent, HuntCreatedEvent,
     HuntDeactivatedEvent, HuntStatistics, HuntStatus, LeaderboardEntry, PlayerProgress,
-    PlayerRegisteredEvent, RewardClaimedEvent, RewardConfig, TimeBonusConfig,
+    PlayerRegisteredEvent, RewardClaimedEvent, RewardConfig, SemVer, TimeBonusConfig,
 };
 use alloc::string::String as StdString;
 use reward_manager::RewardErrorCode;
@@ -37,10 +37,10 @@ pub struct HuntyCore;
 
 #[contractimpl]
 impl HuntyCore {
-    /// Current version of this contract. Bump when making breaking changes.
-    pub const CONTRACT_VERSION: u32 = 1;
+    /// Current semantic version of this contract.
+    pub const CONTRACT_VERSION: SemVer = SemVer { major: 1, minor: 0, patch: 0 };
     /// Minimum RewardManager version this contract requires.
-    pub const REQUIRED_REWARD_MANAGER_VERSION: u32 = 1;
+    pub const REQUIRED_REWARD_MANAGER_VERSION: SemVer = SemVer { major: 1, minor: 0, patch: 0 };
 
     /// Sets the contract admin once. The admin can pause or unpause player activity.
     pub fn initialize_admin(env: Env, admin: Address) -> Result<(), HuntErrorCode> {
@@ -51,7 +51,7 @@ impl HuntyCore {
         }
 
         Storage::set_admin(&env, &admin);
-        Storage::set_contract_version(&env, Self::CONTRACT_VERSION);
+        Storage::set_contract_version(&env, &Self::CONTRACT_VERSION);
         Ok(())
     }
 
@@ -1393,19 +1393,19 @@ impl HuntyCore {
         })
     }
 
-    /// Returns the on-chain version stored during initialize, or the compiled constant.
-    pub fn contract_version(env: Env) -> u32 {
-        Storage::get_contract_version(&env).unwrap_or(Self::CONTRACT_VERSION)
+    /// Returns the on-chain semantic version stored during initialize.
+    pub fn get_version(env: Env) -> SemVer {
+        Storage::get_contract_version(&env).unwrap_or_else(|| Self::CONTRACT_VERSION.clone())
     }
 
     /// Returns true if the given RewardManager contract meets the minimum required version.
     pub fn check_reward_manager_compatibility(env: Env, reward_manager_address: Address) -> bool {
-        let ver: u32 = env.invoke_contract(
+        let ver: SemVer = env.invoke_contract(
             &reward_manager_address,
-            &soroban_sdk::Symbol::new(&env, "contract_version"),
+            &soroban_sdk::Symbol::new(&env, "get_version"),
             soroban_sdk::Vec::new(&env),
         );
-        ver >= Self::REQUIRED_REWARD_MANAGER_VERSION
+        ver.is_compatible_with(&Self::REQUIRED_REWARD_MANAGER_VERSION)
     }
 }
 

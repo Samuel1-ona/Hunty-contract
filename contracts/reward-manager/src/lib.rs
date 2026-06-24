@@ -6,7 +6,7 @@ use crate::nft_handler::NftHandler;
 use crate::storage::Storage;
 pub use crate::types::{
     DistributionRecord, DistributionStatus, RewardConfig, RewardPoolConfig, RewardPoolStatus,
-    ValidationResult,
+    SemVer, ValidationResult,
 };
 use crate::xlm_handler::XlmHandler;
 
@@ -54,10 +54,10 @@ pub struct AdminWithdrawEvent {
 
 #[contractimpl]
 impl RewardManager {
-    /// Current version of this contract. Bump when making breaking changes.
-    pub const CONTRACT_VERSION: u32 = 1;
+    /// Current semantic version of this contract.
+    pub const CONTRACT_VERSION: SemVer = SemVer { major: 1, minor: 0, patch: 0 };
     /// Minimum NftReward version this contract requires.
-    pub const REQUIRED_NFT_REWARD_VERSION: u32 = 1;
+    pub const REQUIRED_NFT_REWARD_VERSION: SemVer = SemVer { major: 1, minor: 0, patch: 0 };
 
     /// Initializes the RewardManager with the XLM token contract address (SAC).
     /// Must be called once before any reward distribution.
@@ -69,7 +69,7 @@ impl RewardManager {
         admin.require_auth();
         Storage::set_admin(&env, &admin);
         Storage::set_xlm_token(&env, &xlm_token);
-        Storage::set_contract_version(&env, Self::CONTRACT_VERSION);
+        Storage::set_contract_version(&env, &Self::CONTRACT_VERSION);
         Ok(())
     }
 
@@ -631,20 +631,19 @@ impl RewardManager {
         Ok(())
     }
 
-    /// Returns the on-chain version stored during initialize, or the compiled constant.
-    pub fn contract_version(env: Env) -> u32 {
-        Storage::get_contract_version(&env).unwrap_or(Self::CONTRACT_VERSION)
+    /// Returns the on-chain semantic version stored during initialize.
+    pub fn get_version(env: Env) -> SemVer {
+        Storage::get_contract_version(&env).unwrap_or_else(|| Self::CONTRACT_VERSION.clone())
     }
 
     /// Returns true if the given NftReward contract meets the minimum required version.
     pub fn check_nft_reward_compatibility(env: Env, nft_reward_address: Address) -> bool {
-        use soroban_sdk::IntoVal;
-        let ver: u32 = env.invoke_contract(
+        let ver: SemVer = env.invoke_contract(
             &nft_reward_address,
-            &soroban_sdk::Symbol::new(&env, "contract_version"),
+            &soroban_sdk::Symbol::new(&env, "get_version"),
             soroban_sdk::Vec::new(&env),
         );
-        ver >= Self::REQUIRED_NFT_REWARD_VERSION
+        ver.is_compatible_with(&Self::REQUIRED_NFT_REWARD_VERSION)
     }
 }
 
