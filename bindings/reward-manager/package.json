@@ -1,0 +1,16 @@
+{
+  "name": "@hunty/reward-manager",
+  "version": "0.0.0",
+  "description": "TypeScript bindings for the reward-manager Soroban contract",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc"
+  },
+  "dependencies": {
+    "@stellar/stellar-sdk": "^12.0.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.0.0"
+  }
+}

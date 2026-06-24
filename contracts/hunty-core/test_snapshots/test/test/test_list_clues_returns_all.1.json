@@ -212,14 +212,6 @@
                   "val": {
                     "u32": 1
                   }
-                },
-                {
-                  "key": {
-                    "symbol": "question"
-                  },
-                  "val": {
-                    "string": "Q1"
-                  }
                 }
               ]
             }

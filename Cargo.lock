@@ -986,6 +986,7 @@ dependencies = [
 name = "reward-manager"
 version = "0.0.0"
 dependencies = [
+ "nft-reward",
  "soroban-sdk",
 ]
 

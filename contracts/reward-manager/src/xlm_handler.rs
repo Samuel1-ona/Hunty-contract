@@ -20,6 +20,7 @@ impl XlmHandler {
     }
 
     /// Checks if the contract holds enough XLM for the required amount.
+    #[allow(dead_code)]
     pub fn validate_pool(
         env: &Env,
         xlm_token: &Address,
@@ -31,6 +32,7 @@ impl XlmHandler {
     }
 
     /// Returns the contract's current XLM balance.
+    #[allow(dead_code)]
     pub fn get_balance(env: &Env, xlm_token: &Address, contract_addr: &Address) -> i128 {
         let client = token::Client::new(env, xlm_token);
         client.balance(contract_addr)

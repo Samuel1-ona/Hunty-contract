@@ -185,6 +185,14 @@
                             },
                             {
                               "key": {
+                                "symbol": "start_time"
+                              },
+                              "val": {
+                                "u64": 0
+                              }
+                            },
+                            {
+                              "key": {
                                 "symbol": "status"
                               },
                               "val": {
@@ -194,6 +202,24 @@
                                   }
                                 ]
                               }
+                            },
+                            {
+                              "key": {
+                                "symbol": "time_bonus_decay_secs"
+                              },
+                              "val": "void"
+                            },
+                            {
+                              "key": {
+                                "symbol": "time_bonus_min_bps"
+                              },
+                              "val": "void"
+                            },
+                            {
+                              "key": {
+                                "symbol": "time_bonus_start_bps"
+                              },
+                              "val": "void"
                             },
                             {
                               "key": {
