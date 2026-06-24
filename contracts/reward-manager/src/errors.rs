@@ -21,4 +21,6 @@ pub enum RewardErrorCode {
     BelowMinimumAmount = 11,
     /// Contract initialization can only happen once.
     AlreadyInitialized = 12,
+    /// hunt_id does not exist in HuntyCore (validated via cross-contract call).
+    HuntNotFound = 13,
 }

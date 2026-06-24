@@ -254,10 +254,14 @@
                           "map": [
                             {
                               "key": {
-                                "symbol": "answer_hash"
+                                "symbol": "answer_hashes"
                               },
                               "val": {
-                                "bytes": "0db52f4076c082518412afd3dd3576e2cb0c63703fd7fed5e23ade60efef31d9"
+                                "vec": [
+                                  {
+                                    "bytes": "0db52f4076c082518412afd3dd3576e2cb0c63703fd7fed5e23ade60efef31d9"
+                                  }
+                                ]
                               }
                             },
                             {
@@ -313,10 +317,14 @@
                           "map": [
                             {
                               "key": {
-                                "symbol": "answer_hash"
+                                "symbol": "answer_hashes"
                               },
                               "val": {
-                                "bytes": "0db52f4076c082518412afd3dd3576e2cb0c63703fd7fed5e23ade60efef31d9"
+                                "vec": [
+                                  {
+                                    "bytes": "0db52f4076c082518412afd3dd3576e2cb0c63703fd7fed5e23ade60efef31d9"
+                                  }
+                                ]
                               }
                             },
                             {
@@ -491,6 +499,14 @@
                             },
                             {
                               "key": {
+                                "symbol": "start_time"
+                              },
+                              "val": {
+                                "u64": 0
+                              }
+                            },
+                            {
+                              "key": {
                                 "symbol": "status"
                               },
                               "val": {
@@ -653,6 +669,14 @@
                                     }
                                   }
                                 ]
+                              }
+                            },
+                            {
+                              "key": {
+                                "symbol": "start_time"
+                              },
+                              "val": {
+                                "u64": 0
                               }
                             },
                             {
@@ -860,14 +884,6 @@
                   "val": {
                     "u32": 5
                   }
-                },
-                {
-                  "key": {
-                    "symbol": "question"
-                  },
-                  "val": {
-                    "string": "Same answer?"
-                  }
                 }
               ]
             }
@@ -982,14 +998,6 @@
                   },
                   "val": {
                     "u32": 5
-                  }
-                },
-                {
-                  "key": {
-                    "symbol": "question"
-                  },
-                  "val": {
-                    "string": "Same answer?"
                   }
                 }
               ]
