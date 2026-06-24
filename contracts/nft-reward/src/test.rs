@@ -4,7 +4,7 @@ extern crate std;
 use crate::{NftMetadata, NftReward, NftRewardClient};
 use soroban_sdk::{
     testutils::{Address as _, Events as _, Ledger as _},
-    Address, Env, String,
+    Address, Env, Map, String,
 };
 
 fn setup_env() -> Env {
@@ -22,6 +22,7 @@ fn create_metadata(env: &Env, title: &str, desc: &str, image_uri: &str) -> NftMe
         hunt_title: String::from_str(env, title),
         rarity: 0u32,
         tier: 0u32,
+        extensions: Map::new(env),
     }
 }
 
@@ -41,6 +42,7 @@ fn create_metadata_full(
         hunt_title: String::from_str(env, hunt_title),
         rarity,
         tier,
+        extensions: Map::new(env),
     }
 }
 
@@ -437,4 +439,145 @@ fn test_get_nft_owner_matches_owner_of() {
 
     assert_eq!(client.owner_of(&nft_id), client.get_nft_owner(&nft_id));
     assert_eq!(client.get_nft_owner(&nft_id), Some(player));
+}
+
+#[test]
+fn test_set_and_get_nft_extension() {
+    let env = setup_env();
+    let client = NftRewardClient::new(&env, &env.register_contract(None, NftReward));
+
+    let owner = Address::generate(&env);
+    let metadata = create_metadata(&env, "Ext NFT", "Desc", "ipfs://ext");
+    let nft_id = client.mint_reward_nft(&1, &owner, &metadata);
+
+    client.set_nft_extension(&nft_id, &owner, &String::from_str(&env, "color"), &String::from_str(&env, "blue"));
+
+    let val = client.get_nft_extension(&nft_id, &String::from_str(&env, "color"));
+    assert_eq!(val, Some(String::from_str(&env, "blue")));
+}
+
+#[test]
+fn test_get_nft_extension_missing_key_returns_none() {
+    let env = setup_env();
+    let client = NftRewardClient::new(&env, &env.register_contract(None, NftReward));
+
+    let owner = Address::generate(&env);
+    let metadata = create_metadata(&env, "Ext NFT", "Desc", "ipfs://ext");
+    let nft_id = client.mint_reward_nft(&1, &owner, &metadata);
+
+    let val = client.get_nft_extension(&nft_id, &String::from_str(&env, "nonexistent"));
+    assert!(val.is_none());
+}
+
+#[test]
+fn test_get_nft_extension_nft_not_found_returns_none() {
+    let env = setup_env();
+    let client = NftRewardClient::new(&env, &env.register_contract(None, NftReward));
+
+    let val = client.get_nft_extension(&999, &String::from_str(&env, "key"));
+    assert!(val.is_none());
+}
+
+#[test]
+fn test_set_nft_extension_update_existing_key() {
+    let env = setup_env();
+    let client = NftRewardClient::new(&env, &env.register_contract(None, NftReward));
+
+    let owner = Address::generate(&env);
+    let metadata = create_metadata(&env, "Ext NFT", "Desc", "ipfs://ext");
+    let nft_id = client.mint_reward_nft(&1, &owner, &metadata);
+
+    client.set_nft_extension(&nft_id, &owner, &String::from_str(&env, "color"), &String::from_str(&env, "blue"));
+    client.set_nft_extension(&nft_id, &owner, &String::from_str(&env, "color"), &String::from_str(&env, "red"));
+
+    let val = client.get_nft_extension(&nft_id, &String::from_str(&env, "color"));
+    assert_eq!(val, Some(String::from_str(&env, "red")));
+}
+
+#[test]
+fn test_set_nft_extension_max_10_fields() {
+    let env = setup_env();
+    let client = NftRewardClient::new(&env, &env.register_contract(None, NftReward));
+
+    let owner = Address::generate(&env);
+    let metadata = create_metadata(&env, "Ext NFT", "Desc", "ipfs://ext");
+    let nft_id = client.mint_reward_nft(&1, &owner, &metadata);
+
+    let keys = ["k0", "k1", "k2", "k3", "k4", "k5", "k6", "k7", "k8", "k9"];
+    for k in keys.iter() {
+        client.set_nft_extension(&nft_id, &owner, &String::from_str(&env, k), &String::from_str(&env, "v"));
+    }
+
+    // 11th unique key should fail
+    let result = client.try_set_nft_extension(
+        &nft_id,
+        &owner,
+        &String::from_str(&env, "k10"),
+        &String::from_str(&env, "v"),
+    );
+    assert!(result.is_err());
+}
+
+#[test]
+fn test_set_nft_extension_updating_existing_key_does_not_exceed_limit() {
+    let env = setup_env();
+    let client = NftRewardClient::new(&env, &env.register_contract(None, NftReward));
+
+    let owner = Address::generate(&env);
+    let metadata = create_metadata(&env, "Ext NFT", "Desc", "ipfs://ext");
+    let nft_id = client.mint_reward_nft(&1, &owner, &metadata);
+
+    let keys = ["k0", "k1", "k2", "k3", "k4", "k5", "k6", "k7", "k8", "k9"];
+    for k in keys.iter() {
+        client.set_nft_extension(&nft_id, &owner, &String::from_str(&env, k), &String::from_str(&env, "v"));
+    }
+
+    // Updating an existing key at the limit should succeed
+    client.set_nft_extension(&nft_id, &owner, &String::from_str(&env, "k0"), &String::from_str(&env, "updated"));
+
+    let val = client.get_nft_extension(&nft_id, &String::from_str(&env, "k0"));
+    assert_eq!(val, Some(String::from_str(&env, "updated")));
+}
+
+#[test]
+#[should_panic]
+fn test_set_nft_extension_not_owner_fails() {
+    let env = setup_env();
+    let client = NftRewardClient::new(&env, &env.register_contract(None, NftReward));
+
+    let owner = Address::generate(&env);
+    let other = Address::generate(&env);
+    let metadata = create_metadata(&env, "Ext NFT", "Desc", "ipfs://ext");
+    let nft_id = client.mint_reward_nft(&1, &owner, &metadata);
+
+    // Should panic: other is not the owner
+    client.set_nft_extension(&nft_id, &other, &String::from_str(&env, "key"), &String::from_str(&env, "val"));
+}
+
+#[test]
+#[should_panic]
+fn test_set_nft_extension_nft_not_found_panics() {
+    let env = setup_env();
+    let client = NftRewardClient::new(&env, &env.register_contract(None, NftReward));
+
+    let owner = Address::generate(&env);
+
+    // Should panic: NFT 999 does not exist
+    client.set_nft_extension(&999, &owner, &String::from_str(&env, "key"), &String::from_str(&env, "val"));
+}
+
+#[test]
+fn test_extensions_visible_in_get_nft_metadata() {
+    let env = setup_env();
+    let client = NftRewardClient::new(&env, &env.register_contract(None, NftReward));
+
+    let owner = Address::generate(&env);
+    let metadata = create_metadata(&env, "Ext NFT", "Desc", "ipfs://ext");
+    let nft_id = client.mint_reward_nft(&1, &owner, &metadata);
+
+    client.set_nft_extension(&nft_id, &owner, &String::from_str(&env, "trait"), &String::from_str(&env, "fire"));
+
+    let meta = client.get_nft_metadata(&nft_id).unwrap();
+    let ext_val = meta.extensions.get(String::from_str(&env, "trait"));
+    assert_eq!(ext_val, Some(String::from_str(&env, "fire")));
 }

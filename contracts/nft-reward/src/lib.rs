@@ -17,6 +17,8 @@ pub struct NftMetadata {
     pub rarity: u32,
     /// Custom tier for special categories (0 = none).
     pub tier: u32,
+    /// Arbitrary key-value metadata extensions (max 10 entries).
+    pub extensions: Map<String, String>,
 }
 
 /// Complete metadata returned by get_nft_metadata (includes NftData-derived fields).
@@ -34,6 +36,7 @@ pub struct NftMetadataResponse {
     pub image_uri: String,
     pub rarity: u32,
     pub tier: u32,
+    pub extensions: Map<String, String>,
 }
 
 /// NFT data structure stored on-chain.
@@ -187,6 +190,7 @@ impl NftReward {
             hunt_title,
             rarity,
             tier,
+            extensions: Map::new(&env),
         };
 
         Self::mint_reward_nft(env, hunt_id, player_address, meta)
@@ -212,6 +216,7 @@ impl NftReward {
             image_uri: nft.metadata.image_uri.clone(),
             rarity: nft.metadata.rarity,
             tier: nft.metadata.tier,
+            extensions: nft.metadata.extensions.clone(),
         })
     }
 
@@ -285,6 +290,52 @@ impl NftReward {
         _to_address: Address,
     ) -> Result<(), crate::errors::NftErrorCode> {
         Err(crate::errors::NftErrorCode::SoulboundNft)
+    }
+
+    /// Sets or updates a single extension field on an NFT's metadata. Owner only.
+    /// Maximum 10 extension fields per NFT.
+    ///
+    /// # Arguments
+    /// * `nft_id` - The NFT to update
+    /// * `owner` - Current owner (must authorize)
+    /// * `key` - Extension key
+    /// * `value` - Extension value
+    pub fn set_nft_extension(
+        env: Env,
+        nft_id: u64,
+        owner: Address,
+        key: String,
+        value: String,
+    ) -> Result<(), crate::errors::NftErrorCode> {
+        owner.require_auth();
+
+        let mut nft = Storage::get_nft(&env, nft_id)
+            .ok_or(crate::errors::NftErrorCode::NftNotFound)?;
+
+        if nft.owner != owner {
+            return Err(crate::errors::NftErrorCode::NotOwner);
+        }
+
+        // Only enforce limit for genuinely new keys.
+        let is_new_key = nft.metadata.extensions.get(key.clone()).is_none();
+        if is_new_key && nft.metadata.extensions.len() >= 10 {
+            return Err(crate::errors::NftErrorCode::TooManyExtensions);
+        }
+
+        nft.metadata.extensions.set(key, value);
+        Storage::save_nft(&env, &nft);
+
+        Ok(())
+    }
+
+    /// Returns the value of a single extension field, or None if not set.
+    ///
+    /// # Arguments
+    /// * `nft_id` - The NFT to query
+    /// * `key` - Extension key to look up
+    pub fn get_nft_extension(env: Env, nft_id: u64, key: String) -> Option<String> {
+        let nft = Storage::get_nft(&env, nft_id)?;
+        nft.metadata.extensions.get(key)
     }
 }
 
