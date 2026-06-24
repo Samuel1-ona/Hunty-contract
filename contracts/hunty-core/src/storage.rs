@@ -102,7 +102,7 @@ impl Storage {
         player: &Address,
     ) -> Option<PlayerProgress> {
         let key = Self::progress_key(hunt_id, player);
-        let result = env
+        env
             .storage()
             .persistent()
             .get::<_, StoredPlayerProgress>(&key)

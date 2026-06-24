@@ -137,7 +137,6 @@ pub struct StoredPlayerProgress {
     pub completed_at: u64,
     pub is_completed: bool,
     pub reward_claimed: bool,
-    pub clue_attempts: Map<u32, u32>,
 }
 
 /// Public view of player progress, with `player` and `hunt_id` reconstructed from the key.
@@ -150,12 +149,10 @@ pub struct PlayerProgress {
     pub completed_clue_index: Map<u32, bool>,
     pub required_completed_count: u32,
     pub total_score: u32,
-    pub required_completed_count: u32,
     pub started_at: u64,
     pub completed_at: u64,
     pub is_completed: bool,
     pub reward_claimed: bool,
-    pub clue_attempts: Map<u32, u32>,
 }
 
 impl PlayerProgress {
@@ -167,7 +164,6 @@ impl PlayerProgress {
             completed_clue_index: Map::new(env),
             required_completed_count: 0,
             total_score: 0,
-            required_completed_count: 0,
             started_at: current_time,
             completed_at: 0,
             is_completed: false,
@@ -187,7 +183,6 @@ impl PlayerProgress {
             completed_at: self.completed_at,
             is_completed: self.is_completed,
             reward_claimed: self.reward_claimed,
-            clue_attempts: self.clue_attempts.clone(),
         }
     }
 
@@ -211,7 +206,6 @@ impl PlayerProgress {
             completed_clue_index,
             required_completed_count: stored.required_completed_count,
             total_score: stored.total_score,
-            required_completed_count: stored.required_completed_count,
             started_at: stored.started_at,
             completed_at: stored.completed_at,
             is_completed: stored.is_completed,

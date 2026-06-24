@@ -3,10 +3,10 @@ extern crate alloc;
 use crate::errors::{HuntError, HuntErrorCode};
 use crate::storage::Storage;
 use crate::types::{
-    AnswerIncorrectEvent, Clue, ClueAddedEvent, ClueCompletedEvent, ClueInfo, ClueRemovedEvent,
+    AnswerIncorrectEvent, Clue, ClueAddedEvent, ClueCompletedEvent, ClueInfo,
     Hunt, HuntActivatedEvent, HuntCancelledEvent, HuntCompletedEvent, HuntCreatedEvent,
     HuntDeactivatedEvent, HuntStatistics, HuntStatus, LeaderboardEntry, PlayerProgress,
-    PlayerRegisteredEvent, RewardClaimedEvent, RewardConfig, TimeBonusConfig,
+    PlayerRegisteredEvent, RewardClaimedEvent, TimeBonusConfig,
 };
 use alloc::string::String as StdString;
 use reward_manager::RewardErrorCode;
@@ -14,8 +14,7 @@ use soroban_sdk::{
     contract, contractimpl, Address, Bytes, BytesN, Env, IntoVal, String, Symbol, Val, Vec,
 };
 
-const MAX_LEADERBOARD_SIZE: u32 = 100;
-const MAX_LEADERBOARD_SCAN_SIZE: usize = 50;
+
 const SUBMISSION_WINDOW_SECS: u64 = 300;
 const MAX_QUESTION_LENGTH: u32 = 2000;
 const MAX_ANSWER_LENGTH: u32 = 256;
