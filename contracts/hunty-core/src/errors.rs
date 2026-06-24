@@ -18,19 +18,14 @@ pub enum HuntErrorCode {
     InvalidTitle = 11,
     InvalidDescription = 12,
     InvalidAddress = 13,
-    InvalidMaxAttempts = 14,
-    MaxAttemptsExceeded = 15,
-    TooManyClues = 16,
-    InvalidQuestion = 17,
-    RefundFailed = 18,
+    TooManyClues = 14,
+    InvalidQuestion = 15,
+    RefundFailed = 16,
     NoCluesAdded = 17,
     HuntNotCompleted = 18,
     RewardAlreadyClaimed = 19,
     RewardDistributionFailed = 20,
     NoRewardsConfigured = 21,
-    NoRequiredClues = 22,
-    InvalidRarity = 23,
-    InvalidTimeBonusConfig = 24,
 }
 
 #[derive(Debug)]
@@ -48,17 +43,12 @@ pub enum HuntError {
     InvalidTitle { reason: String },
     InvalidDescription { reason: String },
     InvalidAddress,
-    InvalidMaxAttempts,
-    MaxAttemptsExceeded,
     TooManyClues { hunt_id: u64, limit: u32 },
     InvalidQuestion,
     HuntNotCompleted { hunt_id: u64 },
     RewardAlreadyClaimed { hunt_id: u64 },
     RewardDistributionFailed { hunt_id: u64 },
     NoRewardsConfigured { hunt_id: u64 },
-    NoRequiredClues { hunt_id: u64 },
-    InvalidRarity { value: u32 },
-    InvalidTimeBonusConfig,
 }
 
 impl fmt::Display for HuntError {
@@ -110,12 +100,6 @@ impl fmt::Display for HuntError {
             HuntError::InvalidAddress => {
                 write!(f, "Invalid address")
             }
-            HuntError::InvalidMaxAttempts => {
-                write!(f, "Invalid max attempts value")
-            }
-            HuntError::MaxAttemptsExceeded => {
-                write!(f, "Max answer attempts exceeded for this clue")
-            }
             HuntError::TooManyClues { hunt_id, limit } => {
                 write!(f, "Too many clues for hunt {} (limit {})", hunt_id, limit)
             }
@@ -133,15 +117,6 @@ impl fmt::Display for HuntError {
             }
             HuntError::NoRewardsConfigured { hunt_id } => {
                 write!(f, "No rewards configured for hunt {}", hunt_id)
-            }
-            HuntError::NoRequiredClues { hunt_id } => {
-                write!(f, "Hunt {} has no required clues; at least one required clue must exist before activation", hunt_id)
-            }
-            HuntError::InvalidEndTime => {
-                write!(f, "Invalid end time: must be in the future")
-            }
-            HuntError::InvalidTimeBonusConfig => {
-                write!(f, "Invalid time bonus configuration")
             }
         }
     }
@@ -163,17 +138,12 @@ impl From<HuntError> for HuntErrorCode {
             HuntError::InvalidTitle { .. } => HuntErrorCode::InvalidTitle,
             HuntError::InvalidDescription { .. } => HuntErrorCode::InvalidDescription,
             HuntError::InvalidAddress => HuntErrorCode::InvalidAddress,
-            HuntError::InvalidMaxAttempts => HuntErrorCode::InvalidMaxAttempts,
-            HuntError::MaxAttemptsExceeded => HuntErrorCode::MaxAttemptsExceeded,
             HuntError::TooManyClues { .. } => HuntErrorCode::TooManyClues,
             HuntError::InvalidQuestion => HuntErrorCode::InvalidQuestion,
             HuntError::HuntNotCompleted { .. } => HuntErrorCode::HuntNotCompleted,
             HuntError::RewardAlreadyClaimed { .. } => HuntErrorCode::RewardAlreadyClaimed,
             HuntError::RewardDistributionFailed { .. } => HuntErrorCode::RewardDistributionFailed,
             HuntError::NoRewardsConfigured { .. } => HuntErrorCode::NoRewardsConfigured,
-            HuntError::NoRequiredClues { .. } => HuntErrorCode::NoRequiredClues,
-            HuntError::InvalidRarity { .. } => HuntErrorCode::InvalidRarity,
-            HuntError::InvalidTimeBonusConfig => HuntErrorCode::InvalidTimeBonusConfig,
         }
     }
 }

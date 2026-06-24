@@ -10,6 +10,7 @@ doctest = false
 
 [dependencies]
 soroban-sdk = { workspace = true }
+hunty-migration = { path = "../migration", package = "hunty-migration" }
 
 [dev-dependencies]
 soroban-sdk = { workspace = true, features = ["testutils"] }

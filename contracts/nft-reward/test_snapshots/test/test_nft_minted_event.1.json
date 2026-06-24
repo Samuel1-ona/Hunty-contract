@@ -87,14 +87,6 @@
                   "map": [
                     {
                       "key": {
-                        "symbol": "completion_player"
-                      },
-                      "val": {
-                        "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4"
-                      }
-                    },
-                    {
-                      "key": {
                         "symbol": "hunt_id"
                       },
                       "val": {
@@ -109,6 +101,12 @@
                         "map": [
                           {
                             "key": {
+                              "symbol": "creator"
+                            },
+                            "val": "void"
+                          },
+                          {
+                            "key": {
                               "symbol": "description"
                             },
                             "val": {
@@ -120,7 +118,7 @@
                               "symbol": "hunt_title"
                             },
                             "val": {
-                              "string": "Indexed Hunt"
+                              "string": "Event Test"
                             }
                           },
                           {
@@ -136,15 +134,21 @@
                               "symbol": "rarity"
                             },
                             "val": {
-                              "u32": 4
+                              "u32": 0
                             }
+                          },
+                          {
+                            "key": {
+                              "symbol": "royalty_bps"
+                            },
+                            "val": "void"
                           },
                           {
                             "key": {
                               "symbol": "tier"
                             },
                             "val": {
-                              "u32": 2
+                              "u32": 0
                             }
                           },
                           {
@@ -181,8 +185,61 @@
                       "val": {
                         "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4"
                       }
+                    },
+                    {
+                      "key": {
+                        "symbol": "transferable"
+                      },
+                      "val": {
+                        "bool": false
+                      }
                     }
                   ]
+                }
+              }
+            },
+            "ext": "v0"
+          },
+          4095
+        ]
+      ],
+      [
+        {
+          "contract_data": {
+            "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
+            "key": {
+              "vec": [
+                {
+                  "symbol": "ONFC"
+                },
+                {
+                  "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4"
+                }
+              ]
+            },
+            "durability": "persistent"
+          }
+        },
+        [
+          {
+            "last_modified_ledger_seq": 0,
+            "data": {
+              "contract_data": {
+                "ext": "v0",
+                "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
+                "key": {
+                  "vec": [
+                    {
+                      "symbol": "ONFC"
+                    },
+                    {
+                      "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4"
+                    }
+                  ]
+                },
+                "durability": "persistent",
+                "val": {
+                  "u32": 1
                 }
               }
             },
@@ -202,6 +259,9 @@
                 },
                 {
                   "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4"
+                },
+                {
+                  "u32": 0
                 }
               ]
             },
@@ -222,17 +282,65 @@
                     },
                     {
                       "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4"
+                    },
+                    {
+                      "u32": 0
                     }
                   ]
                 },
                 "durability": "persistent",
                 "val": {
+                  "u64": 1
+                }
+              }
+            },
+            "ext": "v0"
+          },
+          4095
+        ]
+      ],
+      [
+        {
+          "contract_data": {
+            "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
+            "key": {
+              "vec": [
+                {
+                  "symbol": "ONFX"
+                },
+                {
+                  "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4"
+                },
+                {
+                  "u64": 1
+                }
+              ]
+            },
+            "durability": "persistent"
+          }
+        },
+        [
+          {
+            "last_modified_ledger_seq": 0,
+            "data": {
+              "contract_data": {
+                "ext": "v0",
+                "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
+                "key": {
                   "vec": [
+                    {
+                      "symbol": "ONFX"
+                    },
+                    {
+                      "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4"
+                    },
                     {
                       "u64": 1
                     }
                   ]
-                }
+                },
+                "durability": "persistent",
+                "val": "void"
               }
             },
             "ext": "v0"
@@ -329,6 +437,12 @@
                     "map": [
                       {
                         "key": {
+                          "symbol": "creator"
+                        },
+                        "val": "void"
+                      },
+                      {
+                        "key": {
                           "symbol": "description"
                         },
                         "val": {
@@ -340,7 +454,7 @@
                           "symbol": "hunt_title"
                         },
                         "val": {
-                          "string": "Indexed Hunt"
+                          "string": "Event Test"
                         }
                       },
                       {
@@ -356,15 +470,21 @@
                           "symbol": "rarity"
                         },
                         "val": {
-                          "u32": 4
+                          "u32": 0
                         }
+                      },
+                      {
+                        "key": {
+                          "symbol": "royalty_bps"
+                        },
+                        "val": "void"
                       },
                       {
                         "key": {
                           "symbol": "tier"
                         },
                         "val": {
-                          "u32": 2
+                          "u32": 0
                         }
                       },
                       {
@@ -407,7 +527,7 @@
                     "symbol": "rarity"
                   },
                   "val": {
-                    "u32": 4
+                    "u32": 0
                   }
                 },
                 {
@@ -415,7 +535,7 @@
                     "symbol": "tier"
                   },
                   "val": {
-                    "u32": 2
+                    "u32": 0
                   }
                 }
               ]

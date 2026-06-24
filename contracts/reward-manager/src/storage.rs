@@ -38,6 +38,8 @@ impl Storage {
     const POOL_DEP_KEY: soroban_sdk::Symbol = symbol_short!("PDEP");
     const POOL_DST_KEY: soroban_sdk::Symbol = symbol_short!("PDST");
     const HUNTY_CORE_KEY: soroban_sdk::Symbol = symbol_short!("HCORE");
+    const TOTAL_XLM_DST_KEY: soroban_sdk::Symbol = symbol_short!("TXDST");
+    const IN_DISTRIBUTION_KEY: soroban_sdk::Symbol = symbol_short!("IN_DIST");
 
     // ========== XLM Token Address ==========
 
@@ -176,6 +178,19 @@ impl Storage {
         env.storage().persistent().get(&Self::TOTAL_XLM_DST_KEY).unwrap_or(0)
     }
 
+    // ========== Reentrancy Guard ==========
+
+    pub fn set_in_distribution(env: &Env, value: bool) {
+        env.storage().persistent().set(&Self::IN_DISTRIBUTION_KEY, &value);
+    }
+
+    pub fn is_in_distribution(env: &Env) -> bool {
+        env.storage()
+            .persistent()
+            .get(&Self::IN_DISTRIBUTION_KEY)
+            .unwrap_or(false)
+    }
+
     // ========== Key Helpers ==========
 
     fn distribution_key(hunt_id: u64, player: &Address) -> (soroban_sdk::Symbol, u64, Address) {
@@ -196,6 +211,16 @@ impl Storage {
 
     fn pool_dst_key(hunt_id: u64) -> (soroban_sdk::Symbol, u64) {
         (Self::POOL_DST_KEY, hunt_id)
+    }
+
+    // --- Contract version ---
+
+    pub fn set_contract_version(env: &Env, version: u32) {
+        env.storage().instance().set(&symbol_short!("CVER"), &version);
+    }
+
+    pub fn get_contract_version(env: &Env) -> Option<u32> {
+        env.storage().instance().get(&symbol_short!("CVER"))
     }
 }
 
