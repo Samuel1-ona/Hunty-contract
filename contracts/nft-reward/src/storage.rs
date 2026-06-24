@@ -22,7 +22,9 @@ impl Storage {
     pub const CONTRACT_PREFIX: &'static str = "NR";
 
     const NFT_KEY: soroban_sdk::Symbol = symbol_short!("NFT");
-    const NFT_COUNTER_KEY: soroban_sdk::Symbol = symbol_short!("CNTR");
+    /// NFT ID counter — uses "NFTCNT" (NR-prefixed) to avoid collision with
+    /// HuntyCore's hunt counter.
+    pub(crate) const NFT_COUNTER_KEY: soroban_sdk::Symbol = symbol_short!("NFTCNT");
     const OWNER_NFT_COUNT_KEY: soroban_sdk::Symbol = symbol_short!("ONFC");
     const MAX_SUPPLY_KEY: soroban_sdk::Symbol = symbol_short!("MAXS");
     const INITIALIZED_KEY: soroban_sdk::Symbol = symbol_short!("INIT");
