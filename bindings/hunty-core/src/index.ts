@@ -182,6 +182,7 @@ export interface HuntCancelledEvent {
 
 
 export interface HuntCompletedEvent {
+  completion_rank: u32;
   completion_time: u64;
   hunt_id: u64;
   player: string;
