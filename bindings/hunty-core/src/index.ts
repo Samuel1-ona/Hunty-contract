@@ -24,6 +24,7 @@ export interface Hunt {
   creator: string;
   title: string;
   description: string;
+  image_uri: string;
   status: HuntStatus;
   created_at: bigint;
   activated_at: bigint;
@@ -93,16 +94,18 @@ export class Client extends ContractClient {
     creator,
     title,
     description,
+    image_uri,
     start_time,
     end_time,
   }: {
     creator: string;
     title: string;
     description: string;
+    image_uri: string;
     start_time: bigint | undefined;
     end_time: bigint | undefined;
   }): Promise<AssembledTransaction<bigint>> {
-    return this.call("create_hunt", creator, title, description, start_time, end_time);
+    return this.call("create_hunt", creator, title, description, image_uri, start_time, end_time);
   }
 
   async add_clue({
