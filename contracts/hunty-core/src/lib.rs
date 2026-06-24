@@ -12,6 +12,9 @@ use soroban_sdk::{
     contract, contractimpl, Address, Bytes, BytesN, Env, IntoVal, String, Symbol, Val, Vec,
 };
 
+const MAX_TITLE_LENGTH: u32 = 200;
+const MAX_DESCRIPTION_LENGTH: u32 = 2000;
+const MAX_IMAGE_URI_LENGTH: u32 = 500;
 const MAX_QUESTION_LENGTH: u32 = 2000;
 const MAX_ANSWER_LENGTH: u32 = 256;
 const MAX_CLUES_PER_HUNT: u32 = 100;
@@ -28,48 +31,42 @@ pub struct HuntyCore;
 #[contractimpl]
 impl HuntyCore {
     /// Creates a new scavenger hunt with the provided metadata.
-    ///
-    /// # Arguments
-    /// * `env` - The Soroban environment
-    /// * `creator` - The address of the hunt creator (typically use env.invoker() from the caller)
-    /// * `title` - The title of the hunt (max 200 characters)
-    /// * `description` - The description of the hunt (max 2000 characters)
-    /// * `start_time` - Optional start timestamp (0 means no start time restriction)
-    /// * `end_time` - Optional end timestamp (0 means no end time restriction)
-    ///
-    /// # Returns
-    /// The unique hunt ID of the newly created hunt
-    ///
-    /// # Errors
-    /// * `InvalidTitle` - If title is empty or exceeds maximum length
-    /// * `InvalidDescription` - If description exceeds maximum length
-    /// * `InvalidAddress` - If creator address is invalid
     pub fn create_hunt(
         env: Env,
         creator: Address,
         title: String,
         description: String,
+        image_uri: String,
         _start_time: Option<u64>,
         end_time: Option<u64>,
     ) -> Result<u64, HuntErrorCode> {
-        // Validate creator address - in Soroban, Address is always valid if constructed,
-        // but we ensure it's not a zero/null address pattern if needed
-        // For now, we accept any valid Address type
-
-        // Validate title
         let title_len = title.len();
-        if title_len == 0 {
-            return Err(HuntErrorCode::InvalidTitle);
-        }
-        const MAX_TITLE_LENGTH: u32 = 200;
-        if title_len > MAX_TITLE_LENGTH {
+        if title_len == 0 || title_len > MAX_TITLE_LENGTH {
             return Err(HuntErrorCode::InvalidTitle);
         }
 
-        // Validate description
-        const MAX_DESCRIPTION_LENGTH: u32 = 2000;
-        if description.len() > MAX_DESCRIPTION_LENGTH {
+        let desc_len = description.len();
+        if desc_len == 0 || desc_len > MAX_DESCRIPTION_LENGTH {
             return Err(HuntErrorCode::InvalidDescription);
+        }
+
+        let uri_len = image_uri.len();
+        if uri_len == 0 || uri_len > MAX_IMAGE_URI_LENGTH {
+            return Err(HuntErrorCode::InvalidImageUri);
+        }
+        let mut valid_prefix = false;
+        if uri_len >= 8 {
+            let mut prefix = [0u8; 8];
+            image_uri.copy_into_slice(&mut prefix);
+            valid_prefix = &prefix == b"https://";
+        }
+        if !valid_prefix && uri_len >= 7 {
+            let mut prefix = [0u8; 7];
+            image_uri.copy_into_slice(&mut prefix);
+            valid_prefix = &prefix == b"ipfs://";
+        }
+        if !valid_prefix {
+            return Err(HuntErrorCode::InvalidImageUri);
         }
 
         // Get current timestamp
@@ -88,12 +85,12 @@ impl HuntyCore {
             0,     // nft_tier: 0 initially
         );
 
-        // Create the hunt with Draft status
         let hunt = Hunt {
             hunt_id,
             creator: creator.clone(),
             title: title.clone(),
             description: description.clone(),
+            image_uri: image_uri.clone(),
             status: HuntStatus::Draft,
             created_at: current_time,
             activated_at: 0, // Will be set when hunt is activated

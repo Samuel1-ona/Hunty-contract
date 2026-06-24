@@ -22,14 +22,15 @@ pub enum HuntErrorCode {
     MaxAttemptsExceeded = 15,
     TooManyClues = 16,
     InvalidQuestion = 17,
-    RefundFailed = 18,
-    NoCluesAdded = 17,
     HuntNotCompleted = 18,
     RewardAlreadyClaimed = 19,
     RewardDistributionFailed = 20,
     NoRewardsConfigured = 21,
     NoRequiredClues = 22,
     InvalidRarity = 23,
+    RefundFailed = 24,
+    NoCluesAdded = 25,
+    InvalidImageUri = 26,
 }
 
 #[derive(Debug)]
@@ -57,6 +58,7 @@ pub enum HuntError {
     NoRewardsConfigured { hunt_id: u64 },
     NoRequiredClues { hunt_id: u64 },
     InvalidRarity { value: u32 },
+    InvalidImageUri { reason: String },
 }
 
 impl fmt::Display for HuntError {
@@ -138,6 +140,9 @@ impl fmt::Display for HuntError {
             HuntError::InvalidRarity { value } => {
                 write!(f, "Invalid nft_rarity {}: must be 0-5", value)
             }
+            HuntError::InvalidImageUri { reason } => {
+                write!(f, "Invalid image URI: {:?}", reason)
+            }
         }
     }
 }
@@ -168,6 +173,7 @@ impl From<HuntError> for HuntErrorCode {
             HuntError::NoRewardsConfigured { .. } => HuntErrorCode::NoRewardsConfigured,
             HuntError::NoRequiredClues { .. } => HuntErrorCode::NoRequiredClues,
             HuntError::InvalidRarity { .. } => HuntErrorCode::InvalidRarity,
+            HuntError::InvalidImageUri { .. } => HuntErrorCode::InvalidImageUri,
         }
     }
 }
