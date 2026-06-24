@@ -10,6 +10,8 @@ impl Storage {
     const OWNER_NFT_COUNT_KEY: soroban_sdk::Symbol = symbol_short!("ONFC");
     const MAX_SUPPLY_KEY: soroban_sdk::Symbol = symbol_short!("MAXS");
     const INITIALIZED_KEY: soroban_sdk::Symbol = symbol_short!("INIT");
+    const ADMIN_KEY: soroban_sdk::Symbol = symbol_short!("ADMIN");
+    const MINTER_KEY: soroban_sdk::Symbol = symbol_short!("MINT");
 
     fn nft_key(nft_id: u64) -> (soroban_sdk::Symbol, u64) {
         (Self::NFT_KEY, nft_id)
@@ -54,18 +56,13 @@ impl Storage {
         env.storage().instance().get(&Self::ADMIN_KEY)
     }
 
+    pub fn get_reward_manager(env: &Env) -> Option<Address> {
+        env.storage().instance().get(&symbol_short!("RWDMGR"))
+    }
+
     // --- Max supply ---
 
-    /// Stores max supply. Passing None is a no-op (absence of the key means unlimited).
-    pub fn save_max_supply(env: &Env, max_supply: Option<u64>) {
-        if let Some(supply) = max_supply {
-            env.storage().instance().set(&Self::MAX_SUPPLY_KEY, &supply);
-        }
-    }
 
-    pub fn get_max_supply(env: &Env) -> Option<u64> {
-        env.storage().instance().get(&Self::MAX_SUPPLY_KEY)
-    }
 
     // --- Minter whitelist ---
 
@@ -130,14 +127,6 @@ impl Storage {
             .persistent()
             .get(&Self::MAX_SUPPLY_KEY)
             .unwrap_or(None)
-    }
-
-    /// Returns whether the contract has been initialized.
-    pub fn is_initialized(env: &Env) -> bool {
-        env.storage()
-            .persistent()
-            .get(&Self::INITIALIZED_KEY)
-            .unwrap_or(false)
     }
 
     /// Adds an NFT ID to the owner's index.

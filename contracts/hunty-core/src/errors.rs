@@ -31,6 +31,8 @@ pub enum HuntErrorCode {
     NoRequiredClues = 22,
     InvalidRarity = 23,
     InvalidTimeBonusConfig = 24,
+    SubmissionExpired = 25,
+    DuplicateSubmission = 26,
 }
 
 #[derive(Debug)]
@@ -59,6 +61,8 @@ pub enum HuntError {
     NoRequiredClues { hunt_id: u64 },
     InvalidRarity { value: u32 },
     InvalidTimeBonusConfig,
+    SubmissionExpired,
+    DuplicateSubmission,
 }
 
 impl fmt::Display for HuntError {
@@ -143,6 +147,12 @@ impl fmt::Display for HuntError {
             HuntError::InvalidTimeBonusConfig => {
                 write!(f, "Invalid time bonus configuration")
             }
+            HuntError::SubmissionExpired => {
+                write!(f, "Submission timestamp is outside the allowed time window")
+            }
+            HuntError::DuplicateSubmission => {
+                write!(f, "Duplicate answer submission detected")
+            }
         }
     }
 }
@@ -174,6 +184,8 @@ impl From<HuntError> for HuntErrorCode {
             HuntError::NoRequiredClues { .. } => HuntErrorCode::NoRequiredClues,
             HuntError::InvalidRarity { .. } => HuntErrorCode::InvalidRarity,
             HuntError::InvalidTimeBonusConfig => HuntErrorCode::InvalidTimeBonusConfig,
+            HuntError::SubmissionExpired => HuntErrorCode::SubmissionExpired,
+            HuntError::DuplicateSubmission => HuntErrorCode::DuplicateSubmission,
         }
     }
 }

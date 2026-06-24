@@ -219,21 +219,21 @@ mod test {
         env.ledger().set_timestamp(1_700_000_000);
         env.mock_all_auths();
         as_core_contract(&env, &contract_id, |env| {
-            HuntyCore::submit_answer(env.clone(), hunt_id, 1, player_fast.clone(), answer.clone())
+            HuntyCore::submit_answer(env.clone(), hunt_id, 1, player_fast.clone(), answer.clone(), env.ledger().timestamp())
                 .unwrap();
         });
 
         env.ledger().set_timestamp(1_700_000_050);
         env.mock_all_auths();
         as_core_contract(&env, &contract_id, |env| {
-            HuntyCore::submit_answer(env.clone(), hunt_id, 1, player_mid.clone(), answer.clone())
+            HuntyCore::submit_answer(env.clone(), hunt_id, 1, player_mid.clone(), answer.clone(), env.ledger().timestamp())
                 .unwrap();
         });
 
         env.ledger().set_timestamp(1_700_000_100);
         env.mock_all_auths();
         as_core_contract(&env, &contract_id, |env| {
-            HuntyCore::submit_answer(env.clone(), hunt_id, 1, player_slow.clone(), answer.clone())
+            HuntyCore::submit_answer(env.clone(), hunt_id, 1, player_slow.clone(), answer.clone(), env.ledger().timestamp())
                 .unwrap();
         });
 
@@ -691,7 +691,7 @@ mod test {
                 1,
                 player.clone(),
                 a1.clone(),
-            )
+            , env.ledger().timestamp())
             .unwrap();
         });
         env.mock_all_auths();
@@ -1441,7 +1441,7 @@ mod test {
                 1,
                 player.clone(),
                 String::from_str(env, "Washington"),
-            )
+            , env.ledger().timestamp())
             .unwrap();
         });
         let progress = as_core_contract(&env, &contract_id, |env| {
@@ -1464,7 +1464,7 @@ mod test {
                     1,
                     p.clone(),
                     String::from_str(env, alias),
-                )
+                , env.ledger().timestamp())
                 .unwrap();
             });
             let progress = as_core_contract(&env, &contract_id, |env| {
@@ -1780,7 +1780,7 @@ mod test {
             assert_eq!(progress.total_score, 0);
 
             // Submit correct answer
-            HuntyCore::submit_answer(env.clone(), hunt_id, 1, player.clone(), answer).unwrap();
+            HuntyCore::submit_answer(env.clone(), hunt_id, 1, player.clone(), answer, env.ledger().timestamp()).unwrap();
 
             // Verify score is 30 (10 * 3)
             let progress =
@@ -2711,7 +2711,7 @@ mod test {
             // Move time past end_time
             env.ledger().set_timestamp(1_700_000_002);
             env.mock_all_auths();
-            HuntyCore::submit_answer(env.clone(), hunt_id, 1, player.clone(), answer.clone())
+            HuntyCore::submit_answer(env.clone(), hunt_id, 1, player.clone(), answer.clone(), env.ledger().timestamp())
                 .unwrap_err()
         });
 
@@ -2860,7 +2860,7 @@ mod test {
         });
         env.mock_all_auths();
         as_core_contract(&env, &contract_id, |env| {
-            HuntyCore::submit_answer(env.clone(), hunt_id, 1, player.clone(), answer.clone())
+            HuntyCore::submit_answer(env.clone(), hunt_id, 1, player.clone(), answer.clone(), env.ledger().timestamp())
                 .unwrap();
         });
         let progress = as_core_contract(&env, &contract_id, |env| {
@@ -2941,12 +2941,12 @@ mod test {
         });
         env.mock_all_auths();
         as_core_contract(&env, &contract_id, |env| {
-            HuntyCore::submit_answer(env.clone(), hunt_id, 1, player.clone(), answer.clone())
+            HuntyCore::submit_answer(env.clone(), hunt_id, 1, player.clone(), answer.clone(), env.ledger().timestamp())
                 .unwrap();
         });
         env.mock_all_auths();
         let resubmit = as_core_contract(&env, &contract_id, |env| {
-            HuntyCore::submit_answer(env.clone(), hunt_id, 1, player.clone(), answer)
+            HuntyCore::submit_answer(env.clone(), hunt_id, 1, player.clone(), answer, env.ledger().timestamp())
                 .unwrap();
         });
 
@@ -3008,9 +3008,9 @@ mod test {
         });
         env.mock_all_auths();
         as_core_contract(&env, &contract_id, |env| {
-            HuntyCore::submit_answer(env.clone(), hunt_id, 1, player_a.clone(), answer.clone())
+            HuntyCore::submit_answer(env.clone(), hunt_id, 1, player_a.clone(), answer.clone(), env.ledger().timestamp())
                 .unwrap();
-            HuntyCore::submit_answer(env.clone(), hunt_id, 2, player_b.clone(), answer.clone())
+            HuntyCore::submit_answer(env.clone(), hunt_id, 2, player_b.clone(), answer.clone(), env.ledger().timestamp())
                 .unwrap();
         });
 
@@ -3094,11 +3094,11 @@ mod test {
         });
         env.mock_all_auths();
         as_core_contract(&env, &contract_id, |env| {
-            HuntyCore::submit_answer(env.clone(), hunt_id, 1, player.clone(), a.clone()).unwrap();
+            HuntyCore::submit_answer(env.clone(), hunt_id, 1, player.clone(), a.clone(), env.ledger().timestamp()).unwrap();
         });
         env.mock_all_auths();
         as_core_contract(&env, &contract_id, |env| {
-            HuntyCore::submit_answer(env.clone(), hunt_id, 2, player.clone(), a).unwrap();
+            HuntyCore::submit_answer(env.clone(), hunt_id, 2, player.clone(), a, env.ledger().timestamp()).unwrap();
         });
         let list = as_core_contract(&env, &contract_id, |env| {
             HuntyCore::get_completed_clues(env.clone(), hunt_id, player.clone())
@@ -3145,13 +3145,13 @@ mod test {
 
         env.mock_all_auths();
         as_core_contract(&env, &contract_id, |env| {
-            HuntyCore::submit_answer(env.clone(), hunt_id, 1, player.clone(), answer.clone())
+            HuntyCore::submit_answer(env.clone(), hunt_id, 1, player.clone(), answer.clone(), env.ledger().timestamp())
                 .unwrap();
         });
 
         env.mock_all_auths();
         let err = as_core_contract(&env, &contract_id, |env| {
-            HuntyCore::submit_answer(env.clone(), hunt_id, 1, player.clone(), answer.clone())
+            HuntyCore::submit_answer(env.clone(), hunt_id, 1, player.clone(), answer.clone(), env.ledger().timestamp())
                 .unwrap_err()
         });
 
@@ -3269,29 +3269,29 @@ mod test {
         env.ledger().set_timestamp(1_700_000_001);
         env.mock_all_auths();
         as_core_contract(&env, &contract_id, |env| {
-            HuntyCore::submit_answer(env.clone(), hunt_id, 1, player_b.clone(), answer.clone())
+            HuntyCore::submit_answer(env.clone(), hunt_id, 1, player_b.clone(), answer.clone(), env.ledger().timestamp())
                 .unwrap();
         });
         env.mock_all_auths();
         as_core_contract(&env, &contract_id, |env| {
-            HuntyCore::submit_answer(env.clone(), hunt_id, 2, player_b.clone(), answer.clone())
+            HuntyCore::submit_answer(env.clone(), hunt_id, 2, player_b.clone(), answer.clone(), env.ledger().timestamp())
                 .unwrap();
         });
         env.ledger().set_timestamp(1_700_000_002);
         env.mock_all_auths();
         as_core_contract(&env, &contract_id, |env| {
-            HuntyCore::submit_answer(env.clone(), hunt_id, 1, player_a.clone(), answer.clone())
+            HuntyCore::submit_answer(env.clone(), hunt_id, 1, player_a.clone(), answer.clone(), env.ledger().timestamp())
                 .unwrap();
         });
         env.mock_all_auths();
         as_core_contract(&env, &contract_id, |env| {
-            HuntyCore::submit_answer(env.clone(), hunt_id, 2, player_a.clone(), answer.clone())
+            HuntyCore::submit_answer(env.clone(), hunt_id, 2, player_a.clone(), answer.clone(), env.ledger().timestamp())
                 .unwrap();
         });
         env.ledger().set_timestamp(1_700_000_003);
         env.mock_all_auths();
         as_core_contract(&env, &contract_id, |env| {
-            HuntyCore::submit_answer(env.clone(), hunt_id, 1, player_c.clone(), answer.clone())
+            HuntyCore::submit_answer(env.clone(), hunt_id, 1, player_c.clone(), answer.clone(), env.ledger().timestamp())
                 .unwrap();
         });
         let board = as_core_contract(&env, &contract_id, |env| {
@@ -3415,18 +3415,18 @@ mod test {
         env.ledger().set_timestamp(1_700_000_001);
         env.mock_all_auths();
         as_core_contract(&env, &contract_id, |env| {
-            HuntyCore::submit_answer(env.clone(), hunt_id, 1, player_a.clone(), answer.clone())
+            HuntyCore::submit_answer(env.clone(), hunt_id, 1, player_a.clone(), answer.clone(), env.ledger().timestamp())
                 .unwrap();
         });
         env.ledger().set_timestamp(1_700_000_002);
         env.mock_all_auths();
         as_core_contract(&env, &contract_id, |env| {
-            HuntyCore::submit_answer(env.clone(), hunt_id, 1, player_b.clone(), answer.clone())
+            HuntyCore::submit_answer(env.clone(), hunt_id, 1, player_b.clone(), answer.clone(), env.ledger().timestamp())
                 .unwrap();
         });
         env.mock_all_auths();
         as_core_contract(&env, &contract_id, |env| {
-            HuntyCore::submit_answer(env.clone(), hunt_id, 2, player_c.clone(), answer.clone())
+            HuntyCore::submit_answer(env.clone(), hunt_id, 2, player_c.clone(), answer.clone(), env.ledger().timestamp())
                 .unwrap();
         });
 
@@ -3558,12 +3558,12 @@ mod test {
         });
         env.mock_all_auths();
         as_core_contract(&env, &contract_id, |env| {
-            HuntyCore::submit_answer(env.clone(), hunt_id, 1, player1.clone(), answer.clone())
+            HuntyCore::submit_answer(env.clone(), hunt_id, 1, player1.clone(), answer.clone(), env.ledger().timestamp())
                 .unwrap();
         });
         env.mock_all_auths();
         as_core_contract(&env, &contract_id, |env| {
-            HuntyCore::submit_answer(env.clone(), hunt_id, 1, player2.clone(), answer.clone())
+            HuntyCore::submit_answer(env.clone(), hunt_id, 1, player2.clone(), answer.clone(), env.ledger().timestamp())
                 .unwrap();
         });
         let stats = as_core_contract(&env, &contract_id, |env| {
@@ -3636,7 +3636,7 @@ mod test {
         // Submit correct answer (triggers is_completed = true)
         env.mock_all_auths();
         as_core_contract(env, &contract_id, |env| {
-            HuntyCore::submit_answer(env.clone(), hunt_id, 1, player.clone(), answer.clone())
+            HuntyCore::submit_answer(env.clone(), hunt_id, 1, player.clone(), answer.clone(), env.ledger().timestamp())
                 .unwrap();
         });
 
@@ -3736,7 +3736,7 @@ mod test {
                 1,
                 player.clone(),
                 SorobanString::from_str(env, "2"),
-            )
+            , env.ledger().timestamp())
             .unwrap();
         });
 
@@ -3872,7 +3872,7 @@ mod test {
                 1,
                 player.clone(),
                 SorobanString::from_str(env, "2"),
-            )
+            , env.ledger().timestamp())
             .unwrap();
         });
         env.mock_all_auths();
@@ -4079,7 +4079,7 @@ mod test {
                     1,
                     player.clone(),
                     SorobanString::from_str(env, "2"),
-                )
+                , env.ledger().timestamp())
                 .unwrap();
             });
             env.mock_all_auths();
@@ -4204,7 +4204,7 @@ mod test {
                     1,
                     (*p).clone(),
                     String::from_str(env, "a"),
-                )
+                , env.ledger().timestamp())
                 .unwrap();
             });
         }
@@ -4282,7 +4282,7 @@ mod test {
                     1,
                     (*p).clone(),
                     String::from_str(env, "a"),
-                )
+                , env.ledger().timestamp())
                 .unwrap();
             }
         });
@@ -4416,7 +4416,7 @@ mod test {
                 1,
                 player.clone(),
                 String::from_str(env, "a1"),
-            )
+            , env.ledger().timestamp())
             .unwrap();
         });
 
@@ -4483,7 +4483,7 @@ mod test {
                 1,
                 player2.clone(),
                 String::from_str(env, "2"),
-            )
+            , env.ledger().timestamp())
             .unwrap();
         });
 
@@ -4637,11 +4637,11 @@ fn test_get_hunt_statistics_mixed_completion_states() {
     // Player1 and Player2 solve the required clue
     env.mock_all_auths();
     execute_in_contract(&env, &contract_id, |env| {
-        HuntyCore::submit_answer(env.clone(), hunt_id, 1, player1.clone(), answer.clone()).unwrap();
+        HuntyCore::submit_answer(env.clone(), hunt_id, 1, player1.clone(), answer.clone(), env.ledger().timestamp()).unwrap();
     });
     env.mock_all_auths();
     execute_in_contract(&env, &contract_id, |env| {
-        HuntyCore::submit_answer(env.clone(), hunt_id, 1, player2.clone(), answer.clone()).unwrap();
+        HuntyCore::submit_answer(env.clone(), hunt_id, 1, player2.clone(), answer.clone(), env.ledger().timestamp()).unwrap();
     });
 
     // Player3 remains incomplete (no submissions)
@@ -4699,5 +4699,90 @@ fn test_get_hunt_statistics_mixed_completion_states() {
         let config = crate::types::RewardConfig::new(7, false, None, 3, 0, 0);
         let amount = config.reward_per_winner();
         assert_eq!(amount, 2, "xlm_pool=7 / max_winners=3 must round down to 2");
+    }
+
+    #[test]
+    fn test_submit_answer_replay_protection() {
+        let env = Env::default();
+        env.ledger().set_timestamp(1_700_000_000);
+        
+        let creator = Address::generate(&env);
+        let player = Address::generate(&env);
+        let contract_id = env.register_contract(None, HuntyCore);
+
+        let hunt_id = as_core_contract(&env, &contract_id, |env| {
+            let hid = HuntyCore::create_hunt(
+                env.clone(),
+                creator.clone(),
+                String::from_str(env, "Hunt"),
+                String::from_str(env, "Desc"),
+                None,
+                None,
+            )
+            .unwrap();
+
+            HuntyCore::add_clue(
+                env.clone(),
+                hid,
+                String::from_str(env, "Q"),
+                String::from_str(env, "A"),
+                10,
+                true,
+            )
+            .unwrap();
+
+            HuntyCore::activate_hunt(env.clone(), hid, creator.clone()).unwrap();
+            hid
+        });
+
+        env.mock_all_auths();
+        as_core_contract(&env, &contract_id, |env| {
+            HuntyCore::register_player(env.clone(), hunt_id, player.clone()).unwrap();
+        });
+
+        // 1. Submit answer with valid timestamp (success)
+        let valid_timestamp = env.ledger().timestamp();
+        env.mock_all_auths();
+        as_core_contract(&env, &contract_id, |env| {
+            HuntyCore::submit_answer(
+                env.clone(),
+                hunt_id,
+                1,
+                player.clone(),
+                String::from_str(env, "A"),
+                valid_timestamp,
+            )
+            .unwrap();
+        });
+
+        // 2. Submit EXACT same answer with EXACT same timestamp (should fail as duplicate)
+        env.mock_all_auths();
+        let result_duplicate = as_core_contract(&env, &contract_id, |env| {
+            HuntyCore::submit_answer(
+                env.clone(),
+                hunt_id,
+                1,
+                player.clone(),
+                String::from_str(env, "A"),
+                valid_timestamp,
+            )
+        });
+        assert_eq!(result_duplicate, Err(HuntErrorCode::DuplicateSubmission));
+
+        // 3. Submit answer with expired timestamp (should fail as expired)
+        // Assume SUBMISSION_WINDOW_SECS is 300, try a timestamp 400 seconds ago
+        let expired_timestamp = valid_timestamp - 400;
+        env.mock_all_auths();
+        let result_expired = as_core_contract(&env, &contract_id, |env| {
+            HuntyCore::submit_answer(
+                env.clone(),
+                hunt_id,
+                1,
+                player.clone(),
+                String::from_str(env, "A"),
+                expired_timestamp,
+            )
+        });
+        assert_eq!(result_expired, Err(HuntErrorCode::SubmissionExpired));
     }
 }

@@ -29,6 +29,7 @@ impl Storage {
     const REWARD_MGR_KEY: soroban_sdk::Symbol = symbol_short!("RWDMGR");
     const ADMIN_KEY: soroban_sdk::Symbol = symbol_short!("ADMIN");
     const PAUSED_KEY: soroban_sdk::Symbol = symbol_short!("PAUSED");
+    const SUBMISSION_KEY: soroban_sdk::Symbol = symbol_short!("SUBM");
 
     // ========== Hunt Storage Functions ==========
 
@@ -166,6 +167,10 @@ impl Storage {
         (Self::PLAYER_COUNT_KEY, hunt_id)
     }
 
+    fn submission_key(hunt_id: u64, clue_id: u32, player: &Address, timestamp: u64) -> (soroban_sdk::Symbol, u64, u32, Address, u64) {
+        (Self::SUBMISSION_KEY, hunt_id, clue_id, player.clone(), timestamp)
+    }
+
     // ========== Internal Helper Functions ==========
 
     fn add_clue_to_list(env: &Env, hunt_id: u64, clue_id: u32) {
@@ -266,6 +271,21 @@ impl Storage {
 
     fn clue_exists_key(hunt_id: u64, clue_id: u32) -> (soroban_sdk::Symbol, u64, u32) {
         (symbol_short!("CLEX"), hunt_id, clue_id)
+    }
+
+    // ========== Submission Tracking Functions ==========
+
+    pub fn has_submission_been_processed(env: &Env, hunt_id: u64, clue_id: u32, player: &Address, timestamp: u64) -> bool {
+        let key = Self::submission_key(hunt_id, clue_id, player, timestamp);
+        env.storage().temporary().has(&key)
+    }
+
+    pub fn mark_submission_processed(env: &Env, hunt_id: u64, clue_id: u32, player: &Address, timestamp: u64, ttl_secs: u32) {
+        let key = Self::submission_key(hunt_id, clue_id, player, timestamp);
+        env.storage().temporary().set(&key, &());
+        // Calculate ledger extension based on roughly 5s per ledger
+        let ledgers = ttl_secs / 5;
+        env.storage().temporary().extend_ttl(&key, ledgers, ledgers);
     }
 
     // ========== Hunt Counter Functions ==========

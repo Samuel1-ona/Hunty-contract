@@ -15,6 +15,7 @@ impl Storage {
     const POOL_DEP_KEY: soroban_sdk::Symbol = symbol_short!("PDEP");
     const POOL_DST_KEY: soroban_sdk::Symbol = symbol_short!("PDST");
     const HUNTY_CORE_KEY: soroban_sdk::Symbol = symbol_short!("HCORE");
+    const TOTAL_XLM_DST_KEY: soroban_sdk::Symbol = symbol_short!("TXDST");
 
     // ========== XLM Token Address ==========
 

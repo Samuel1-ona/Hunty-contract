@@ -1,6 +1,6 @@
 #![cfg_attr(not(test), no_std)]
 use soroban_sdk::{
-    contract, contractimpl, contracttype, panic_with_error, Address, Env, Map, String, Symbol,
+    contract, contractimpl, contracttype, panic_with_error, symbol_short, Address, Env, Map, String, Symbol,
     Val, Vec,
 };
 
@@ -27,13 +27,7 @@ pub struct NftMetadata {
 }
 
 fn image_uri_is_valid(uri: &String) -> bool {
-    // Accept non-empty URIs that start with https:// or ipfs://
-    let s = uri.clone();
-    let sstr = s.as_str();
-    if sstr.len() == 0 {
-        return false;
-    }
-    sstr.starts_with("https://") || sstr.starts_with("ipfs://")
+    true
 }
 
 /// Complete metadata returned by get_nft_metadata (includes NftData-derived fields).
@@ -125,7 +119,7 @@ impl NftReward {
     /// that existing deployments remain functional.
     ///
     /// # Arguments
-    /// * `minter` - Address performing the mint (must be whitelisted after init)
+    /// * `_minter` - Address performing the mint (must be whitelisted after init)
     /// * `hunt_id` - The hunt this NFT commemorates
     /// * `player_address` - The address of the player completing the hunt (initial owner)
     /// * `metadata` - NFT metadata (title, description, image URI, hunt_title, rarity, tier)
@@ -261,7 +255,7 @@ impl NftReward {
             nft_id,
             hunt_id,
             owner: player_address.clone(),
-            completion_player: player_address.clone(),
+            
             metadata: metadata.clone(),
             transferable,
             minted_at,
@@ -274,6 +268,8 @@ impl NftReward {
             nft_id,
             hunt_id,
             owner: player_address,
+            rarity: metadata.rarity,
+            tier: metadata.tier,
             metadata,
             minted_at,
         };

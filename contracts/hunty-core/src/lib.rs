@@ -14,6 +14,9 @@ use soroban_sdk::{
     contract, contractimpl, Address, Bytes, BytesN, Env, IntoVal, String, Symbol, Val, Vec,
 };
 
+const MAX_LEADERBOARD_SIZE: u32 = 100;
+const MAX_LEADERBOARD_SCAN_SIZE: usize = 50;
+const SUBMISSION_WINDOW_SECS: u64 = 300;
 const MAX_QUESTION_LENGTH: u32 = 2000;
 const MAX_ANSWER_LENGTH: u32 = 256;
 const MAX_TITLE_LENGTH: u32 = 200;
@@ -1002,6 +1005,7 @@ impl HuntyCore {
     /// * `clue_id` - The clue ID to answer
     /// * `player` - The address of the player submitting the answer
     /// * `answer` - The plain-text answer submission
+    /// * `timestamp` - Client-provided timestamp for replay protection
     ///
     /// # Returns
     /// `Ok(())` on successful answer verification and progress update
@@ -1013,6 +1017,8 @@ impl HuntyCore {
     /// * `ClueNotFound` - Clue does not exist in this hunt
     /// * `ClueAlreadyCompleted` - Player has already completed this clue
     /// * `InvalidAnswer` - Submitted answer does not match the stored hash
+    /// * `SubmissionExpired` - Timestamp is outside the allowed window
+    /// * `DuplicateSubmission` - Same submission already processed
     ///
     /// # Events
     /// * `ClueCompleted` - Emitted when answer is correct
@@ -1024,10 +1030,25 @@ impl HuntyCore {
         clue_id: u32,
         player: Address,
         answer: String,
+        timestamp: u64,
     ) -> Result<(), HuntErrorCode> {
         // Require player authorization
         player.require_auth();
         Self::ensure_not_paused(&env)?;
+
+        let current_time = env.ledger().timestamp();
+        
+        // Check replay protection window
+        if current_time.saturating_sub(timestamp) > SUBMISSION_WINDOW_SECS 
+            || timestamp > current_time.saturating_add(60) // Allow 60s future drift
+        {
+            return Err(HuntErrorCode::SubmissionExpired);
+        }
+
+        // Check if this exact submission was already processed
+        if Storage::has_submission_been_processed(&env, hunt_id, clue_id, &player, timestamp) {
+            return Err(HuntErrorCode::DuplicateSubmission);
+        }
 
         // 1. Verify hunt exists and is active
         let hunt = Storage::get_hunt(&env, hunt_id).ok_or(HuntErrorCode::HuntNotFound)?;
@@ -1050,6 +1071,9 @@ impl HuntyCore {
         if attempts >= hunt.max_attempts_per_clue {
             return Err(HuntErrorCode::MaxAttemptsExceeded);
         }
+
+        // Mark submission as processed (will be valid for SUBMISSION_WINDOW_SECS)
+        Storage::mark_submission_processed(&env, hunt_id, clue_id, &player, timestamp, SUBMISSION_WINDOW_SECS as u32);
 
         let submitted_hash =
             Self::normalize_and_hash_answer(&env, &answer).map_err(HuntErrorCode::from)?;

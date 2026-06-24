@@ -70,7 +70,7 @@ pub struct Clue {
     pub points: u32,
     pub is_required: bool,
     /// Difficulty multiplier (1-10). Points earned = points * difficulty.
-    pub difficulty: u8,
+    pub difficulty: u32,
 }
 
 /// Clue info returned by get_clue/list_clues. Excludes answer hash.
@@ -82,7 +82,7 @@ pub struct ClueInfo {
     pub points: u32,
     pub is_required: bool,
     /// Difficulty multiplier (1-10).
-    pub difficulty: u8,
+    pub difficulty: u32,
 }
 
 #[contracttype]
@@ -419,7 +419,7 @@ pub struct ClueAddedEvent {
     pub points: u32,
     pub is_required: bool,
     /// Difficulty multiplier (1-10).
-    pub difficulty: u8,
+    pub difficulty: u32,
 }
 
 /// Emitted when a player registers for an active hunt.
