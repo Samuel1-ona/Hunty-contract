@@ -30,6 +30,7 @@ pub struct Hunt {
     pub creator: Address,
     pub title: String,
     pub description: String,
+    pub image_uri: String,
     pub status: HuntStatus,
     pub created_at: u64,
     pub activated_at: u64,
@@ -180,7 +181,7 @@ impl PlayerProgress {
     }
 
     pub fn failed_attempts_for_clue(&self, clue_id: u32) -> u32 {
-        self.clue_attempts.get(&clue_id).unwrap_or(0)
+        self.clue_attempts.get(clue_id).unwrap_or(0)
     }
 
     pub fn record_failed_attempt(&mut self, clue_id: u32) {

@@ -115,6 +115,7 @@ mod test {
                 creator.clone(),
                 title.clone(),
                 description.clone(),
+                String::from_str(&env, "https://example.com/image.png"),
                 None,
                 None,
             )
@@ -129,6 +130,7 @@ mod test {
         assert_eq!(hunt.creator, creator);
         assert_eq!(hunt.title, title);
         assert_eq!(hunt.description, description);
+        assert_eq!(hunt.image_uri, String::from_str(&env, "https://example.com/image.png"));
         assert_eq!(hunt.status, HuntStatus::Draft);
         assert_eq!(hunt.total_clues, 0);
         assert_eq!(hunt.required_clues, 0);
@@ -156,6 +158,7 @@ mod test {
                 creator.clone(),
                 title.clone(),
                 description.clone(),
+                String::from_str(&env, "https://example.com/image.png"),
                 None,
                 Some(end_time),
             )
@@ -174,7 +177,7 @@ mod test {
         let description = String::from_str(&env, "Valid description");
 
         let result = with_core_contract(&env, |env, _cid| {
-            HuntyCore::create_hunt(env.clone(), creator, title, description, None, None)
+            HuntyCore::create_hunt(env.clone(), creator, title, description, String::from_str(&env, "https://example.com/image.png"), None, None)
         });
 
         assert_eq!(result, Err(HuntErrorCode::InvalidTitle));
@@ -190,7 +193,7 @@ mod test {
         let description = String::from_str(&env, "Valid description");
 
         let result = with_core_contract(&env, |env, _cid| {
-            HuntyCore::create_hunt(env.clone(), creator, long_title, description, None, None)
+            HuntyCore::create_hunt(env.clone(), creator, long_title, description, String::from_str(&env, "https://example.com/image.png"), None, None)
         });
 
         assert_eq!(result, Err(HuntErrorCode::InvalidTitle));
@@ -206,7 +209,7 @@ mod test {
         let description = String::from_str(&env, "Valid description");
 
         let result = with_core_contract(&env, |env, _cid| {
-            HuntyCore::create_hunt(env.clone(), creator, title, description, None, None)
+            HuntyCore::create_hunt(env.clone(), creator, title, description, String::from_str(&env, "https://example.com/image.png"), None, None)
         });
 
         assert!(result.is_ok());
@@ -222,7 +225,7 @@ mod test {
         let long_description = String::from_str(&env, &"a".repeat(2001));
 
         let result = with_core_contract(&env, |env, _cid| {
-            HuntyCore::create_hunt(env.clone(), creator, title, long_description, None, None)
+            HuntyCore::create_hunt(env.clone(), creator, title, long_description, String::from_str(&env, "https://example.com/image.png"), None, None)
         });
 
         assert_eq!(result, Err(HuntErrorCode::InvalidDescription));
@@ -238,7 +241,82 @@ mod test {
         let description = String::from_str(&env, &"a".repeat(2000));
 
         let result = with_core_contract(&env, |env, _cid| {
-            HuntyCore::create_hunt(env.clone(), creator, title, description, None, None)
+            HuntyCore::create_hunt(env.clone(), creator, title, description, String::from_str(&env, "https://example.com/image.png"), None, None)
+        });
+
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_create_hunt_empty_description() {
+        let env = Env::default();
+        env.ledger().set_timestamp(1_700_000_000);
+        let creator = Address::generate(&env);
+        let title = String::from_str(&env, "Valid Title");
+        let description = String::from_str(&env, "");
+
+        let result = with_core_contract(&env, |env, _cid| {
+            HuntyCore::create_hunt(env.clone(), creator, title, description, String::from_str(&env, "https://example.com/image.png"), None, None)
+        });
+
+        assert_eq!(result, Err(HuntErrorCode::InvalidDescription));
+    }
+
+    #[test]
+    fn test_create_hunt_empty_image_uri() {
+        let env = Env::default();
+        env.ledger().set_timestamp(1_700_000_000);
+        let creator = Address::generate(&env);
+        let title = String::from_str(&env, "Valid Title");
+        let description = String::from_str(&env, "Valid description");
+
+        let result = with_core_contract(&env, |env, _cid| {
+            HuntyCore::create_hunt(env.clone(), creator, title, description, String::from_str(&env, ""), None, None)
+        });
+
+        assert_eq!(result, Err(HuntErrorCode::InvalidImageUri));
+    }
+
+    #[test]
+    fn test_create_hunt_image_uri_too_long() {
+        let env = Env::default();
+        env.ledger().set_timestamp(1_700_000_000);
+        let creator = Address::generate(&env);
+        let title = String::from_str(&env, "Valid Title");
+        let description = String::from_str(&env, "Valid description");
+
+        let result = with_core_contract(&env, |env, _cid| {
+            HuntyCore::create_hunt(env.clone(), creator, title, description, String::from_str(&env, &format!("https://example.com/{}", "a".repeat(501))), None, None)
+        });
+
+        assert_eq!(result, Err(HuntErrorCode::InvalidImageUri));
+    }
+
+    #[test]
+    fn test_create_hunt_invalid_image_uri_format() {
+        let env = Env::default();
+        env.ledger().set_timestamp(1_700_000_000);
+        let creator = Address::generate(&env);
+        let title = String::from_str(&env, "Valid Title");
+        let description = String::from_str(&env, "Valid description");
+
+        let result = with_core_contract(&env, |env, _cid| {
+            HuntyCore::create_hunt(env.clone(), creator, title, description, String::from_str(&env, "ftp://bad.com/img.png"), None, None)
+        });
+
+        assert_eq!(result, Err(HuntErrorCode::InvalidImageUri));
+    }
+
+    #[test]
+    fn test_create_hunt_valid_ipfs_uri() {
+        let env = Env::default();
+        env.ledger().set_timestamp(1_700_000_000);
+        let creator = Address::generate(&env);
+        let title = String::from_str(&env, "Valid Title");
+        let description = String::from_str(&env, "Valid description");
+
+        let result = with_core_contract(&env, |env, _cid| {
+            HuntyCore::create_hunt(env.clone(), creator, title, description, String::from_str(&env, "ipfs://QmXoypizjW3WknFiJnKLwHCnL72vedxjQkDDP1mXWo6uco"), None, None)
         });
 
         assert!(result.is_ok());
@@ -260,6 +338,7 @@ mod test {
                 creator.clone(),
                 title1,
                 description.clone(),
+                String::from_str(&env, "https://example.com/image.png"),
                 None,
                 None,
             )
@@ -269,6 +348,7 @@ mod test {
                 creator.clone(),
                 title2,
                 description.clone(),
+                String::from_str(&env, "https://example.com/image.png"),
                 None,
                 None,
             )
@@ -278,6 +358,7 @@ mod test {
                 creator.clone(),
                 title3,
                 description,
+                String::from_str(&env, "https://example.com/image.png"),
                 None,
                 None,
             )
@@ -308,6 +389,7 @@ mod test {
                 creator1.clone(),
                 title.clone(),
                 description.clone(),
+                String::from_str(&env, "https://example.com/image.png"),
                 None,
                 None,
             )
@@ -317,6 +399,7 @@ mod test {
                 creator2.clone(),
                 title,
                 description,
+                String::from_str(&env, "https://example.com/image.png"),
                 None,
                 None,
             )
@@ -350,6 +433,7 @@ mod test {
                     creator.clone(),
                     title.clone(),
                     description.clone(),
+                    String::from_str(&env, "https://example.com/image.png"),
                     None,
                     None,
                 )
@@ -364,6 +448,7 @@ mod test {
                     creator.clone(),
                     title,
                     description,
+                    String::from_str(&env, "https://example.com/image.png"),
                     None,
                     None,
                 )
@@ -398,7 +483,7 @@ mod test {
 
         let hunt = with_core_contract(&env, |env, _cid| {
             let hunt_id =
-                HuntyCore::create_hunt(env.clone(), creator, title, description, None, None)
+                HuntyCore::create_hunt(env.clone(), creator, title, description, String::from_str(&env, "https://example.com/image.png"), None, None)
                     .unwrap();
             Storage::get_hunt(env, hunt_id).unwrap()
         });
@@ -422,7 +507,7 @@ mod test {
 
         let (hunt, current_time) = with_core_contract(&env, |env, _cid| {
             let hunt_id =
-                HuntyCore::create_hunt(env.clone(), creator, title, description, None, None)
+                HuntyCore::create_hunt(env.clone(), creator, title, description, String::from_str(&env, "https://example.com/image.png"), None, None)
                     .unwrap();
             (
                 Storage::get_hunt(env, hunt_id).unwrap(),
@@ -456,6 +541,7 @@ mod test {
                 creator.clone(),
                 title,
                 description.clone(),
+                String::from_str(&env, "https://example.com/image.png"),
                 None,
                 None,
             )
@@ -491,7 +577,7 @@ mod test {
 
         with_core_contract(&env, |env, _cid| {
             let hunt_id =
-                HuntyCore::create_hunt(env.clone(), creator, title, description, None, None)
+                HuntyCore::create_hunt(env.clone(), creator, title, description, String::from_str(&env, "https://example.com/image.png"), None, None)
                     .unwrap();
             let _ = HuntyCore::add_clue(env.clone(), hunt_id, question, answer, 10, true);
         });
@@ -511,7 +597,7 @@ mod test {
         let a = String::from_str(&env, "a");
 
         let (id1, id2, id3) = with_core_contract(&env, |env, _cid| {
-            let hid = HuntyCore::create_hunt(env.clone(), creator, title, description, None, None)
+            let hid = HuntyCore::create_hunt(env.clone(), creator, title, description, String::from_str(&env, "https://example.com/image.png"), None, None)
                 .unwrap();
             let id1 = HuntyCore::add_clue(env.clone(), hid, q1, a.clone(), 1, false).unwrap();
             let id2 = HuntyCore::add_clue(env.clone(), hid, q2, a.clone(), 1, false).unwrap();
@@ -542,6 +628,7 @@ mod test {
                 creator,
                 title,
                 description.clone(),
+                String::from_str(&env, "https://example.com/image.png"),
                 None,
                 None,
             )
@@ -555,6 +642,7 @@ mod test {
                 Address::generate(&env),
                 String::from_str(&env, "H2"),
                 description,
+                String::from_str(&env, "https://example.com/image.png"),
                 None,
                 None,
             )
@@ -584,7 +672,7 @@ mod test {
         let answer = String::from_str(&env, "secret");
 
         let info = with_core_contract(&env, |env, _cid| {
-            let hid = HuntyCore::create_hunt(env.clone(), creator, title, description, None, None)
+            let hid = HuntyCore::create_hunt(env.clone(), creator, title, description, String::from_str(&env, "https://example.com/image.png"), None, None)
                 .unwrap();
             let _ = HuntyCore::add_clue(env.clone(), hid, question.clone(), answer, 7, true);
             HuntyCore::get_clue(env.clone(), hid, 1).unwrap()
@@ -606,7 +694,7 @@ mod test {
         let description = String::from_str(&env, "Desc");
 
         let err = with_core_contract(&env, |env, _cid| {
-            let hid = HuntyCore::create_hunt(env.clone(), creator, title, description, None, None)
+            let hid = HuntyCore::create_hunt(env.clone(), creator, title, description, String::from_str(&env, "https://example.com/image.png"), None, None)
                 .unwrap();
             HuntyCore::get_clue(env.clone(), hid, 999).unwrap_err()
         });
@@ -624,7 +712,7 @@ mod test {
         let description = String::from_str(&env, "Desc");
 
         let list = with_core_contract(&env, |env, _cid| {
-            let hid = HuntyCore::create_hunt(env.clone(), creator, title, description, None, None)
+            let hid = HuntyCore::create_hunt(env.clone(), creator, title, description, String::from_str(&env, "https://example.com/image.png"), None, None)
                 .unwrap();
             HuntyCore::list_clues(env.clone(), hid)
         });
@@ -645,7 +733,7 @@ mod test {
         let a = String::from_str(&env, "a");
 
         let list = with_core_contract(&env, |env, _cid| {
-            let hid = HuntyCore::create_hunt(env.clone(), creator, title, description, None, None)
+            let hid = HuntyCore::create_hunt(env.clone(), creator, title, description, String::from_str(&env, "https://example.com/image.png"), None, None)
                 .unwrap();
             HuntyCore::add_clue(env.clone(), hid, q1, a.clone(), 1, false).unwrap();
             HuntyCore::add_clue(env.clone(), hid, q2, a, 2, true).unwrap();
@@ -690,7 +778,7 @@ mod test {
         let answer = String::from_str(&env, "a");
 
         let err = with_core_contract(&env, |env, _cid| {
-            let hid = HuntyCore::create_hunt(env.clone(), creator, title, description, None, None)
+            let hid = HuntyCore::create_hunt(env.clone(), creator, title, description, String::from_str(&env, "https://example.com/image.png"), None, None)
                 .unwrap();
             HuntyCore::add_clue(env.clone(), hid, empty, answer, 1, false).unwrap_err()
         });
@@ -710,7 +798,7 @@ mod test {
         let empty = String::from_str(&env, "");
 
         let err = with_core_contract(&env, |env, _cid| {
-            let hid = HuntyCore::create_hunt(env.clone(), creator, title, description, None, None)
+            let hid = HuntyCore::create_hunt(env.clone(), creator, title, description, String::from_str(&env, "https://example.com/image.png"), None, None)
                 .unwrap();
             HuntyCore::add_clue(env.clone(), hid, question, empty, 1, false).unwrap_err()
         });
@@ -730,7 +818,7 @@ mod test {
         let ws = String::from_str(&env, "   \t  ");
 
         let err = with_core_contract(&env, |env, _cid| {
-            let hid = HuntyCore::create_hunt(env.clone(), creator, title, description, None, None)
+            let hid = HuntyCore::create_hunt(env.clone(), creator, title, description, String::from_str(&env, "https://example.com/image.png"), None, None)
                 .unwrap();
             HuntyCore::add_clue(env.clone(), hid, question, ws, 1, false).unwrap_err()
         });
@@ -751,7 +839,7 @@ mod test {
 
         const MAX_CLUES: u32 = 100;
         let err = with_core_contract(&env, |env, _cid| {
-            let hid = HuntyCore::create_hunt(env.clone(), creator, title, description, None, None)
+            let hid = HuntyCore::create_hunt(env.clone(), creator, title, description, String::from_str(&env, "https://example.com/image.png"), None, None)
                 .unwrap();
             for _ in 0..MAX_CLUES {
                 HuntyCore::add_clue(env.clone(), hid, question.clone(), answer.clone(), 1, false)
@@ -780,6 +868,7 @@ mod test {
                 creator.clone(),
                 title,
                 description,
+                String::from_str(&env, "https://example.com/image.png"),
                 None,
                 None,
             )
@@ -805,7 +894,7 @@ mod test {
         let answer = String::from_str(&env, "a");
 
         let err = with_core_contract(&env, |env, _cid| {
-            let hid = HuntyCore::create_hunt(env.clone(), creator, title, description, None, None)
+            let hid = HuntyCore::create_hunt(env.clone(), creator, title, description, String::from_str(&env, "https://example.com/image.png"), None, None)
                 .unwrap();
             HuntyCore::add_clue(env.clone(), hid, long_q, answer, 1, false).unwrap_err()
         });
@@ -832,6 +921,7 @@ mod test {
                 creator.clone(),
                 title,
                 description,
+                String::from_str(&env, "https://example.com/image.png"),
                 None,
                 None,
             )
@@ -877,6 +967,7 @@ mod test {
                 creator.clone(),
                 title,
                 description,
+                String::from_str(&env, "https://example.com/image.png"),
                 None,
                 None,
             )
@@ -903,6 +994,7 @@ mod test {
                 creator.clone(),
                 title,
                 description,
+                String::from_str(&env, "https://example.com/image.png"),
                 None,
                 None,
             )
@@ -931,6 +1023,7 @@ mod test {
                 creator.clone(),
                 title,
                 description,
+                String::from_str(&env, "https://example.com/image.png"),
                 None,
                 None,
             )
@@ -962,6 +1055,7 @@ mod test {
                 creator.clone(),
                 String::from_str(env, "Test Hunt"),
                 String::from_str(env, "Test description"),
+                String::from_str(&env, "https://example.com/image.png"),
                 None,
                 None,
             )
@@ -1010,6 +1104,7 @@ mod test {
                 creator.clone(),
                 String::from_str(env, "Test Hunt"),
                 String::from_str(env, "Test description"),
+                String::from_str(&env, "https://example.com/image.png"),
                 None,
                 None,
             )
@@ -1045,6 +1140,7 @@ mod test {
                 creator.clone(),
                 String::from_str(env, "Test Hunt"),
                 String::from_str(env, "Test description"),
+                String::from_str(&env, "https://example.com/image.png"),
                 None,
                 None,
             )
@@ -1085,6 +1181,7 @@ mod test {
                 creator.clone(),
                 String::from_str(env, "Refund Hunt"),
                 String::from_str(env, "Should refund on cancel"),
+                String::from_str(&env, "https://example.com/image.png"),
                 None,
                 None,
             )
@@ -1146,6 +1243,7 @@ mod test {
                 creator.clone(),
                 String::from_str(env, "Test Hunt"),
                 String::from_str(env, "Test description"),
+                String::from_str(&env, "https://example.com/image.png"),
                 None,
                 None,
             )
@@ -1181,6 +1279,7 @@ mod test {
                 creator.clone(),
                 String::from_str(env, "Test Hunt"),
                 String::from_str(env, "Test description"),
+                String::from_str(&env, "https://example.com/image.png"),
                 None,
                 None,
             )
@@ -1216,6 +1315,7 @@ mod test {
                 creator.clone(),
                 String::from_str(env, "Query Hunt"),
                 String::from_str(env, "Desc"),
+                String::from_str(&env, "https://example.com/image.png"),
                 None,
                 None,
             )
@@ -1249,6 +1349,7 @@ mod test {
                 creator.clone(),
                 String::from_str(env, "Active Hunt"),
                 String::from_str(env, "Desc"),
+                String::from_str(&env, "https://example.com/image.png"),
                 None,
                 None,
             )
@@ -1290,6 +1391,7 @@ mod test {
                 creator.clone(),
                 String::from_str(env, "Hunt"),
                 String::from_str(env, "Desc"),
+                String::from_str(&env, "https://example.com/image.png"),
                 None,
                 None,
             )
@@ -1327,6 +1429,7 @@ mod test {
                 creator.clone(),
                 String::from_str(env, "Hunt"),
                 String::from_str(env, "Desc"),
+                String::from_str(&env, "https://example.com/image.png"),
                 None,
                 None,
             )
@@ -1385,6 +1488,7 @@ mod test {
                 creator.clone(),
                 String::from_str(env, "Hunt"),
                 String::from_str(env, "Desc"),
+                String::from_str(&env, "https://example.com/image.png"),
                 None,
                 None,
             )
@@ -1415,6 +1519,7 @@ mod test {
                 creator.clone(),
                 String::from_str(env, "Hunt"),
                 String::from_str(env, "Desc"),
+                String::from_str(&env, "https://example.com/image.png"),
                 None,
                 Some(end_time),
             )
@@ -1448,6 +1553,7 @@ mod test {
                 creator.clone(),
                 String::from_str(env, "Hunt"),
                 String::from_str(env, "Desc"),
+                String::from_str(&env, "https://example.com/image.png"),
                 None,
                 None,
             )
@@ -1489,6 +1595,7 @@ mod test {
                 creator.clone(),
                 String::from_str(env, "Hunt"),
                 String::from_str(env, "Desc"),
+                String::from_str(&env, "https://example.com/image.png"),
                 None,
                 None,
             )
@@ -1516,6 +1623,7 @@ mod test {
                 creator.clone(),
                 String::from_str(env, "Hunt"),
                 String::from_str(env, "Desc"),
+                String::from_str(&env, "https://example.com/image.png"),
                 None,
                 None,
             )
@@ -1547,6 +1655,7 @@ mod test {
                 creator.clone(),
                 String::from_str(env, "Hunt"),
                 String::from_str(env, "Desc"),
+                String::from_str(&env, "https://example.com/image.png"),
                 None,
                 None,
             )
@@ -1608,6 +1717,7 @@ mod test {
                 creator.clone(),
                 String::from_str(env, "Hunt"),
                 String::from_str(env, "Desc"),
+                String::from_str(&env, "https://example.com/image.png"),
                 None,
                 None,
             )
@@ -1657,6 +1767,7 @@ mod test {
                 creator.clone(),
                 String::from_str(env, "Hunt"),
                 String::from_str(env, "Desc"),
+                String::from_str(&env, "https://example.com/image.png"),
                 None,
                 None,
             )
@@ -1687,6 +1798,7 @@ mod test {
                 creator.clone(),
                 String::from_str(env, "Hunt"),
                 String::from_str(env, "Desc"),
+                String::from_str(&env, "https://example.com/image.png"),
                 None,
                 None,
             )
@@ -1751,6 +1863,7 @@ mod test {
                 creator.clone(),
                 String::from_str(env, "Hunt"),
                 String::from_str(env, "Desc"),
+                String::from_str(&env, "https://example.com/image.png"),
                 None,
                 None,
             )
@@ -1782,6 +1895,7 @@ mod test {
                 creator.clone(),
                 String::from_str(env, "Hunt"),
                 String::from_str(env, "Desc"),
+                String::from_str(&env, "https://example.com/image.png"),
                 None,
                 None,
             )
@@ -1918,6 +2032,7 @@ mod test {
                 creator.clone(),
                 String::from_str(env, "Hunt"),
                 String::from_str(env, "Desc"),
+                String::from_str(&env, "https://example.com/image.png"),
                 None,
                 None,
             )
@@ -1969,6 +2084,7 @@ mod test {
                 creator.clone(),
                 String::from_str(env, "Hunt"),
                 String::from_str(env, "Desc"),
+                String::from_str(&env, "https://example.com/image.png"),
                 None,
                 None,
             )
@@ -2004,6 +2120,7 @@ mod test {
                 creator.clone(),
                 String::from_str(env, "Hunt"),
                 String::from_str(env, "Desc"),
+                String::from_str(&env, "https://example.com/image.png"),
                 None,
                 None,
             )
@@ -2089,6 +2206,7 @@ mod test {
                 creator.clone(),
                 String::from_str(env, "Reward Hunt"),
                 String::from_str(env, "A hunt with rewards"),
+                String::from_str(&env, "https://example.com/image.png"),
                 None,
                 None,
             )
@@ -2176,6 +2294,7 @@ mod test {
                 creator.clone(),
                 SorobanString::from_str(env, "Integrated Hunt"),
                 SorobanString::from_str(env, "Hunt with XLM + NFT rewards"),
+                String::from_str(&env, "https://example.com/image.png"),
                 None,
                 None,
             )
@@ -2364,6 +2483,7 @@ mod test {
                 creator.clone(),
                 SorobanString::from_str(env, "Multi Hunt"),
                 SorobanString::from_str(env, "Multiple winners"),
+                String::from_str(&env, "https://example.com/image.png"),
                 None,
                 None,
             )
@@ -2512,6 +2632,7 @@ mod test {
                 creator.clone(),
                 String::from_str(env, "Batch Hunt"),
                 String::from_str(env, "Desc"),
+                String::from_str(&env, "https://example.com/image.png"),
                 None,
                 None,
             )
@@ -2587,6 +2708,7 @@ mod test {
                 creator.clone(),
                 String::from_str(env, "Hunt"),
                 String::from_str(env, "Desc"),
+                String::from_str(&env, "https://example.com/image.png"),
                 None,
                 None,
             )
