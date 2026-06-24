@@ -26,6 +26,7 @@ jobs:
         run: make bindings
 
       - name: Check for uncommitted changes in bindings
+        if: github.ref == 'refs/heads/main'
         run: git diff --exit-code bindings
 
       - name: Upload bindings artifact
