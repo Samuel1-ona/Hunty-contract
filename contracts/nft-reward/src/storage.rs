@@ -4,6 +4,7 @@ use soroban_sdk::{symbol_short, Address, Env, Vec};
 /// Storage layer for NFTs.
 pub struct Storage;
 
+#[allow(dead_code)]
 impl Storage {
     const NFT_KEY: soroban_sdk::Symbol = symbol_short!("NFT");
     const NFT_COUNTER_KEY: soroban_sdk::Symbol = symbol_short!("CNTR");

@@ -723,6 +723,7 @@ fn test_creator_preserved_across_metadata_queries() {
 fn test_burn_removes_nft_and_clears_owner_list() {
     let env = setup_env();
     let client = setup_nft_reward(&env, None);
+}
 
 #[test]
 fn test_initialize_stores_admin_and_minter() {

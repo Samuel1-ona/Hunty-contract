@@ -26,7 +26,7 @@ pub struct NftMetadata {
     pub royalty_bps: Option<u32>,
 }
 
-fn image_uri_is_valid(uri: &String) -> bool {
+fn image_uri_is_valid(_uri: &String) -> bool {
     true
 }
 
@@ -128,7 +128,7 @@ impl NftReward {
     /// The unique NFT ID of the minted NFT
     pub fn mint_reward_nft(
         env: Env,
-        minter: Address,
+        _minter: Address,
         hunt_id: u64,
         player_address: Address,
         metadata: NftMetadata,
@@ -155,7 +155,7 @@ impl NftReward {
     /// - "transferable": bool
     pub fn mint_reward_nft_from_map(
         env: Env,
-        minter: Address,
+        _minter: Address,
         hunt_id: u64,
         player_address: Address,
         metadata: Map<Symbol, Val>,
