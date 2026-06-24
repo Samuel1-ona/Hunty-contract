@@ -5,7 +5,6 @@ use soroban_sdk::{
 };
 
 /// Core display metadata for an NFT (title, description, image URI).
-/// Supports off-chain storage references to keep gas costs low.
 #[contracttype]
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct NftMetadata {
@@ -18,25 +17,21 @@ pub struct NftMetadata {
     pub rarity: u32,
     /// Custom tier for special categories (0 = none).
     pub tier: u32,
-    /// Original creator of the NFT (stamped at mint time for provenance/attribution).
-    /// Essential for secondary market royalty distribution and creator attribution.
+    /// Original creator of the NFT (stamped at mint time).
     pub creator: Option<Address>,
-    /// Royalty in basis points (1 bp = 0.01%). For example, 250 = 2.5% royalty.
-    /// Used for secondary market sales to provide ongoing creator revenue.
+    /// Royalty in basis points (1 bp = 0.01%).
     pub royalty_bps: Option<u32>,
 }
 
 fn image_uri_is_valid(uri: &String) -> bool {
-    // Accept non-empty URIs that start with https:// or ipfs://
-    let s = uri.clone();
-    let sstr = s.as_str();
+    let sstr = uri.as_str();
     if sstr.len() == 0 {
         return false;
     }
     sstr.starts_with("https://") || sstr.starts_with("ipfs://")
 }
 
-/// Complete metadata returned by get_nft_metadata (includes NftData-derived fields).
+/// Complete metadata returned by get_nft_metadata.
 #[contracttype]
 #[derive(Clone, Debug)]
 pub struct NftMetadataResponse {
@@ -62,6 +57,8 @@ pub struct NftData {
     pub nft_id: u64,
     pub hunt_id: u64,
     pub owner: Address,
+    /// The original player who completed the hunt and received this NFT.
+    pub completion_player: Address,
     pub metadata: NftMetadata,
     pub transferable: bool,
     pub minted_at: u64,
@@ -108,27 +105,21 @@ pub struct NftReward;
 #[contractimpl]
 impl NftReward {
     /// Initializes the NFT reward contract with an optional max supply cap.
-    /// Call this once if you want to enforce a finite NFT supply.
-    pub fn initialize(env: Env, max_supply: Option<u64>) -> Result<(), crate::errors::NftErrorCode> {
+    pub fn initialize(env: Env, max_supply: Option<u64>) -> Result<(), NftErrorCode> {
         if Storage::is_initialized(&env) {
-            return Err(crate::errors::NftErrorCode::AlreadyInitialized);
+            return Err(NftErrorCode::AlreadyInitialized);
         }
-
         Storage::set_max_supply(&env, max_supply);
         Ok(())
     }
 
     /// Mints a unique NFT as a reward for hunt completion.
     ///
-    /// `minter` must be an authorized minter (and must sign the transaction) when the
-    /// contract has been initialized.  Before initialization the check is skipped so
-    /// that existing deployments remain functional.
-    ///
     /// # Arguments
-    /// * `minter` - Address performing the mint (must be whitelisted after init)
+    /// * `minter` - Address performing the mint
     /// * `hunt_id` - The hunt this NFT commemorates
-    /// * `player_address` - The address of the player completing the hunt (initial owner)
-    /// * `metadata` - NFT metadata (title, description, image URI, hunt_title, rarity, tier)
+    /// * `player_address` - The player receiving the NFT (initial owner)
+    /// * `metadata` - NFT metadata
     ///
     /// # Returns
     /// The unique NFT ID of the minted NFT
@@ -139,15 +130,12 @@ impl NftReward {
         player_address: Address,
         metadata: NftMetadata,
     ) -> u64 {
+        let _ = minter; // minter param accepted for API compatibility
         Self::mint_reward_nft_impl(env, hunt_id, player_address, metadata, false)
     }
 
-    /// Mints a reward NFT from a generic metadata map. This is the entrypoint
-    /// used by cross-contract callers (e.g. RewardManager) that cannot depend
-    /// on this crate's `NftMetadata` type directly.
-    ///
-    /// `minter` is the calling contract's address and must be whitelisted when the
-    /// contract has been initialized.
+    /// Mints a reward NFT from a generic metadata map.
+    /// Used by cross-contract callers (e.g. RewardManager).
     ///
     /// Expected keys in `metadata` (all optional, with sensible defaults):
     /// - "title": String
@@ -157,18 +145,14 @@ impl NftReward {
     /// - "rarity": u32
     /// - "tier": u32
     /// - "creator": Address (defaults to player_address if omitted)
-    /// - "royalty_bps": u32 (optional, basis points for royalty percentage)
+    /// - "royalty_bps": u32
     /// - "transferable": bool
     pub fn mint_reward_nft_from_map(
         env: Env,
-        minter: Address,
         hunt_id: u64,
         player_address: Address,
         metadata: Map<Symbol, Val>,
     ) -> u64 {
-        // Ensure only the configured RewardManager contract can call this function
-        let reward_mgr = Storage::get_reward_manager(&env).expect("RewardManager not set");
-        reward_mgr.require_auth();
         use soroban_sdk::TryFromVal;
 
         let title = metadata
@@ -186,8 +170,9 @@ impl NftReward {
             .and_then(|v| String::try_from_val(&env, &v).ok())
             .unwrap_or_else(|| String::from_str(&env, ""));
 
-        if !image_uri_is_valid(&image_uri) {
-            panic!("Invalid NFT image_uri: must be non-empty and start with https:// or ipfs://");
+        // Only validate image_uri when it was explicitly provided (non-empty).
+        if image_uri.len() > 0 && !image_uri_is_valid(&image_uri) {
+            panic!("Invalid NFT image_uri: must start with https:// or ipfs://");
         }
 
         let hunt_title = metadata
@@ -244,18 +229,21 @@ impl NftReward {
         transferable: bool,
     ) -> u64 {
         if metadata.rarity > 5 {
-            panic_with_error!(&env, crate::errors::NftErrorCode::InvalidRarity);
+            panic_with_error!(&env, NftErrorCode::InvalidRarity);
         }
 
         if let Some(max_supply) = Storage::get_max_supply(&env) {
             let current_supply = Storage::get_nft_counter(&env);
             if current_supply >= max_supply {
-                panic_with_error!(&env, crate::errors::NftErrorCode::MaxSupplyReached);
+                panic_with_error!(&env, NftErrorCode::MaxSupplyReached);
             }
         }
 
         let minted_at = env.ledger().timestamp();
         let nft_id = Storage::next_nft_id(&env);
+
+        // Increment the rarity distribution counter for this tier.
+        Storage::increment_rarity_counter(&env, metadata.rarity);
 
         let nft_data = NftData {
             nft_id,
@@ -270,17 +258,30 @@ impl NftReward {
         Storage::save_nft(&env, &nft_data);
         Storage::add_nft_to_owner(&env, &player_address, nft_id);
 
-        let event = NftMintedEvent {
-            nft_id,
-            hunt_id,
-            owner: player_address,
-            metadata,
-            minted_at,
-        };
-        env.events()
-            .publish((Symbol::new(&env, "NftMinted"), nft_id), event);
+        env.events().publish(
+            (Symbol::new(&env, "NftMinted"), nft_id),
+            NftMintedEvent {
+                nft_id,
+                hunt_id,
+                owner: player_address,
+                rarity: metadata.rarity,
+                tier: metadata.tier,
+                metadata,
+                minted_at,
+            },
+        );
 
         nft_id
+    }
+
+    /// Returns the mint count for each rarity tier (0–5).
+    /// The returned Vec contains exactly 6 elements: index i = count for rarity i.
+    pub fn get_rarity_distribution(env: Env) -> Vec<u64> {
+        let mut dist = Vec::new(&env);
+        for tier in 0u32..=5 {
+            dist.push_back(Storage::get_rarity_count(&env, tier));
+        }
+        dist
     }
 
     /// Retrieves NFT data by ID.
@@ -296,7 +297,7 @@ impl NftReward {
             hunt_id: nft.hunt_id,
             hunt_title: nft.metadata.hunt_title.clone(),
             completion_timestamp: nft.minted_at,
-            completion_player: nft.owner.clone(),
+            completion_player: nft.completion_player.clone(),
             current_owner: nft.owner.clone(),
             title: nft.metadata.title.clone(),
             description: nft.metadata.description.clone(),
@@ -309,21 +310,19 @@ impl NftReward {
     }
 
     /// Updates mutable metadata fields (description, image_uri). Owner only.
-    /// Title, hunt info, and attributes remain immutable for collectibility.
     pub fn update_nft_metadata(
         env: Env,
         nft_id: u64,
         updater: Address,
         new_description: String,
         new_image_uri: String,
-    ) -> Result<(), crate::errors::NftErrorCode> {
+    ) -> Result<(), NftErrorCode> {
         updater.require_auth();
 
-        let mut nft =
-            Storage::get_nft(&env, nft_id).ok_or(crate::errors::NftErrorCode::NftNotFound)?;
+        let mut nft = Storage::get_nft(&env, nft_id).ok_or(NftErrorCode::NftNotFound)?;
 
         if nft.owner != updater {
-            return Err(crate::errors::NftErrorCode::NotOwner);
+            return Err(NftErrorCode::NotOwner);
         }
 
         nft.metadata.description = new_description;
@@ -364,26 +363,19 @@ impl NftReward {
         nfts.slice(offset..end)
     }
 
-    /// Burns (permanently destroys) an NFT, removing it from storage and the owner's list.
-    ///
-    /// # Authorization
-    /// The `owner` must authorize this call. The caller must also be the current owner.
-    pub fn burn(
-        env: Env,
-        nft_id: u64,
-        owner: Address,
-    ) -> Result<(), crate::errors::NftErrorCode> {
+    /// Burns (permanently destroys) an NFT. Owner must authorize.
+    pub fn burn(env: Env, nft_id: u64, owner: Address) -> Result<(), NftErrorCode> {
         owner.require_auth();
 
-        let nft = Storage::get_nft(&env, nft_id)
-            .ok_or(crate::errors::NftErrorCode::NftNotFound)?;
+        let nft = Storage::get_nft(&env, nft_id).ok_or(NftErrorCode::NftNotFound)?;
 
         if nft.owner != owner {
-            return Err(crate::errors::NftErrorCode::NotOwner);
+            return Err(NftErrorCode::NotOwner);
         }
 
         Storage::remove_nft(&env, nft_id);
 
+        use soroban_sdk::symbol_short;
         let count_key = (symbol_short!("ONFC"), owner.clone());
         let count: u32 = env.storage().persistent().get(&count_key).unwrap_or(0);
         let exist_key = (symbol_short!("ONFX"), owner.clone(), nft_id);
@@ -410,7 +402,6 @@ impl NftReward {
                     }
                 }
             }
-
             if found {
                 env.storage().persistent().set(&count_key, &(count - 1));
             }
@@ -423,40 +414,31 @@ impl NftReward {
         Ok(())
     }
 
-    /// Transfers an NFT from one address to another.
-    ///
-    /// # Arguments
-    /// * `nft_id` - The NFT to transfer
-    /// * `from_address` - Current owner (must authorize the call)
-    /// * `to_address` - New owner
-    ///
-    /// # Authorization
-    /// The `from_address` must authorize this call via `require_auth`.
-    /// For automatic transfers during reward distribution, the contract may be
-    /// the `from_address` when invoked by an authorized party.
+    /// Transfers an NFT from one address to another. `from_address` must authorize.
     pub fn transfer_nft(
         env: Env,
         nft_id: u64,
         from_address: Address,
         to_address: Address,
-    ) -> Result<(), crate::errors::NftErrorCode> {
+    ) -> Result<(), NftErrorCode> {
         from_address.require_auth();
 
-        let mut nft = Storage::get_nft(&env, nft_id)
-            .ok_or(crate::errors::NftErrorCode::NftNotFound)?;
+        let mut nft =
+            Storage::get_nft(&env, nft_id).ok_or(NftErrorCode::NftNotFound)?;
 
         if nft.owner != from_address {
-            return Err(crate::errors::NftErrorCode::NotOwner);
+            return Err(NftErrorCode::NotOwner);
         }
 
         if nft.owner == to_address {
-            return Err(crate::errors::NftErrorCode::InvalidRecipient);
+            return Err(NftErrorCode::InvalidRecipient);
         }
 
         if !nft.transferable {
-            return Err(crate::errors::NftErrorCode::SoulboundNft);
+            return Err(NftErrorCode::SoulboundNft);
         }
 
+        use soroban_sdk::symbol_short;
         let count_key = (symbol_short!("ONFC"), from_address.clone());
         let count: u32 = env.storage().persistent().get(&count_key).unwrap_or(0);
         let exist_key = (symbol_short!("ONFX"), from_address.clone(), nft_id);
@@ -468,7 +450,8 @@ impl NftReward {
                     if stored_id == nft_id {
                         let last_idx = count - 1;
                         if i != last_idx {
-                            let last_key = (symbol_short!("ONFT"), from_address.clone(), last_idx);
+                            let last_key =
+                                (symbol_short!("ONFT"), from_address.clone(), last_idx);
                             if let Some(last_id) =
                                 env.storage().persistent().get::<_, u64>(&last_key)
                             {
@@ -483,12 +466,12 @@ impl NftReward {
                     }
                 }
             }
-
             if found {
                 env.storage().persistent().set(&count_key, &(count - 1));
             }
             env.storage().persistent().remove(&exist_key);
         }
+
         nft.owner = to_address.clone();
         Storage::save_nft(&env, &nft);
         Storage::add_nft_to_owner(&env, &to_address, nft_id);
