@@ -36,52 +36,29 @@ impl Storage {
         env.storage().persistent().remove(&key);
     }
 
-    fn minter_key(minter: &Address) -> (soroban_sdk::Symbol, Address) {
-        (Self::MINTER_KEY, minter.clone())
-    }
+    // --- Initialization and max supply ---
 
-    // --- Admin / initialization ---
-
-    pub fn is_initialized(env: &Env) -> bool {
-        env.storage().instance().has(&Self::ADMIN_KEY)
-    }
-
-    pub fn save_admin(env: &Env, admin: &Address) {
-        env.storage().instance().set(&Self::ADMIN_KEY, admin);
-    }
-
-    pub fn get_admin(env: &Env) -> Option<Address> {
-        env.storage().instance().get(&Self::ADMIN_KEY)
-    }
-
-    // --- Max supply ---
-
-    /// Stores max supply. Passing None is a no-op (absence of the key means unlimited).
-    pub fn save_max_supply(env: &Env, max_supply: Option<u64>) {
+    /// Marks the contract initialized and stores the optional max supply cap.
+    /// Pass None to allow unlimited minting.
+    pub fn set_max_supply(env: &Env, max_supply: Option<u64>) {
         if let Some(supply) = max_supply {
             env.storage().instance().set(&Self::MAX_SUPPLY_KEY, &supply);
         }
+        env.storage().instance().set(&Self::INITIALIZED_KEY, &true);
     }
 
+    /// Returns the configured max supply cap, if one has been stored.
+    /// Returns None if not initialized or no limit set.
     pub fn get_max_supply(env: &Env) -> Option<u64> {
         env.storage().instance().get(&Self::MAX_SUPPLY_KEY)
     }
 
-    // --- Minter whitelist ---
-
-    pub fn add_minter(env: &Env, minter: &Address) {
-        let key = Self::minter_key(minter);
-        env.storage().persistent().set(&key, &true);
-    }
-
-    pub fn remove_minter(env: &Env, minter: &Address) {
-        let key = Self::minter_key(minter);
-        env.storage().persistent().remove(&key);
-    }
-
-    pub fn is_minter(env: &Env, minter: &Address) -> bool {
-        let key = Self::minter_key(minter);
-        env.storage().persistent().get(&key).unwrap_or(false)
+    /// Returns whether the contract has been initialized.
+    pub fn is_initialized(env: &Env) -> bool {
+        env.storage()
+            .instance()
+            .get(&Self::INITIALIZED_KEY)
+            .unwrap_or(false)
     }
 
     /// Saves an NFT to persistent storage.
@@ -116,28 +93,6 @@ impl Storage {
             .persistent()
             .get(&Self::NFT_COUNTER_KEY)
             .unwrap_or(0)
-    }
-
-    /// Marks the contract initialized and stores the optional max supply cap.
-    pub fn set_max_supply(env: &Env, max_supply: Option<u64>) {
-        env.storage().persistent().set(&Self::MAX_SUPPLY_KEY, &max_supply);
-        env.storage().persistent().set(&Self::INITIALIZED_KEY, &true);
-    }
-
-    /// Returns the configured max supply cap, if one has been stored.
-    pub fn get_max_supply(env: &Env) -> Option<u64> {
-        env.storage()
-            .persistent()
-            .get(&Self::MAX_SUPPLY_KEY)
-            .unwrap_or(None)
-    }
-
-    /// Returns whether the contract has been initialized.
-    pub fn is_initialized(env: &Env) -> bool {
-        env.storage()
-            .persistent()
-            .get(&Self::INITIALIZED_KEY)
-            .unwrap_or(false)
     }
 
     /// Adds an NFT ID to the owner's index.

@@ -62,6 +62,7 @@ pub struct NftData {
     pub nft_id: u64,
     pub hunt_id: u64,
     pub owner: Address,
+    pub completion_player: Address,
     pub metadata: NftMetadata,
     pub transferable: bool,
     pub minted_at: u64,
@@ -296,7 +297,7 @@ impl NftReward {
             hunt_id: nft.hunt_id,
             hunt_title: nft.metadata.hunt_title.clone(),
             completion_timestamp: nft.minted_at,
-            completion_player: nft.owner.clone(),
+            completion_player: nft.completion_player.clone(),
             current_owner: nft.owner.clone(),
             title: nft.metadata.title.clone(),
             description: nft.metadata.description.clone(),
@@ -503,6 +504,26 @@ impl NftReward {
         );
 
         Ok(())
+    }
+
+    /// Returns the total supply cap, or 0 if unlimited.
+    pub fn get_max_supply(env: Env) -> u64 {
+        Storage::get_max_supply(&env).unwrap_or(0)
+    }
+
+    /// Returns the number of NFTs remaining that can be minted.
+    /// Returns u64::MAX if supply is unlimited.
+    pub fn get_remaining_supply(env: Env) -> u64 {
+        if let Some(max_supply) = Storage::get_max_supply(&env) {
+            let current_supply = Storage::get_nft_counter(&env);
+            if current_supply >= max_supply {
+                return 0;
+            }
+            max_supply - current_supply
+        } else {
+            // No max supply set means unlimited
+            u64::MAX
+        }
     }
 
     /// Returns the contract version.

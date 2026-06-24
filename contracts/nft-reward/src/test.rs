@@ -904,3 +904,80 @@ fn test_mint_reward_nft_from_map_with_invalid_types_uses_defaults() {
     assert_eq!(nft.metadata.tier, 0u32); // default due to invalid type
     assert_eq!(nft.transferable, false); // default due to invalid type
 }
+
+#[test]
+fn test_get_remaining_supply_unlimited() {
+    let env = setup_env();
+    let client = setup_nft_reward(&env, None);
+    
+    // When no max supply is set, remaining supply should be u64::MAX
+    assert_eq!(client.get_remaining_supply(), u64::MAX);
+    assert_eq!(client.get_max_supply(), 0);
+}
+
+#[test]
+fn test_get_remaining_supply_with_limit() {
+    let env = setup_env();
+    let client = setup_nft_reward(&env, Some(10));
+    
+    // Initially, remaining supply should equal max supply
+    assert_eq!(client.get_remaining_supply(), 10);
+    assert_eq!(client.get_max_supply(), 10);
+}
+
+#[test]
+fn test_get_remaining_supply_decreases_after_mint() {
+    let env = setup_env();
+    let client = setup_nft_reward(&env, Some(5));
+    
+    let player = Address::generate(&env);
+    
+    // Initial remaining supply
+    assert_eq!(client.get_remaining_supply(), 5);
+    
+    // Mint one NFT
+    let metadata = create_metadata(&env, "NFT 1", "Desc", "ipfs://1");
+    client.mint_reward_nft(&1, &player, &metadata);
+    assert_eq!(client.get_remaining_supply(), 4);
+    
+    // Mint another NFT
+    let metadata2 = create_metadata(&env, "NFT 2", "Desc", "ipfs://2");
+    client.mint_reward_nft(&1, &player, &metadata2);
+    assert_eq!(client.get_remaining_supply(), 3);
+}
+
+#[test]
+fn test_get_remaining_supply_at_capacity() {
+    let env = setup_env();
+    let client = setup_nft_reward(&env, Some(2));
+    
+    let player = Address::generate(&env);
+    
+    // Mint first NFT
+    let metadata1 = create_metadata(&env, "NFT 1", "Desc", "ipfs://1");
+    client.mint_reward_nft(&1, &player, &metadata1);
+    assert_eq!(client.get_remaining_supply(), 1);
+    
+    // Mint second NFT
+    let metadata2 = create_metadata(&env, "NFT 2", "Desc", "ipfs://2");
+    client.mint_reward_nft(&1, &player, &metadata2);
+    assert_eq!(client.get_remaining_supply(), 0);
+}
+
+#[test]
+fn test_get_max_supply_returns_zero_for_unlimited() {
+    let env = setup_env();
+    let client = setup_nft_reward(&env, None);
+    
+    // When no max supply is set, get_max_supply returns 0
+    assert_eq!(client.get_max_supply(), 0);
+}
+
+#[test]
+fn test_get_max_supply_returns_actual_value() {
+    let env = setup_env();
+    let client = setup_nft_reward(&env, Some(100));
+    
+    // Should return the actual max supply value
+    assert_eq!(client.get_max_supply(), 100);
+}
