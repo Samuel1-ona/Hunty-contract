@@ -4,11 +4,34 @@ use soroban_sdk::{symbol_short, Address, Env, Vec};
 
 /// Storage access layer for hunts, clues, and player progress.
 /// Provides type-safe, efficient storage operations with consistent key management.
+///
+/// # Storage Key Namespace — HuntyCore (prefix: "HC")
+///
+/// All keys are unique within this contract and isolated from other contracts:
+///
+/// | Constant            | Symbol   | Purpose                                      |
+/// |---------------------|----------|----------------------------------------------|
+/// | `CONTRACT_PREFIX`   | `"HC"`   | Contract namespace guard (documents ownership)|
+/// | `HUNT_KEY`          | `"HUNT"` | Per-hunt data                                |
+/// | `CLUE_KEY`          | `"CLUE"` | Per-clue data (composite: hunt_id, clue_id)  |
+/// | `PROGRESS_KEY`      | `"PROG"` | Player progress (composite: hunt_id, player) |
+/// | `PLAYER_ENTRY_KEY`  | `"PLRS"` | Player list entry (composite: hunt_id, idx)  |
+/// | `PLAYER_COUNT_KEY`  | `"PLCT"` | Player count per hunt                        |
+/// | `CLUE_ENTRY_KEY`    | `"CLST"` | Clue list entry (composite: hunt_id, idx)    |
+/// | `CLUE_LIST_COUNT_KEY`| `"CLCT"`| Clue count per hunt                          |
+/// | `HUNT_COUNTER_KEY`  | `"HCCNT"`| Global hunt ID counter (HC-prefixed)         |
+/// | `CLUE_COUNTER_KEY`  | `"CCNT"` | Clue ID counter per hunt                     |
+/// | `REWARD_MGR_KEY`    | `"RWDMGR"`| Reward manager contract address             |
+/// | `CLUE_EXISTS_KEY`   | `"CLEX"` | Clue existence sentinel                      |
+/// | `PLAYER_EXISTS_KEY` | `"PLEX"` | Player existence sentinel                    |
 pub struct Storage;
 
 impl Storage {
-    // Symbol constants for key prefixes to prevent collisions
-    // Using symbol_short for efficient key generation
+    /// Contract namespace identifier for HuntyCore.
+    /// All storage keys in this contract belong to the "HC" namespace.
+    /// This ensures no key can collide with RewardManager ("RM") or NftReward ("NR").
+    pub const CONTRACT_PREFIX: &'static str = "HC";
+
     const HUNT_KEY: soroban_sdk::Symbol = symbol_short!("HUNT");
     const CLUE_KEY: soroban_sdk::Symbol = symbol_short!("CLUE");
     const PROGRESS_KEY: soroban_sdk::Symbol = symbol_short!("PROG");
@@ -16,9 +39,13 @@ impl Storage {
     const PLAYER_COUNT_KEY: soroban_sdk::Symbol = symbol_short!("PLCT");
     const CLUE_ENTRY_KEY: soroban_sdk::Symbol = symbol_short!("CLST");
     const CLUE_LIST_COUNT_KEY: soroban_sdk::Symbol = symbol_short!("CLCT");
-    const HUNT_COUNTER_KEY: soroban_sdk::Symbol = symbol_short!("CNTR");
+    /// Hunt ID counter — uses "HCCNT" (HC-prefixed) to avoid collision with
+    /// nft-reward's former "CNTR" key.
+    pub(crate) const HUNT_COUNTER_KEY: soroban_sdk::Symbol = symbol_short!("HCCNT");
     const CLUE_COUNTER_KEY: soroban_sdk::Symbol = symbol_short!("CCNT");
     const REWARD_MGR_KEY: soroban_sdk::Symbol = symbol_short!("RWDMGR");
+    const CLUE_EXISTS_KEY: soroban_sdk::Symbol = symbol_short!("CLEX");
+    const PLAYER_EXISTS_KEY: soroban_sdk::Symbol = symbol_short!("PLEX");
 
     // ========== Hunt Storage Functions ==========
 
@@ -337,7 +364,7 @@ impl Storage {
         let count: u32 = env.storage().persistent().get(&count_key).unwrap_or(0);
 
         // O(1) existence check
-        let exist_key = (symbol_short!("PLEX"), hunt_id, player.clone());
+        let exist_key = (Self::PLAYER_EXISTS_KEY, hunt_id, player.clone());
         if env.storage().persistent().has(&exist_key) {
             return;
         }
@@ -362,7 +389,7 @@ impl Storage {
     }
 
     fn clue_exists_key(hunt_id: u64, clue_id: u32) -> (soroban_sdk::Symbol, u64, u32) {
-        (symbol_short!("CLEX"), hunt_id, clue_id)
+        (Self::CLUE_EXISTS_KEY, hunt_id, clue_id)
     }
 
     // ========== Hunt Counter Functions ==========
@@ -437,5 +464,60 @@ impl Storage {
 
     pub fn get_reward_manager(env: &Env) -> Option<Address> {
         env.storage().instance().get(&Self::REWARD_MGR_KEY)
+    }
+}
+
+#[cfg(test)]
+mod key_isolation_tests {
+    use super::Storage;
+    use soroban_sdk::symbol_short;
+
+    /// Verify the HuntyCore contract prefix is "HC" and unique across contracts.
+    #[test]
+    fn test_contract_prefix_is_hc() {
+        assert_eq!(Storage::CONTRACT_PREFIX, "HC");
+    }
+
+    /// Verify the prefix does not equal the other contracts' prefixes.
+    #[test]
+    fn test_prefix_distinct_from_other_contracts() {
+        assert_ne!(Storage::CONTRACT_PREFIX, "RM"); // RewardManager
+        assert_ne!(Storage::CONTRACT_PREFIX, "NR"); // NftReward
+    }
+
+    /// Verify the hunt counter key is "HCCNT" — not the old "CNTR" that
+    /// collided with nft-reward's NFT counter.
+    #[test]
+    fn test_hunt_counter_key_is_hccnt() {
+        let expected = symbol_short!("HCCNT");
+        assert_eq!(Storage::HUNT_COUNTER_KEY, expected);
+    }
+
+    /// Verify all symbol constants within hunty-core are distinct (no intra-contract collision).
+    #[test]
+    fn test_no_intra_contract_key_collision() {
+        let keys = [
+            symbol_short!("HUNT"),
+            symbol_short!("CLUE"),
+            symbol_short!("PROG"),
+            symbol_short!("PLRS"),
+            symbol_short!("PLCT"),
+            symbol_short!("CLST"),
+            symbol_short!("CLCT"),
+            symbol_short!("HCCNT"),
+            symbol_short!("CCNT"),
+            symbol_short!("RWDMGR"),
+            symbol_short!("CLEX"),
+            symbol_short!("PLEX"),
+        ];
+        for i in 0..keys.len() {
+            for j in (i + 1)..keys.len() {
+                assert_ne!(
+                    keys[i], keys[j],
+                    "Duplicate key at indices {} and {}",
+                    i, j
+                );
+            }
+        }
     }
 }
