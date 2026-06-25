@@ -4,6 +4,8 @@ use soroban_sdk::{
     Symbol, Val, Vec,
 };
 
+const MAX_URI_LEN: usize = 512;
+
 /// Core display metadata for an NFT (title, description, image URI).
 /// Supports off-chain storage references to keep gas costs low.
 #[contracttype]
@@ -47,9 +49,14 @@ pub struct NftMetadataResponse {
     pub tier: u32,
     pub creator: Option<Address>,
     pub royalty_bps: Option<u32>,
+    /// Schema version of the NFT metadata.
+    pub schema_version: u32,
 }
 
 /// NFT data structure stored on-chain.
+/// NOTE: Do NOT add new fields here without a migration step — the Soroban
+/// host rejects stored structs whose field count differs from the stored
+/// ScVal map.  Use per-NFT auxiliary keys for new metadata instead.
 #[contracttype]
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct NftData {
@@ -101,6 +108,15 @@ pub struct AdminImageUrisUpdatedEvent {
     pub updated_count: u32,
 }
 
+/// Event emitted when an operator is granted or revoked.
+#[contracttype]
+#[derive(Clone, Debug)]
+pub struct OperatorChangedEvent {
+    pub owner: Address,
+    pub operator: Address,
+    pub approved: bool,
+}
+
 mod errors;
 pub use errors::NftErrorCode;
 mod migration;
@@ -110,8 +126,12 @@ use storage::Storage;
 #[contract]
 pub struct NftReward;
 
+/// Current metadata schema version (bump when adding/changing NftMetadata shape).
+pub const METADATA_SCHEMA_VERSION: u32 = 1;
+
 #[contractimpl]
 impl NftReward {
+    const CONTRACT_VERSION: u32 = 1;
     /// Initializes the NFT reward contract with an admin address and optional max supply cap.
     /// Call this once to set the admin who can manage the contract.
     pub fn initialize(
@@ -284,12 +304,14 @@ impl NftReward {
             nft_id,
             hunt_id,
             owner: player_address.clone(),
+            completion_player: player_address.clone(),
             metadata: metadata.clone(),
             transferable,
             minted_at,
         };
 
         Storage::save_nft(&env, &nft_data);
+        Storage::set_nft_version(&env, nft_id, METADATA_SCHEMA_VERSION);
         Storage::add_nft_to_owner(&env, &player_address, nft_id);
 
         let event = NftMintedEvent {
@@ -315,6 +337,7 @@ impl NftReward {
     /// Returns complete metadata for an NFT, including hunt info and completion details.
     pub fn get_nft_metadata(env: Env, nft_id: u64) -> Option<NftMetadataResponse> {
         let nft = Storage::get_nft(&env, nft_id)?;
+        let version = Storage::get_nft_version(&env, nft_id);
         Some(NftMetadataResponse {
             nft_id: nft.nft_id,
             hunt_id: nft.hunt_id,
@@ -329,6 +352,7 @@ impl NftReward {
             tier: nft.metadata.tier,
             creator: nft.metadata.creator.clone(),
             royalty_bps: nft.metadata.royalty_bps,
+            schema_version: version,
         })
     }
 
@@ -344,7 +368,7 @@ impl NftReward {
         reward_manager: Address,
     ) -> Result<(), crate::errors::NftErrorCode> {
         Self::require_admin(&env, &admin)?;
-        Storage::save_reward_manager(&env, &reward_manager);
+        Storage::set_reward_manager(&env, &reward_manager);
         Ok(())
     }
 
@@ -375,15 +399,35 @@ impl NftReward {
         for nft_id in 1..=total {
             if let Some(mut nft) = Storage::get_nft(&env, nft_id) {
                 let uri = nft.metadata.image_uri.clone();
-                let uri_str = uri.as_str();
 
-                if uri_str.starts_with(old_prefix.as_str()) {
-                    let suffix = uri_str.strip_prefix(old_prefix.as_str()).unwrap_or("");
-                    let new_uri = String::from_str(&env, new_prefix.as_str())
-                        .concat(&String::from_str(&env, suffix));
-                    nft.metadata.image_uri = new_uri;
-                    Storage::save_nft(&env, &nft);
-                    updated += 1;
+                let uri_len = uri.len() as usize;
+                let prefix_len = old_prefix.len() as usize;
+
+                if uri_len >= prefix_len
+                    && uri_len <= MAX_URI_LEN
+                    && prefix_len <= MAX_URI_LEN
+                {
+                    let mut uri_buf = [0u8; MAX_URI_LEN];
+                    let mut prefix_buf = [0u8; MAX_URI_LEN];
+
+                    uri.copy_into_slice(&mut uri_buf[..uri_len]);
+                    old_prefix.copy_into_slice(&mut prefix_buf[..prefix_len]);
+
+                    if &uri_buf[..prefix_len] == &prefix_buf[..prefix_len] {
+                        let suffix = &uri_buf[prefix_len..uri_len];
+                        let suffix_len = suffix.len();
+                        let new_prefix_len = new_prefix.len() as usize;
+                        if new_prefix_len + suffix_len <= MAX_URI_LEN {
+                            let mut new_uri_buf = [0u8; MAX_URI_LEN];
+                            new_prefix.copy_into_slice(&mut new_uri_buf[..new_prefix_len]);
+                            let end = new_prefix_len + suffix_len;
+                            new_uri_buf[new_prefix_len..end].copy_from_slice(suffix);
+                            nft.metadata.image_uri =
+                                String::from_bytes(&env, &new_uri_buf[..end]);
+                            Storage::save_nft(&env, &nft);
+                            updated += 1;
+                        }
+                    }
                 }
             }
         }

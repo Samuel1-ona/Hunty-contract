@@ -119,7 +119,7 @@
                               "symbol": "description"
                             },
                             "val": {
-                              "string": "Completed the City Hunt"
+                              "string": "Has version"
                             }
                           },
                           {
@@ -127,7 +127,7 @@
                               "symbol": "hunt_title"
                             },
                             "val": {
-                              "string": "Hunt Champion"
+                              "string": "Versioned NFT"
                             }
                           },
                           {
@@ -135,7 +135,7 @@
                               "symbol": "image_uri"
                             },
                             "val": {
-                              "string": "ipfs://QmExample123"
+                              "string": "ipfs://v"
                             }
                           },
                           {
@@ -165,7 +165,7 @@
                               "symbol": "title"
                             },
                             "val": {
-                              "string": "Hunt Champion"
+                              "string": "Versioned NFT"
                             }
                           }
                         ]

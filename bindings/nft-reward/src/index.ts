@@ -109,6 +109,7 @@ export interface NftMetadataResponse {
   nft_id: u64;
   rarity: u32;
   royalty_bps: Option<u32>;
+  schema_version: u32;
   tier: u32;
   title: string;
 }

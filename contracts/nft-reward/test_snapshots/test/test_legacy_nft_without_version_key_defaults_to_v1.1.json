@@ -6,6 +6,7 @@
   "auth": [
     [],
     [],
+    [],
     []
   ],
   "ledger": {
@@ -99,7 +100,7 @@
                         "symbol": "hunt_id"
                       },
                       "val": {
-                        "u64": 1
+                        "u64": 3
                       }
                     },
                     {
@@ -119,7 +120,7 @@
                               "symbol": "description"
                             },
                             "val": {
-                              "string": "Completed the City Hunt"
+                              "string": "no version key"
                             }
                           },
                           {
@@ -127,7 +128,7 @@
                               "symbol": "hunt_title"
                             },
                             "val": {
-                              "string": "Hunt Champion"
+                              "string": "NoVer"
                             }
                           },
                           {
@@ -135,7 +136,7 @@
                               "symbol": "image_uri"
                             },
                             "val": {
-                              "string": "ipfs://QmExample123"
+                              "string": "ipfs://nover"
                             }
                           },
                           {
@@ -165,7 +166,7 @@
                               "symbol": "title"
                             },
                             "val": {
-                              "string": "Hunt Champion"
+                              "string": "NoVer"
                             }
                           }
                         ]
@@ -204,51 +205,6 @@
                       }
                     }
                   ]
-                }
-              }
-            },
-            "ext": "v0"
-          },
-          4095
-        ]
-      ],
-      [
-        {
-          "contract_data": {
-            "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
-            "key": {
-              "vec": [
-                {
-                  "symbol": "NVER"
-                },
-                {
-                  "u64": 1
-                }
-              ]
-            },
-            "durability": "persistent"
-          }
-        },
-        [
-          {
-            "last_modified_ledger_seq": 0,
-            "data": {
-              "contract_data": {
-                "ext": "v0",
-                "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
-                "key": {
-                  "vec": [
-                    {
-                      "symbol": "NVER"
-                    },
-                    {
-                      "u64": 1
-                    }
-                  ]
-                },
-                "durability": "persistent",
-                "val": {
-                  "u32": 1
                 }
               }
             },
