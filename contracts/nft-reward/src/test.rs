@@ -1,10 +1,10 @@
 #![cfg(test)]
 extern crate std;
 
-use crate::{NftMetadata, NftReward, NftRewardClient};
+use crate::{AdminImageUrisUpdatedEvent, NftMetadata, NftReward, NftRewardClient};
 use soroban_sdk::{
     testutils::{Address as _, Events as _, Ledger as _},
-    Address, Env, IntoVal, Map, String, Symbol, Val,
+    Address, Env, IntoVal, Map, String, Symbol, TryFromVal, Val,
 };
 
 fn setup_env() -> Env {
@@ -206,7 +206,6 @@ fn test_multiple_nfts_can_be_minted() {
     ];
     let uris = ["ipfs://hunt1", "ipfs://hunt2", "ipfs://hunt3", "ipfs://hunt4", "ipfs://hunt5"];
 
-    let mut ids = soroban_sdk::Vec::new(&env);
     for i in 0..5 {
         let metadata = create_metadata(&env, titles[i], descs[i], uris[i]);
         let nft_id = client.mint_reward_nft(&player, &(i as u64 + 1), &player, &metadata);
@@ -474,4 +473,224 @@ fn test_get_nft_owner_matches_owner_of() {
 
     assert_eq!(client.owner_of(&nft_id), client.get_nft_owner(&nft_id));
     assert_eq!(client.get_nft_owner(&nft_id), Some(player));
+}
+
+// --- Admin initialization tests ---
+
+#[test]
+fn test_initialize_stores_admin() {
+    let env = setup_env();
+    let admin = Address::generate(&env);
+    let contract_id = env.register(NftReward, ());
+    let client = NftRewardClient::new(&env, &contract_id);
+    client.initialize(&admin, &None);
+
+    assert_eq!(client.get_admin(), Some(admin));
+}
+
+#[test]
+#[should_panic(expected = "HostError")]
+fn test_initialize_requires_auth() {
+    let env = Env::default();
+    // Do NOT mock auth - we want the call to fail without auth
+    env.ledger().set_timestamp(1000);
+
+    let admin = Address::generate(&env);
+    let contract_id = env.register(NftReward, ());
+    let client = NftRewardClient::new(&env, &contract_id);
+
+    client.initialize(&admin, &None);
+}
+
+#[test]
+#[should_panic(expected = "HostError")]
+fn test_initialize_cannot_be_called_twice() {
+    let env = setup_env();
+    let admin = Address::generate(&env);
+    let contract_id = env.register(NftReward, ());
+    let client = NftRewardClient::new(&env, &contract_id);
+    client.initialize(&admin, &None);
+    client.initialize(&admin, &None);
+}
+
+// --- admin_update_image_uris tests ---
+
+#[test]
+fn test_admin_update_image_uris_replaces_ipfs_prefix() {
+    let env = setup_env();
+    let admin = Address::generate(&env);
+    let contract_id = env.register(NftReward, ());
+    let client = NftRewardClient::new(&env, &contract_id);
+    client.initialize(&admin, &None);
+
+    let player = Address::generate(&env);
+
+    // Mint 3 NFTs with old IPFS gateway URIs
+    let m1 = create_metadata(&env, "NFT 1", "Desc 1", "ipfs://oldgateway/QmAbc");
+    let m2 = create_metadata(&env, "NFT 2", "Desc 2", "ipfs://oldgateway/QmDef");
+    let m3 = create_metadata(&env, "NFT 3", "Desc 3", "https://cdn.example.com/nft/123.png");
+
+    let id1 = client.mint_reward_nft(&player, &1, &player, &m1);
+    let id2 = client.mint_reward_nft(&player, &1, &player, &m2);
+    let id3 = client.mint_reward_nft(&player, &1, &player, &m3);
+
+    // Batch-update: replace ipfs://oldgateway/ with ipfs://newgateway/
+    let old_prefix = String::from_str(&env, "ipfs://oldgateway/");
+    let new_prefix = String::from_str(&env, "ipfs://newgateway/");
+    let updated = client.admin_update_image_uris(&admin, &old_prefix, &new_prefix);
+
+    assert_eq!(updated, 2);
+
+    // Verify NFT 1 was updated
+    let nft = client.get_nft(&id1).unwrap();
+    assert_eq!(nft.metadata.image_uri, String::from_str(&env, "ipfs://newgateway/QmAbc"));
+
+    // Verify NFT 2 was updated
+    let nft = client.get_nft(&id2).unwrap();
+    assert_eq!(nft.metadata.image_uri, String::from_str(&env, "ipfs://newgateway/QmDef"));
+
+    // Verify NFT 3 was NOT changed (different prefix)
+    let nft = client.get_nft(&id3).unwrap();
+    assert_eq!(nft.metadata.image_uri, String::from_str(&env, "https://cdn.example.com/nft/123.png"));
+}
+
+#[test]
+fn test_admin_update_image_uris_replaces_https_prefix() {
+    let env = setup_env();
+    let admin = Address::generate(&env);
+    let contract_id = env.register(NftReward, ());
+    let client = NftRewardClient::new(&env, &contract_id);
+    client.initialize(&admin, &None);
+
+    let player = Address::generate(&env);
+
+    let m1 = create_metadata(&env, "NFT 1", "Desc", "https://cdn.example.com/nft/1.png");
+    let m2 = create_metadata(&env, "NFT 2", "Desc", "https://cdn.example.com/nft/2.png");
+
+    let id1 = client.mint_reward_nft(&player, &1, &player, &m1);
+    let id2 = client.mint_reward_nft(&player, &1, &player, &m2);
+
+    let old_prefix = String::from_str(&env, "https://cdn.example.com/");
+    let new_prefix = String::from_str(&env, "https://new-cdn.example.com/");
+    let updated = client.admin_update_image_uris(&admin, &old_prefix, &new_prefix);
+
+    assert_eq!(updated, 2);
+
+    let nft1 = client.get_nft(&id1).unwrap();
+    assert_eq!(nft1.metadata.image_uri, String::from_str(&env, "https://new-cdn.example.com/nft/1.png"));
+
+    let nft2 = client.get_nft(&id2).unwrap();
+    assert_eq!(nft2.metadata.image_uri, String::from_str(&env, "https://new-cdn.example.com/nft/2.png"));
+}
+
+#[test]
+fn test_admin_update_image_uris_returns_zero_when_no_match() {
+    let env = setup_env();
+    let admin = Address::generate(&env);
+    let contract_id = env.register(NftReward, ());
+    let client = NftRewardClient::new(&env, &contract_id);
+    client.initialize(&admin, &None);
+
+    let player = Address::generate(&env);
+    let metadata = create_metadata(&env, "NFT", "Desc", "ipfs://some/QmAbc");
+    let _id = client.mint_reward_nft(&player, &1, &player, &metadata);
+
+    let old_prefix = String::from_str(&env, "ipfs://nonexistent/");
+    let new_prefix = String::from_str(&env, "ipfs://new/");
+    let updated = client.admin_update_image_uris(&admin, &old_prefix, &new_prefix);
+
+    assert_eq!(updated, 0);
+}
+
+#[test]
+fn test_admin_update_image_uris_returns_zero_for_empty_contract() {
+    let env = setup_env();
+    let admin = Address::generate(&env);
+    let contract_id = env.register(NftReward, ());
+    let client = NftRewardClient::new(&env, &contract_id);
+    client.initialize(&admin, &None);
+
+    let old_prefix = String::from_str(&env, "ipfs://old/");
+    let new_prefix = String::from_str(&env, "ipfs://new/");
+    let updated = client.admin_update_image_uris(&admin, &old_prefix, &new_prefix);
+
+    assert_eq!(updated, 0);
+}
+
+#[test]
+fn test_admin_update_image_uris_skips_burned_nfts() {
+    let env = setup_env();
+    let admin = Address::generate(&env);
+    let contract_id = env.register(NftReward, ());
+    let client = NftRewardClient::new(&env, &contract_id);
+    client.initialize(&admin, &None);
+
+    let player = Address::generate(&env);
+
+    let m1 = create_metadata(&env, "NFT 1", "Desc", "ipfs://old/QmAbc");
+    let m2 = create_metadata(&env, "NFT 2", "Desc", "ipfs://old/QmDef");
+
+    let id1 = client.mint_reward_nft(&player, &1, &player, &m1);
+    let _id2 = client.mint_reward_nft(&player, &1, &player, &m2);
+
+    // Burn NFT 1
+    client.burn(&id1, &player);
+
+    let old_prefix = String::from_str(&env, "ipfs://old/");
+    let new_prefix = String::from_str(&env, "ipfs://new/");
+    let updated = client.admin_update_image_uris(&admin, &old_prefix, &new_prefix);
+
+    // Only NFT 2 should be updated (NFT 1 is burned/skipped)
+    assert_eq!(updated, 1);
+}
+
+#[test]
+#[should_panic(expected = "HostError")]
+fn test_admin_update_image_uris_requires_auth() {
+    let env = Env::default();
+    env.ledger().set_timestamp(1000);
+    // Don't mock auth
+
+    let admin = Address::generate(&env);
+    let contract_id = env.register(NftReward, ());
+    let client = NftRewardClient::new(&env, &contract_id);
+    client.initialize(&admin, &None);
+
+    let old_prefix = String::from_str(&env, "ipfs://old/");
+    let new_prefix = String::from_str(&env, "ipfs://new/");
+    client.admin_update_image_uris(&admin, &old_prefix, &new_prefix);
+}
+
+#[test]
+fn test_admin_update_image_uris_emits_event() {
+    let env = setup_env();
+    let admin = Address::generate(&env);
+    let contract_id = env.register(NftReward, ());
+    let client = NftRewardClient::new(&env, &contract_id);
+    client.initialize(&admin, &None);
+
+    let player = Address::generate(&env);
+    let metadata = create_metadata(&env, "NFT", "Desc", "ipfs://old/QmAbc");
+    let _id = client.mint_reward_nft(&player, &1, &player, &metadata);
+
+    let old_prefix = String::from_str(&env, "ipfs://old/");
+    let new_prefix = String::from_str(&env, "ipfs://new/");
+    let updated = client.admin_update_image_uris(&admin, &old_prefix, &new_prefix);
+    assert_eq!(updated, 1);
+
+    // Check event was emitted
+    let events = env.events().all();
+    let (_contract, topics, data): (Address, soroban_sdk::Vec<Val>, Val) =
+        events.get(events.len() - 1).unwrap();
+
+    assert_eq!(topics.len(), 1);
+    assert_eq!(
+        Symbol::try_from_val(&env, &topics.get(0).unwrap()).unwrap(),
+        Symbol::new(&env, "AdminImageUrisUpdated")
+    );
+
+    let event = AdminImageUrisUpdatedEvent::try_from_val(&env, &data).unwrap();
+    assert_eq!(event.old_prefix, String::from_str(&env, "ipfs://old/"));
+    assert_eq!(event.new_prefix, String::from_str(&env, "ipfs://new/"));
+    assert_eq!(event.updated_count, 1);
 }

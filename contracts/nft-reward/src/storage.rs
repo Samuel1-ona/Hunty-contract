@@ -39,17 +39,14 @@ impl Storage {
         env.storage().persistent().remove(&key);
     }
 
-    #[allow(dead_code)]
     pub fn save_admin(env: &Env, admin: &Address) {
         env.storage().instance().set(&Self::ADMIN_KEY, admin);
     }
 
-    #[allow(dead_code)]
     pub fn get_admin(env: &Env) -> Option<Address> {
         env.storage().instance().get(&Self::ADMIN_KEY)
     }
 
-    #[allow(dead_code)]
     pub fn set_reward_manager(env: &Env, address: &Address) {
         env.storage().instance().set(&Self::REWARD_MGR_KEY, address);
     }

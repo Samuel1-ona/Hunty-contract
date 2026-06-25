@@ -132,6 +132,15 @@ export interface NftMetadataUpdatedEvent {
   updater: string;
 }
 
+/**
+ * Event emitted when admin batch-updates image URIs across NFTs.
+ */
+export interface AdminImageUrisUpdatedEvent {
+  old_prefix: string;
+  new_prefix: string;
+  updated_count: u32;
+}
+
 export const NftErrorCode = {
   1: {message:"NftNotFound"},
   2: {message:"Unauthorized"},
@@ -140,7 +149,8 @@ export const NftErrorCode = {
   5: {message:"SoulboundNft"},
   6: {message:"InvalidRarity"},
   7: {message:"AlreadyInitialized"},
-  8: {message:"MaxSupplyReached"}
+  8: {message:"MaxSupplyReached"},
+  9: {message:"NotInitialized"}
 }
 
 
@@ -177,10 +187,29 @@ export interface Client {
 
   /**
    * Construct and simulate a initialize transaction. Returns an `AssembledTransaction` object which will have a `result` field containing the result of the simulation. If this transaction changes contract state, you will need to call `signAndSend()` on the returned object.
-   * Initializes the NFT reward contract with an optional max supply cap.
-   * Call this once if you want to enforce a finite NFT supply.
+   * Initializes the NFT reward contract with an admin address and optional max supply cap.
+   * Call this once to set the admin who can manage the contract.
    */
-  initialize: ({max_supply}: {max_supply: Option<u64>}, options?: MethodOptions) => Promise<AssembledTransaction<Result<void>>>
+  initialize: ({admin, max_supply}: {admin: string, max_supply: Option<u64>}, options?: MethodOptions) => Promise<AssembledTransaction<Result<void>>>
+
+  /**
+   * Construct and simulate a get_admin transaction. Returns an `AssembledTransaction` object which will have a `result` field containing the result of the simulation. If this transaction changes contract state, you will need to call `signAndSend()` on the returned object.
+   * Returns the configured admin address, if set.
+   */
+  get_admin: (options?: MethodOptions) => Promise<AssembledTransaction<Option<string>>>
+
+  /**
+   * Construct and simulate a set_reward_manager transaction. Returns an `AssembledTransaction` object which will have a `result` field containing the result of the simulation. If this transaction changes contract state, you will need to call `signAndSend()` on the returned object.
+   * Sets the RewardManager contract address. Only the admin can call this.
+   */
+  set_reward_manager: ({admin, reward_manager}: {admin: string, reward_manager: string}, options?: MethodOptions) => Promise<AssembledTransaction<Result<void>>>
+
+  /**
+   * Construct and simulate a admin_update_image_uris transaction. Returns an `AssembledTransaction` object which will have a `result` field containing the result of the simulation. If this transaction changes contract state, you will need to call `signAndSend()` on the returned object.
+   * Batch-updates image URIs for all NFTs whose `image_uri` starts with `old_prefix`,
+   * replacing it with `new_prefix`. Useful for migrating between IPFS gateways or CDNs.
+   */
+  admin_update_image_uris: ({admin, old_prefix, new_prefix}: {admin: string, old_prefix: string, new_prefix: string}, options?: MethodOptions) => Promise<AssembledTransaction<Result<u32>>>
 
   /**
    * Construct and simulate a total_supply transaction. Returns an `AssembledTransaction` object which will have a `result` field containing the result of the simulation. If this transaction changes contract state, you will need to call `signAndSend()` on the returned object.
@@ -347,6 +376,9 @@ export class Client extends ContractClient {
         get_nft: this.txFromJSON<Option<NftData>>,
         owner_of: this.txFromJSON<Option<string>>,
         initialize: this.txFromJSON<Result<void>>,
+        get_admin: this.txFromJSON<Option<string>>,
+        set_reward_manager: this.txFromJSON<Result<void>>,
+        admin_update_image_uris: this.txFromJSON<Result<u32>>,
         total_supply: this.txFromJSON<u64>,
         transfer_nft: this.txFromJSON<Result<void>>,
         get_nft_owner: this.txFromJSON<Option<string>>,

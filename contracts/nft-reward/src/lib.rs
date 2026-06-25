@@ -91,6 +91,15 @@ pub struct NftMetadataUpdatedEvent {
     pub updater: Address,
 }
 
+/// Event emitted when admin batch-updates image URIs across NFTs.
+#[contracttype]
+#[derive(Clone, Debug)]
+pub struct AdminImageUrisUpdatedEvent {
+    pub old_prefix: String,
+    pub new_prefix: String,
+    pub updated_count: u32,
+}
+
 mod errors;
 pub use errors::NftErrorCode;
 mod migration;
@@ -102,14 +111,30 @@ pub struct NftReward;
 
 #[contractimpl]
 impl NftReward {
-    /// Initializes the NFT reward contract with an optional max supply cap.
-    /// Call this once if you want to enforce a finite NFT supply.
-    pub fn initialize(env: Env, max_supply: Option<u64>) -> Result<(), crate::errors::NftErrorCode> {
+    /// Initializes the NFT reward contract with an admin address and optional max supply cap.
+    /// Call this once to set the admin who can manage the contract.
+    pub fn initialize(
+        env: Env,
+        admin: Address,
+        max_supply: Option<u64>,
+    ) -> Result<(), crate::errors::NftErrorCode> {
         if Storage::is_initialized(&env) {
             return Err(crate::errors::NftErrorCode::AlreadyInitialized);
         }
 
+        admin.require_auth();
+        Storage::save_admin(&env, &admin);
         Storage::set_max_supply(&env, max_supply);
+        Ok(())
+    }
+
+    fn require_admin(env: &Env, admin: &Address) -> Result<(), crate::errors::NftErrorCode> {
+        admin.require_auth();
+        let stored_admin =
+            Storage::get_admin(env).ok_or(crate::errors::NftErrorCode::NotInitialized)?;
+        if stored_admin != admin.clone() {
+            return Err(crate::errors::NftErrorCode::Unauthorized);
+        }
         Ok(())
     }
 
@@ -303,6 +328,97 @@ impl NftReward {
             creator: nft.metadata.creator.clone(),
             royalty_bps: nft.metadata.royalty_bps,
         })
+    }
+
+    /// Returns the configured admin address, if set.
+    pub fn get_admin(env: Env) -> Option<Address> {
+        Storage::get_admin(&env)
+    }
+
+    /// Sets the RewardManager contract address. Only the admin can call this.
+    pub fn set_reward_manager(
+        env: Env,
+        admin: Address,
+        reward_manager: Address,
+    ) -> Result<(), crate::errors::NftErrorCode> {
+        Self::require_admin(&env, &admin)?;
+        Storage::set_reward_manager(&env, &reward_manager);
+        Ok(())
+    }
+
+    /// Batch-updates image URIs for all NFTs whose `image_uri` starts with `old_prefix`,
+    /// replacing it with `new_prefix`. Useful for migrating between IPFS gateways or CDNs.
+    ///
+    /// # Authorization
+    /// Only the configured admin can call this function.
+    ///
+    /// # Arguments
+    /// * `admin` - The admin address (must match the stored admin)
+    /// * `old_prefix` - The prefix to match (e.g. "ipfs://oldgateway/")
+    /// * `new_prefix` - The replacement prefix (e.g. "ipfs://newgateway/")
+    ///
+    /// # Returns
+    /// The number of NFTs whose image URIs were updated.
+    pub fn admin_update_image_uris(
+        env: Env,
+        admin: Address,
+        old_prefix: String,
+        new_prefix: String,
+    ) -> Result<u32, crate::errors::NftErrorCode> {
+        Self::require_admin(&env, &admin)?;
+
+        let total = Storage::get_nft_counter(&env);
+        let mut updated: u32 = 0;
+
+        let prefix_len = old_prefix.len() as usize;
+        let mut prefix_buf = [0u8; 256];
+        old_prefix.copy_into_slice(&mut prefix_buf[..prefix_len]);
+
+        for nft_id in 1..=total {
+            if let Some(mut nft) = Storage::get_nft(&env, nft_id) {
+                let uri = &nft.metadata.image_uri;
+                let uri_len = uri.len() as usize;
+
+                if uri_len >= prefix_len {
+                    let mut uri_buf = [0u8; 512];
+                    uri.copy_into_slice(&mut uri_buf[..uri_len]);
+
+                    let mut matches = true;
+                    for i in 0..prefix_len {
+                        if uri_buf[i] != prefix_buf[i] {
+                            matches = false;
+                            break;
+                        }
+                    }
+
+                    if matches {
+                        let new_prefix_len = new_prefix.len() as usize;
+                        let suffix_len = uri_len - prefix_len;
+                        let new_len = new_prefix_len + suffix_len;
+                        let mut new_buf = [0u8; 512];
+                        new_prefix.copy_into_slice(&mut new_buf[..new_prefix_len]);
+                        for i in 0..suffix_len {
+                            new_buf[new_prefix_len + i] = uri_buf[prefix_len + i];
+                        }
+                        nft.metadata.image_uri =
+                            String::from_bytes(&env, &new_buf[..new_len]);
+                        Storage::save_nft(&env, &nft);
+                        updated += 1;
+                    }
+                }
+            }
+        }
+
+        env.events().publish(
+            (Symbol::new(&env, "AdminImageUrisUpdated"),),
+            AdminImageUrisUpdatedEvent {
+                old_prefix,
+                new_prefix,
+                updated_count: updated,
+            },
+        );
+
+        Ok(updated)
     }
 
     /// Updates mutable metadata fields (description, image_uri). Owner only.
