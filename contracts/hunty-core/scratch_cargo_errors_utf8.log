@@ -1,0 +1,922 @@
+﻿cargo : warning: unused variable: `minter`
+At line:1 char:1
++ cargo check --tests 2>&1 | Out-File -Encoding utf8 scratch_cargo_erro ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (warning: unused variable: `minter`:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+   --> contracts\nft-reward\src\lib.rs:201:9
+    |
+201 |         minter: Address,
+    |         ^^^^^^ help: if this is intentional, prefix it with an underscore: `_minter`
+    |
+    = note: `#[warn(unused_variables)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused variable: `minter`
+   --> contracts\nft-reward\src\lib.rs:228:9
+    |
+228 |         minter: Address,
+    |         ^^^^^^ help: if this is intentional, prefix it with an underscore: `_minter`
+
+warning: associated function `save_max_supply` is never used
+  --> contracts\nft-reward\src\storage.rs:59:12
+   |
+ 7 | impl Storage {
+   | ------------ associated function in this implementation
+...
+59 |     pub fn save_max_supply(env: &Env, max_supply: Option<u64>) {
+   |            ^^^^^^^^^^^^^^^
+   |
+   = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: `nft-reward` (lib) generated 3 warnings (run `cargo fix --lib -p nft-reward` to apply 2 suggestions)
+warning: unused import: `alloc::string::String as StdString`
+  --> contracts\hunty-core\src\lib.rs:12:5
+   |
+12 | use alloc::string::String as StdString;
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+    Checking hunty-core v0.0.0 (C:\Users\HomePC\Documents\D\Hunty-contract\contracts\hunty-core)
+warning: `hunty-core` (lib) generated 1 warning (run `cargo fix --lib -p hunty-core` to apply 1 suggestion)
+warning: use of deprecated method `soroban_sdk::Env::register_contract`: use `register`
+  --> contracts\hunty-core\tests\test.rs:34:23
+   |
+34 |     let core_id = env.register_contract(None, HuntyCore);
+   |                       ^^^^^^^^^^^^^^^^^
+   |
+   = note: `#[warn(deprecated)]` on by default
+
+warning: unused import: `Register`
+ --> contracts\hunty-core\tests\test.rs:1:57
+  |
+1 | use soroban_sdk::testutils::{Address as _, Ledger as _, Register as _};
+  |                                                         ^^^^^^^^
+  |
+  = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: `hunty-core` (test "test") generated 2 warnings
+error[E0425]: cannot find type `PlayerProgress` in this scope
+   --> contracts\hunty-core\src\test.rs:180:21
+    |
+180 |         ) -> Result<PlayerProgress, HuntErrorCode> {
+    |                     ^^^^^^^^^^^^^^ not found in this scope
+    |
+help: consider importing this struct through its public re-export
+    |
+ 20 +     use crate::PlayerProgress;
+    |
+
+error[E0425]: cannot find type `LeaderboardEntry` in this scope
+   --> contracts\hunty-core\src\test.rs:199:25
+    |
+199 |         ) -> Result<Vec<LeaderboardEntry>, HuntErrorCode> {
+    |                         ^^^^^^^^^^^^^^^^ not found in this scope
+    |
+help: consider importing this struct through its public re-export
+    |
+ 20 +     use crate::LeaderboardEntry;
+    |
+
+error[E0425]: cannot find type `HuntStatistics` in this scope
+   --> contracts\hunty-core\src\test.rs:207:21
+    |
+207 |         ) -> Result<HuntStatistics, HuntErrorCode> {
+    |                     ^^^^^^^^^^^^^^ not found in this scope
+    |
+help: consider importing this struct through its public re-export
+    |
+ 20 +     use crate::HuntStatistics;
+    |
+
+error[E0425]: cannot find type `Hunt` in this scope
+   --> contracts\hunty-core\src\test.rs:212:64
+    |
+212 |         pub fn get_hunt_info(env: Env, hunt_id: u64) -> Result<Hunt, HuntErrorCode> {
+    |                                                                ^^^^ not found in this scope
+    |
+help: consider importing this struct through its public re-export
+    |
+ 20 +     use crate::Hunt;
+    |
+
+warning: unused import: `String`
+ --> contracts\hunty-core\src\test.rs:3:33
+  |
+3 | use soroban_sdk::{Address, Env, String};
+  |                                 ^^^^^^
+
+warning: unused import: `NftMetadata`
+   --> contracts\hunty-core\src\test.rs:242:22
+    |
+242 |     use nft_reward::{NftMetadata, NftReward};
+    |                      ^^^^^^^^^^^
+
+warning: cannot test inner items
+    --> contracts\hunty-core\src\test.rs:4850:1
+     |
+4850 | #[test]
+     | ^^^^^^^
+     |
+     = note: `#[warn(unnameable_test_items)]` on by default
+
+error[E0308]: mismatched types
+  --> contracts\hunty-core\src\test.rs:32:13
+   |
+29 |         pub fn initialize_admin(env: Env, admin: Address) -> Result<(), HuntErrorCode> {
+   |                                                              ------------------------- expected 
+`core::result::Result<(), HuntErrorCode>` because of return type
+...
+32 |             client.initialize_admin(&admin)
+   |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ expected `Result<(), HuntErrorCode>`, found `()`
+   |
+   = note:   expected enum `core::result::Result<(), HuntErrorCode>`
+           found unit type `()`
+help: try adding an expression at the end of the block
+   |
+32 ~             client.initialize_admin(&admin);
+33 +             Ok(())
+   |
+
+error[E0308]: mismatched types
+  --> contracts\hunty-core\src\test.rs:44:13
+   |
+41 |         ) -> Result<u64, HuntErrorCode> {
+   |              -------------------------- expected `core::result::Result<u64, HuntErrorCode>` because of return type
+...
+44 |             client.create_hunt(&creator, &title, &description, &start_time, &end_time)
+   |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ expected `Result<u64, 
+HuntErrorCode>`, found `u64`
+   |
+   = note: expected enum `core::result::Result<u64, HuntErrorCode>`
+              found type `u64`
+help: try wrapping the expression in `core::prelude::v1::Ok`
+   |
+44 |             core::prelude::v1::Ok(client.create_hunt(&creator, &title, &description, &start_time, &end_time))
+   |             ++++++++++++++++++++++                                                                          +
+
+error[E0308]: arguments to this method are incorrect
+   --> contracts\hunty-core\src\test.rs:57:20
+    |
+ 57 |             client.create_hunt_from_template(&creator, &template_hunt_id, &title, &description, &start_time, 
+&end_time)
+    |                    ^^^^^^^^^^^^^^^^^^^^^^^^^ --------  ----------------- expected `&soroban_sdk::Address`, found 
+`&u64`
+    |                                              |
+    |                                              expected `&u64`, found `&soroban_sdk::Address`
+    |
+note: method defined here
+   --> contracts\hunty-core\src\lib.rs:199:12
+    |
+199 |     pub fn create_hunt_from_template(
+    |            ^^^^^^^^^^^^^^^^^^^^^^^^^
+help: swap these arguments
+    |
+ 57 -             client.create_hunt_from_template(&creator, &template_hunt_id, &title, &description, &start_time, 
+&end_time)
+ 57 +             client.create_hunt_from_template(&template_hunt_id, &creator, &title, &description, &start_time, 
+&end_time)
+    |
+
+error[E0308]: mismatched types
+  --> contracts\hunty-core\src\test.rs:57:13
+   |
+54 |         ) -> Result<u64, HuntErrorCode> {
+   |              -------------------------- expected `core::result::Result<u64, HuntErrorCode>` because of return type
+...
+57 |             client.create_hunt_from_template(&creator, &template_hunt_id, &title, &description, &start_time, 
+&end_time)
+   |             
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ expected 
+`Result<u64, HuntErrorCode>`, found `u64`
+   |
+   = note: expected enum `core::result::Result<u64, HuntErrorCode>`
+              found type `u64`
+help: try wrapping the expression in `core::prelude::v1::Ok`
+   |
+57 |             core::prelude::v1::Ok(client.create_hunt_from_template(&creator, &template_hunt_id, &title, 
+&description, &start_time, &end_time))
+   |             ++++++++++++++++++++++                                                                                
+                           +
+
+error[E0308]: mismatched types
+  --> contracts\hunty-core\src\test.rs:67:13
+   |
+64 |         ) -> Result<(), HuntErrorCode> {
+   |              ------------------------- expected `core::result::Result<(), HuntErrorCode>` because of return type
+...
+67 |             client.set_time_bonus_config(&hunt_id, &caller, &config)
+   |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ expected `Result<(), HuntErrorCode>`, found 
+`()`
+   |
+   = note:   expected enum `core::result::Result<(), HuntErrorCode>`
+           found unit type `()`
+help: try adding an expression at the end of the block
+   |
+67 ~             client.set_time_bonus_config(&hunt_id, &caller, &config);
+68 +             Ok(())
+   |
+
+error[E0061]: this method takes 3 arguments but 6 arguments were supplied
+   --> contracts\hunty-core\src\test.rs:80:20
+    |
+ 80 |             client.update_hunt(&hunt_id, &creator, &title, &description, &start_time, &end_time)
+    |                    ^^^^^^^^^^^                             ------------  -----------  --------- unexpected 
+argument #6 of type `&core::option::Option<u64>`
+    |                                                            |             |
+    |                                                            |             unexpected argument #5 of type 
+`&core::option::Option<u64>`
+    |                                                            unexpected argument #4 of type 
+`&core::option::Option<soroban_sdk::String>`
+    |
+note: expected `&u32`, found `&Option<String>`
+   --> contracts\hunty-core\src\test.rs:80:52
+    |
+ 80 |             client.update_hunt(&hunt_id, &creator, &title, &description, &start_time, &end_time)
+    |                                                    ^^^^^^
+    = note: expected reference `&u32`
+               found reference `&core::option::Option<soroban_sdk::String>`
+note: method defined here
+   --> contracts\hunty-core\src\lib.rs:303:12
+    |
+303 |     pub fn update_hunt(
+    |            ^^^^^^^^^^^
+...
+307 |         max_attempts_per_clue: u32,
+    |         --------------------------
+help: remove the extra arguments
+    |
+ 80 -             client.update_hunt(&hunt_id, &creator, &title, &description, &start_time, &end_time)
+ 80 +             client.update_hunt(&hunt_id, &creator, /* &u32 */)
+    |
+
+error[E0308]: mismatched types
+  --> contracts\hunty-core\src\test.rs:80:13
+   |
+77 |         ) -> Result<(), HuntErrorCode> {
+   |              ------------------------- expected `core::result::Result<(), HuntErrorCode>` because of return type
+...
+80 |             client.update_hunt(&hunt_id, &creator, &title, &description, &start_time, &end_time)
+   |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ expected 
+`Result<(), HuntErrorCode>`, found `()`
+   |
+   = note:   expected enum `core::result::Result<(), HuntErrorCode>`
+           found unit type `()`
+help: try adding an expression at the end of the block
+   |
+80 ~             client.update_hunt(&hunt_id, &creator, &title, &description, &start_time, &end_time);
+81 +             Ok(())
+   |
+
+error[E0308]: mismatched types
+  --> contracts\hunty-core\src\test.rs:93:13
+   |
+90 |         ) -> Result<u32, HuntErrorCode> {
+   |              -------------------------- expected `core::result::Result<u32, HuntErrorCode>` because of return type
+...
+93 |             client.add_clue(&hunt_id, &question, &answer, &points, &is_required, &difficulty)
+   |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ expected 
+`Result<u32, HuntErrorCode>`, found `u32`
+   |
+   = note: expected enum `core::result::Result<u32, HuntErrorCode>`
+              found type `u32`
+help: try wrapping the expression in `core::prelude::v1::Ok`
+   |
+93 |             core::prelude::v1::Ok(client.add_clue(&hunt_id, &question, &answer, &points, &is_required, 
+&difficulty))
+   |             ++++++++++++++++++++++                                                                                
+ +
+
+error[E0308]: mismatched types
+   --> contracts\hunty-core\src\test.rs:103:13
+    |
+100 |         ) -> Result<(), HuntErrorCode> {
+    |              ------------------------- expected `core::result::Result<(), HuntErrorCode>` because of return type
+...
+103 |             client.add_clue_aliases(&hunt_id, &clue_id, &answers)
+    |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ expected `Result<(), HuntErrorCode>`, found 
+`()`
+    |
+    = note:   expected enum `core::result::Result<(), HuntErrorCode>`
+            found unit type `()`
+help: try adding an expression at the end of the block
+    |
+103 ~             client.add_clue_aliases(&hunt_id, &clue_id, &answers);
+104 +             Ok(())
+    |
+
+error[E0308]: mismatched types
+   --> contracts\hunty-core\src\test.rs:108:13
+    |
+105 |         pub fn get_clue(env: Env, hunt_id: u64, clue_id: u32) -> Result<ClueInfo, HuntErrorCode> {
+    |                                                                  ------------------------------- expected 
+`core::result::Result<ClueInfo, HuntErrorCode>` because of return type
+...
+108 |             client.get_clue(&hunt_id, &clue_id)
+    |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ expected `Result<ClueInfo, HuntErrorCode>`, found `ClueInfo`
+    |
+    = note: expected enum `core::result::Result<ClueInfo, HuntErrorCode>`
+             found struct `ClueInfo`
+help: try wrapping the expression in `core::prelude::v1::Ok`
+    |
+108 |             core::prelude::v1::Ok(client.get_clue(&hunt_id, &clue_id))
+    |             ++++++++++++++++++++++                                   +
+
+error[E0308]: mismatched types
+   --> contracts\hunty-core\src\test.rs:118:13
+    |
+115 |         pub fn activate_hunt(env: Env, hunt_id: u64, caller: Address) -> Result<(), HuntErrorCode> {
+    |                                                                          ------------------------- expected 
+`core::result::Result<(), HuntErrorCode>` because of return type
+...
+118 |             client.activate_hunt(&hunt_id, &caller)
+    |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ expected `Result<(), HuntErrorCode>`, found `()`
+    |
+    = note:   expected enum `core::result::Result<(), HuntErrorCode>`
+            found unit type `()`
+help: try adding an expression at the end of the block
+    |
+118 ~             client.activate_hunt(&hunt_id, &caller);
+119 +             Ok(())
+    |
+
+error[E0308]: mismatched types
+   --> contracts\hunty-core\src\test.rs:123:13
+    |
+120 |         pub fn deactivate_hunt(env: Env, hunt_id: u64, caller: Address) -> Result<(), HuntErrorCode> {
+    |                                                                            ------------------------- expected 
+`core::result::Result<(), HuntErrorCode>` because of return type
+...
+123 |             client.deactivate_hunt(&hunt_id, &caller)
+    |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ expected `Result<(), HuntErrorCode>`, found `()`
+    |
+    = note:   expected enum `core::result::Result<(), HuntErrorCode>`
+            found unit type `()`
+help: try adding an expression at the end of the block
+    |
+123 ~             client.deactivate_hunt(&hunt_id, &caller);
+124 +             Ok(())
+    |
+
+error[E0308]: mismatched types
+   --> contracts\hunty-core\src\test.rs:128:13
+    |
+125 |         pub fn pause_contract(env: Env, admin: Address) -> Result<(), HuntErrorCode> {
+    |                                                            ------------------------- expected 
+`core::result::Result<(), HuntErrorCode>` because of return type
+...
+128 |             client.pause_contract(&admin)
+    |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ expected `Result<(), HuntErrorCode>`, found `()`
+    |
+    = note:   expected enum `core::result::Result<(), HuntErrorCode>`
+            found unit type `()`
+help: try adding an expression at the end of the block
+    |
+128 ~             client.pause_contract(&admin);
+129 +             Ok(())
+    |
+
+error[E0308]: mismatched types
+   --> contracts\hunty-core\src\test.rs:133:13
+    |
+130 |         pub fn unpause_contract(env: Env, admin: Address) -> Result<(), HuntErrorCode> {
+    |                                                              ------------------------- expected 
+`core::result::Result<(), HuntErrorCode>` because of return type
+...
+133 |             client.unpause_contract(&admin)
+    |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ expected `Result<(), HuntErrorCode>`, found `()`
+    |
+    = note:   expected enum `core::result::Result<(), HuntErrorCode>`
+            found unit type `()`
+help: try adding an expression at the end of the block
+    |
+133 ~             client.unpause_contract(&admin);
+134 +             Ok(())
+    |
+
+error[E0308]: mismatched types
+   --> contracts\hunty-core\src\test.rs:143:13
+    |
+140 |         pub fn register_player(env: Env, hunt_id: u64, player: Address) -> Result<(), HuntErrorCode> {
+    |                                                                            ------------------------- expected 
+`core::result::Result<(), HuntErrorCode>` because of return type
+...
+143 |             client.register_player(&hunt_id, &player)
+    |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ expected `Result<(), HuntErrorCode>`, found `()`
+    |
+    = note:   expected enum `core::result::Result<(), HuntErrorCode>`
+            found unit type `()`
+help: try adding an expression at the end of the block
+    |
+143 ~             client.register_player(&hunt_id, &player);
+144 +             Ok(())
+    |
+
+error[E0308]: mismatched types
+   --> contracts\hunty-core\src\test.rs:154:13
+    |
+151 |         ) -> Result<(), HuntErrorCode> {
+    |              ------------------------- expected `core::result::Result<(), HuntErrorCode>` because of return type
+...
+154 |             client.submit_answer(&hunt_id, &clue_id, &player, &answer)
+    |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ expected `Result<(), HuntErrorCode>`, 
+found `()`
+    |
+    = note:   expected enum `core::result::Result<(), HuntErrorCode>`
+            found unit type `()`
+help: try adding an expression at the end of the block
+    |
+154 ~             client.submit_answer(&hunt_id, &clue_id, &player, &answer);
+155 +             Ok(())
+    |
+
+error[E0308]: mismatched types
+   --> contracts\hunty-core\src\test.rs:159:13
+    |
+156 |         pub fn complete_hunt(env: Env, hunt_id: u64, player: Address) -> Result<(), HuntErrorCode> {
+    |                                                                          ------------------------- expected 
+`core::result::Result<(), HuntErrorCode>` because of return type
+...
+159 |             client.complete_hunt(&hunt_id, &player)
+    |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ expected `Result<(), HuntErrorCode>`, found `()`
+    |
+    = note:   expected enum `core::result::Result<(), HuntErrorCode>`
+            found unit type `()`
+help: try adding an expression at the end of the block
+    |
+159 ~             client.complete_hunt(&hunt_id, &player);
+160 +             Ok(())
+    |
+
+error[E0308]: mismatched types
+   --> contracts\hunty-core\src\test.rs:169:13
+    |
+166 |         ) -> Result<(), HuntErrorCode> {
+    |              ------------------------- expected `core::result::Result<(), HuntErrorCode>` because of return type
+...
+169 |             client.batch_complete_hunt(&hunt_id, &creator, &players)
+    |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ expected `Result<(), HuntErrorCode>`, found 
+`()`
+    |
+    = note:   expected enum `core::result::Result<(), HuntErrorCode>`
+            found unit type `()`
+help: try adding an expression at the end of the block
+    |
+169 ~             client.batch_complete_hunt(&hunt_id, &creator, &players);
+170 +             Ok(())
+    |
+
+error[E0308]: mismatched types
+   --> contracts\hunty-core\src\test.rs:174:13
+    |
+171 |         pub fn cancel_hunt(env: Env, hunt_id: u64, creator: Address) -> Result<(), HuntErrorCode> {
+    |                                                                         ------------------------- expected 
+`core::result::Result<(), HuntErrorCode>` because of return type
+...
+174 |             client.cancel_hunt(&hunt_id, &creator)
+    |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ expected `Result<(), HuntErrorCode>`, found `()`
+    |
+    = note:   expected enum `core::result::Result<(), HuntErrorCode>`
+            found unit type `()`
+help: try adding an expression at the end of the block
+    |
+174 ~             client.cancel_hunt(&hunt_id, &creator);
+175 +             Ok(())
+    |
+
+error[E0308]: mismatched types
+   --> contracts\hunty-core\src\test.rs:192:13
+    |
+189 |         ) -> Result<Vec<u32>, HuntErrorCode> {
+    |              ------------------------------- expected `core::result::Result<soroban_sdk::Vec<u32>, 
+HuntErrorCode>` because of return type
+...
+192 |             client.get_completed_clues(&hunt_id, &player)
+    |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ expected `Result<Vec<u32>, HuntErrorCode>`, found 
+`Vec<u32>`
+    |
+    = note: expected enum `core::result::Result<soroban_sdk::Vec<_>, HuntErrorCode>`
+             found struct `soroban_sdk::Vec<_>`
+help: try wrapping the expression in `core::prelude::v1::Ok`
+    |
+192 |             core::prelude::v1::Ok(client.get_completed_clues(&hunt_id, &player))
+    |             ++++++++++++++++++++++                                             +
+
+error[E0308]: mismatched types
+   --> contracts\hunty-core\src\test.rs:224:13
+    |
+221 |         ) -> Result<(), HuntErrorCode> {
+    |              ------------------------- expected `core::result::Result<(), HuntErrorCode>` because of return type
+...
+224 |             client.set_reward_manager(&caller, &reward_manager)
+    |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ expected `Result<(), HuntErrorCode>`, found `()`
+    |
+    = note:   expected enum `core::result::Result<(), HuntErrorCode>`
+            found unit type `()`
+help: try adding an expression at the end of the block
+    |
+224 ~             client.set_reward_manager(&caller, &reward_manager);
+225 +             Ok(())
+    |
+
+error[E0599]: no method named `get_reward_manager` found for struct `HuntyCoreClient<'a>` in the current scope
+   --> contracts\hunty-core\src\test.rs:229:20
+    |
+229 |             client.get_reward_manager()
+    |                    ^^^^^^^^^^^^^^^^^^
+    |
+   ::: contracts\hunty-core\src\lib.rs:37:1
+    |
+ 37 | #[contract]
+    | ----------- method `get_reward_manager` not found for this struct
+    |
+help: there is a method `set_reward_manager` with a similar name, but with different arguments
+   --> contracts\hunty-core\src\lib.rs:40:1
+    |
+ 40 | #[contractimpl]
+    | ^^^^^^^^^^^^^^^
+    = note: this error originates in the attribute macro `soroban_sdk::contractclient` (in Nightly builds, run with -Z 
+macro-backtrace for more info)
+
+error[E0308]: mismatched types
+   --> contracts\hunty-core\src\test.rs:239:13
+    |
+236 |         pub fn cleanup_hunt(env: Env, admin: Address, hunt_id: u64) -> Result<u32, HuntErrorCode> {
+    |                                                                        -------------------------- expected 
+`core::result::Result<u32, HuntErrorCode>` because of return type
+...
+239 |             client.cleanup_hunt(&admin, &hunt_id)
+    |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ expected `Result<u32, HuntErrorCode>`, found `u32`
+    |
+    = note: expected enum `core::result::Result<u32, HuntErrorCode>`
+               found type `u32`
+help: try wrapping the expression in `core::prelude::v1::Ok`
+    |
+239 |             core::prelude::v1::Ok(client.cleanup_hunt(&admin, &hunt_id))
+    |             ++++++++++++++++++++++                                     +
+
+warning: use of deprecated method `soroban_sdk::Env::register_contract`: use `register`
+   --> contracts\hunty-core\src\test.rs:249:31
+    |
+249 |         let contract_id = env.register_contract(None, super::HuntyCore);
+    |                               ^^^^^^^^^^^^^^^^^
+    |
+    = note: `#[warn(deprecated)]` on by default
+
+warning: use of deprecated method `soroban_sdk::Env::register_contract`: use `register`
+   --> contracts\hunty-core\src\test.rs:391:31
+    |
+391 |         let contract_id = env.register_contract(None, super::HuntyCore);
+    |                               ^^^^^^^^^^^^^^^^^
+
+warning: use of deprecated method `soroban_sdk::Env::register_contract`: use `register`
+   --> contracts\hunty-core\src\test.rs:848:31
+    |
+848 |         let contract_id = env.register_contract(None, super::HuntyCore);
+    |                               ^^^^^^^^^^^^^^^^^
+
+error[E0308]: arguments to this function are incorrect
+   --> contracts\hunty-core\src\test.rs:923:13
+    |
+923 |             HuntyCore::create_hunt_from_template(
+    |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+924 |                 env.clone(),
+925 |                 template_hunt_id,
+    |                 ---------------- expected `soroban_sdk::Address`, found `u64`
+926 |                 new_creator.clone(),
+    |                 ------------------- expected `u64`, found `soroban_sdk::Address`
+    |
+note: associated function defined here
+   --> contracts\hunty-core\src\test.rs:46:16
+    |
+ 46 |         pub fn create_hunt_from_template(
+    |                ^^^^^^^^^^^^^^^^^^^^^^^^^
+help: swap these arguments
+    |
+923 ~             HuntyCore::create_hunt_from_template(
+924 +                 env.clone(),
+925 +                 new_creator.clone(),
+926 +                 template_hunt_id,
+927 +                 cloned_title,
+928 +                 cloned_description,
+929 +                 None,
+930 +                 None,
+931 +             )
+    |
+
+warning: use of deprecated method `soroban_sdk::Env::register_contract`: use `register`
+   --> contracts\hunty-core\src\test.rs:956:31
+    |
+956 |         let contract_id = env.register_contract(None, super::HuntyCore);
+    |                               ^^^^^^^^^^^^^^^^^
+
+error[E0308]: arguments to this function are incorrect
+   --> contracts\hunty-core\src\test.rs:986:13
+    |
+986 |             HuntyCore::create_hunt_from_template(
+    |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+987 |                 env.clone(),
+988 |                 template_hunt_id,
+    |                 ---------------- expected `soroban_sdk::Address`, found `u64`
+989 |                 new_creator,
+    |                 ----------- expected `u64`, found `soroban_sdk::Address`
+    |
+note: associated function defined here
+   --> contracts\hunty-core\src\test.rs:46:16
+    |
+ 46 |         pub fn create_hunt_from_template(
+    |                ^^^^^^^^^^^^^^^^^^^^^^^^^
+help: swap these arguments
+    |
+986 ~             HuntyCore::create_hunt_from_template(
+987 +                 env.clone(),
+988 +                 new_creator,
+989 +                 template_hunt_id,
+990 +                 String::from_str(env, "Cloned"),
+991 +                 String::from_str(env, "Draft from template"),
+992 +                 None,
+993 +                 None,
+994 +             )
+    |
+
+warning: use of deprecated method `soroban_sdk::Env::register_contract`: use `register`
+    --> contracts\hunty-core\src\test.rs:1562:31
+     |
+1562 |         let contract_id = env.register_contract(None, super::HuntyCore);
+     |                               ^^^^^^^^^^^^^^^^^
+
+warning: use of deprecated method `soroban_sdk::Env::register_contract`: use `register`
+    --> contracts\hunty-core\src\test.rs:1607:31
+     |
+1607 |         let contract_id = env.register_contract(None, super::HuntyCore);
+     |                               ^^^^^^^^^^^^^^^^^
+
+warning: use of deprecated method `soroban_sdk::Env::register_contract`: use `register`
+    --> contracts\hunty-core\src\test.rs:1733:31
+     |
+1733 |         let contract_id = env.register_contract(None, super::HuntyCore);
+     |                               ^^^^^^^^^^^^^^^^^
+
+warning: use of deprecated method `soroban_sdk::Env::register_contract`: use `register`
+    --> contracts\hunty-core\src\test.rs:1776:31
+     |
+1776 |         let contract_id = env.register_contract(None, super::HuntyCore);
+     |                               ^^^^^^^^^^^^^^^^^
+
+warning: use of deprecated method `soroban_sdk::Env::register_contract`: use `register`
+    --> contracts\hunty-core\src\test.rs:1822:31
+     |
+1822 |         let contract_id = env.register_contract(None, super::HuntyCore);
+     |                               ^^^^^^^^^^^^^^^^^
+
+warning: use of deprecated method `soroban_sdk::Env::register_contract`: use `register`
+    --> contracts\hunty-core\src\test.rs:2483:27
+     |
+2483 |         let core_id = env.register_contract(None, super::HuntyCore);
+     |                           ^^^^^^^^^^^^^^^^^
+
+warning: use of deprecated method `soroban_sdk::Env::register_contract`: use `register`
+    --> contracts\hunty-core\src\test.rs:3068:31
+     |
+3068 |         let contract_id = env.register_contract(None, super::HuntyCore);
+     |                               ^^^^^^^^^^^^^^^^^
+
+warning: use of deprecated method `soroban_sdk::Env::register_contract`: use `register`
+    --> contracts\hunty-core\src\test.rs:3130:31
+     |
+3130 |         let contract_id = env.register_contract(None, super::HuntyCore);
+     |                               ^^^^^^^^^^^^^^^^^
+
+warning: use of deprecated method `soroban_sdk::Env::register_contract`: use `register`
+    --> contracts\hunty-core\src\test.rs:3182:31
+     |
+3182 |         let contract_id = env.register_contract(None, super::HuntyCore);
+     |                               ^^^^^^^^^^^^^^^^^
+
+warning: use of deprecated method `soroban_sdk::Env::register_contract`: use `register`
+    --> contracts\hunty-core\src\test.rs:3235:31
+     |
+3235 |         let contract_id = env.register_contract(None, super::HuntyCore);
+     |                               ^^^^^^^^^^^^^^^^^
+
+error[E0599]: no method named `len` found for enum `core::result::Result<T, E>` in the current scope
+    --> contracts\hunty-core\src\test.rs:3330:25
+     |
+3330 |         assert_eq!(list.len(), 0);
+     |                         ^^^
+     |
+note: the method `len` exists on the type `soroban_sdk::Vec<u32>`
+    --> C:\Users\HomePC\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\soroban-sdk-22.0.8\src\vec.rs:804:5
+     |
+ 804 |     pub fn len(&self) -> u32 {
+     |     ^^^^^^^^^^^^^^^^^^^^^^^^
+help: there is a method `le` with a similar name, but with different arguments
+    --> /rustc/ac68faa20c58cbccd01ee7208bf3b6e93a7d7f96/library\core\src\cmp.rs:1427:4
+help: consider using `Result::expect` to unwrap the `soroban_sdk::Vec<u32>` value, panicking if the value is a 
+`Result::Err`
+     |
+3330 |         assert_eq!(list.expect("REASON").len(), 0);
+     |                        +++++++++++++++++
+
+warning: use of deprecated method `soroban_sdk::Env::register_contract`: use `register`
+    --> contracts\hunty-core\src\test.rs:3344:31
+     |
+3344 |         let contract_id = env.register_contract(None, super::HuntyCore);
+     |                               ^^^^^^^^^^^^^^^^^
+
+error[E0599]: no method named `len` found for enum `core::result::Result<T, E>` in the current scope
+    --> contracts\hunty-core\src\test.rs:3381:25
+     |
+3381 |         assert_eq!(list.len(), 2);
+     |                         ^^^
+     |
+note: the method `len` exists on the type `soroban_sdk::Vec<u32>`
+    --> C:\Users\HomePC\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\soroban-sdk-22.0.8\src\vec.rs:804:5
+     |
+ 804 |     pub fn len(&self) -> u32 {
+     |     ^^^^^^^^^^^^^^^^^^^^^^^^
+help: there is a method `le` with a similar name, but with different arguments
+    --> /rustc/ac68faa20c58cbccd01ee7208bf3b6e93a7d7f96/library\core\src\cmp.rs:1427:4
+help: consider using `Result::expect` to unwrap the `soroban_sdk::Vec<u32>` value, panicking if the value is a 
+`Result::Err`
+     |
+3381 |         assert_eq!(list.expect("REASON").len(), 2);
+     |                        +++++++++++++++++
+
+error[E0599]: no method named `get` found for enum `core::result::Result<T, E>` in the current scope
+    --> contracts\hunty-core\src\test.rs:3382:25
+     |
+3382 |         assert_eq!(list.get(0).unwrap(), 1);
+     |                         ^^^
+     |
+note: the method `get` exists on the type `soroban_sdk::Vec<u32>`
+    --> C:\Users\HomePC\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\soroban-sdk-22.0.8\src\vec.rs:388:5
+     |
+ 388 |     pub fn get(&self, i: u32) -> Option<T> {
+     |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+help: consider using `Result::expect` to unwrap the `soroban_sdk::Vec<u32>` value, panicking if the value is a 
+`Result::Err`
+     |
+3382 |         assert_eq!(list.expect("REASON").get(0).unwrap(), 1);
+     |                        +++++++++++++++++
+help: there is a method `ge` with a similar name
+     |
+3382 -         assert_eq!(list.get(0).unwrap(), 1);
+3382 +         assert_eq!(list.ge(0).unwrap(), 1);
+     |
+
+error[E0599]: no method named `get` found for enum `core::result::Result<T, E>` in the current scope
+    --> contracts\hunty-core\src\test.rs:3383:25
+     |
+3383 |         assert_eq!(list.get(1).unwrap(), 2);
+     |                         ^^^
+     |
+note: the method `get` exists on the type `soroban_sdk::Vec<u32>`
+    --> C:\Users\HomePC\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\soroban-sdk-22.0.8\src\vec.rs:388:5
+     |
+ 388 |     pub fn get(&self, i: u32) -> Option<T> {
+     |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+help: consider using `Result::expect` to unwrap the `soroban_sdk::Vec<u32>` value, panicking if the value is a 
+`Result::Err`
+     |
+3383 |         assert_eq!(list.expect("REASON").get(1).unwrap(), 2);
+     |                        +++++++++++++++++
+help: there is a method `ge` with a similar name
+     |
+3383 -         assert_eq!(list.get(1).unwrap(), 2);
+3383 +         assert_eq!(list.ge(1).unwrap(), 2);
+     |
+
+warning: use of deprecated method `soroban_sdk::Env::register_contract`: use `register`
+    --> contracts\hunty-core\src\test.rs:3396:31
+     |
+3396 |         let contract_id = env.register_contract(None, super::HuntyCore);
+     |                               ^^^^^^^^^^^^^^^^^
+
+warning: use of deprecated method `soroban_sdk::Env::register_contract`: use `register`
+    --> contracts\hunty-core\src\test.rs:3494:31
+     |
+3494 |         let contract_id = env.register_contract(None, super::HuntyCore);
+     |                               ^^^^^^^^^^^^^^^^^
+
+warning: use of deprecated method `soroban_sdk::Env::register_contract`: use `register`
+    --> contracts\hunty-core\src\test.rs:3645:31
+     |
+3645 |         let contract_id = env.register_contract(None, super::HuntyCore);
+     |                               ^^^^^^^^^^^^^^^^^
+
+warning: use of deprecated method `soroban_sdk::Env::register_contract`: use `register`
+    --> contracts\hunty-core\src\test.rs:3793:31
+     |
+3793 |         let contract_id = env.register_contract(None, super::HuntyCore);
+     |                               ^^^^^^^^^^^^^^^^^
+
+warning: use of deprecated method `soroban_sdk::Env::register_contract`: use `register`
+    --> contracts\hunty-core\src\test.rs:3861:31
+     |
+3861 |         let contract_id = env.register_contract(None, super::HuntyCore);
+     |                               ^^^^^^^^^^^^^^^^^
+
+warning: use of deprecated method `soroban_sdk::Env::register_contract`: use `register`
+    --> contracts\hunty-core\src\test.rs:3928:27
+     |
+3928 |         let core_id = env.register_contract(None, super::HuntyCore);
+     |                           ^^^^^^^^^^^^^^^^^
+
+warning: use of deprecated method `soroban_sdk::Env::register_contract`: use `register`
+    --> contracts\hunty-core\src\test.rs:3929:35
+     |
+3929 |         let nft_contract_id = env.register_contract(None, NftReward);
+     |                                   ^^^^^^^^^^^^^^^^^
+
+warning: use of deprecated method `soroban_sdk::Env::register_contract`: use `register`
+    --> contracts\hunty-core\src\test.rs:4082:27
+     |
+4082 |         let core_id = env.register_contract(None, super::HuntyCore);
+     |                           ^^^^^^^^^^^^^^^^^
+
+warning: use of deprecated method `soroban_sdk::Env::register_contract`: use `register`
+    --> contracts\hunty-core\src\test.rs:4171:27
+     |
+4171 |         let core_id = env.register_contract(None, super::HuntyCore);
+     |                           ^^^^^^^^^^^^^^^^^
+
+warning: use of deprecated method `soroban_sdk::Env::register_contract`: use `register`
+    --> contracts\hunty-core\src\test.rs:4267:27
+     |
+4267 |         let core_id = env.register_contract(None, super::HuntyCore);
+     |                           ^^^^^^^^^^^^^^^^^
+
+warning: use of deprecated method `soroban_sdk::Env::register_contract`: use `register`
+    --> contracts\hunty-core\src\test.rs:4268:35
+     |
+4268 |         let nft_contract_id = env.register_contract(None, NftReward);
+     |                                   ^^^^^^^^^^^^^^^^^
+
+warning: use of deprecated method `soroban_sdk::Env::register_contract`: use `register`
+    --> contracts\hunty-core\src\test.rs:4425:31
+     |
+4425 |         let contract_id = env.register_contract(None, super::HuntyCore);
+     |                               ^^^^^^^^^^^^^^^^^
+
+warning: use of deprecated method `soroban_sdk::Env::register_contract`: use `register`
+    --> contracts\hunty-core\src\test.rs:4510:31
+     |
+4510 |         let contract_id = env.register_contract(None, super::HuntyCore);
+     |                               ^^^^^^^^^^^^^^^^^
+
+warning: use of deprecated method `soroban_sdk::Env::register_contract`: use `register`
+    --> contracts\hunty-core\src\test.rs:4628:31
+     |
+4628 |         let contract_id = env.register_contract(None, super::HuntyCore);
+     |                               ^^^^^^^^^^^^^^^^^
+
+warning: use of deprecated method `soroban_sdk::Env::register_contract`: use `register`
+    --> contracts\hunty-core\src\test.rs:4807:27
+     |
+4807 |         let core_id = env.register_contract(None, super::HuntyCore);
+     |                           ^^^^^^^^^^^^^^^^^
+
+warning: unused import: `Register`
+   --> contracts\hunty-core\src\test.rs:244:74
+    |
+244 |     use soroban_sdk::testutils::{Address as _, Events as _, Ledger as _, Register as _};
+    |                                                                          ^^^^^^^^
+
+warning: unused import: `Address`
+   --> contracts\hunty-core\src\test.rs:244:34
+    |
+244 |     use soroban_sdk::testutils::{Address as _, Events as _, Ledger as _, Register as _};
+    |                                  ^^^^^^^
+
+warning: unused variable: `hunt_id1`
+   --> contracts\hunty-core\src\test.rs:706:14
+    |
+706 |         let (hunt_id1, hunt_id2, hunt1, hunt2) = with_core_contract(&env, |env, _cid| {
+    |              ^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_hunt_id1`
+    |
+    = note: `#[warn(unused_variables)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused variable: `hunt_id2`
+   --> contracts\hunty-core\src\test.rs:706:24
+    |
+706 |         let (hunt_id1, hunt_id2, hunt1, hunt2) = with_core_contract(&env, |env, _cid| {
+    |                        ^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_hunt_id2`
+
+warning: unused variable: `attacker`
+    --> contracts\hunty-core\src\test.rs:1862:13
+     |
+1862 |         let attacker = Address::generate(&env);
+     |             ^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_attacker`
+
+warning: unused variable: `attacker`
+    --> contracts\hunty-core\src\test.rs:2580:13
+     |
+2580 |         let attacker = Address::generate(&env);
+     |             ^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_attacker`
+
+Some errors have detailed explanations: E0061, E0308, E0425, E0599.
+For more information about an error, try `rustc --explain E0061`.
+warning: `hunty-core` (lib test) generated 40 warnings (1 duplicate)
+error: could not compile `hunty-core` (lib test) due to 33 previous errors; 40 warnings emitted

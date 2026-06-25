@@ -1,0 +1,810 @@
+﻿cargo : warning: unused variable: `minter`
+At line:1 char:1
++ cargo check --tests 2>&1 | Out-File -Encoding utf8 scratch_cargo_erro ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (warning: unused variable: `minter`:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+   --> contracts\nft-reward\src\lib.rs:201:9
+    |
+201 |         minter: Address,
+    |         ^^^^^^ help: if this is intentional, prefix it with an underscore: `_minter`
+    |
+    = note: `#[warn(unused_variables)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused variable: `minter`
+   --> contracts\nft-reward\src\lib.rs:228:9
+    |
+228 |         minter: Address,
+    |         ^^^^^^ help: if this is intentional, prefix it with an underscore: `_minter`
+
+warning: associated function `save_max_supply` is never used
+  --> contracts\nft-reward\src\storage.rs:59:12
+   |
+ 7 | impl Storage {
+   | ------------ associated function in this implementation
+...
+59 |     pub fn save_max_supply(env: &Env, max_supply: Option<u64>) {
+   |            ^^^^^^^^^^^^^^^
+   |
+   = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: `nft-reward` (lib) generated 3 warnings (run `cargo fix --lib -p nft-reward` to apply 2 suggestions)
+warning: unused import: `alloc::string::String as StdString`
+  --> contracts\hunty-core\src\lib.rs:12:5
+   |
+12 | use alloc::string::String as StdString;
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+    Checking hunty-core v0.0.0 (C:\Users\HomePC\Documents\D\Hunty-contract\contracts\hunty-core)
+warning: `hunty-core` (lib) generated 1 warning (run `cargo fix --lib -p hunty-core` to apply 1 suggestion)
+warning: use of deprecated method `soroban_sdk::Env::register_contract`: use `register`
+  --> contracts\hunty-core\tests\test.rs:34:23
+   |
+34 |     let core_id = env.register_contract(None, HuntyCore);
+   |                       ^^^^^^^^^^^^^^^^^
+   |
+   = note: `#[warn(deprecated)]` on by default
+
+warning: unused import: `Register`
+ --> contracts\hunty-core\tests\test.rs:1:57
+  |
+1 | use soroban_sdk::testutils::{Address as _, Ledger as _, Register as _};
+  |                                                         ^^^^^^^^
+  |
+  = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: `hunty-core` (test "test") generated 2 warnings
+warning: unused import: `String`
+ --> contracts\hunty-core\src\test.rs:3:33
+  |
+3 | use soroban_sdk::{Address, Env, String};
+  |                                 ^^^^^^
+
+warning: unused import: `HuntRewardConfig`
+  --> contracts\hunty-core\src\test.rs:27:80
+   |
+27 |     use crate::types::{PlayerProgress, LeaderboardEntry, HuntStatistics, Hunt, HuntRewardConfig};
+   |                                                                                ^^^^^^^^^^^^^^^^
+
+warning: unused import: `NftMetadata`
+   --> contracts\hunty-core\src\test.rs:360:22
+    |
+360 |     use nft_reward::{NftMetadata, NftReward};
+    |                      ^^^^^^^^^^^
+
+warning: cannot test inner items
+    --> contracts\hunty-core\src\test.rs:4960:1
+     |
+4960 | #[test]
+     | ^^^^^^^
+     |
+     = note: `#[warn(unnameable_test_items)]` on by default
+
+error[E0308]: mismatched types
+  --> contracts\hunty-core\src\test.rs:36:37
+   |
+36 |                 Ok(Err(err)) => Err(err),
+   |                                 --- ^^^ expected `HuntErrorCode`, found `ConversionError`
+   |                                 |
+   |                                 arguments to this enum variant are incorrect
+   |
+help: the type constructed contains `soroban_sdk::ConversionError` due to the type of the argument passed
+  --> contracts\hunty-core\src\test.rs:36:33
+   |
+36 |                 Ok(Err(err)) => Err(err),
+   |                                 ^^^^---^
+   |                                     |
+   |                                     this argument influences the type of `Err`
+note: tuple variant defined here
+  --> /rustc/ac68faa20c58cbccd01ee7208bf3b6e93a7d7f96/library\core\src\result.rs:566:4
+
+error[E0308]: mismatched types
+  --> contracts\hunty-core\src\test.rs:46:37
+   |
+46 |                 Ok(Err(err)) => Err(err),
+   |                                 --- ^^^ expected `HuntErrorCode`, found `ConversionError`
+   |                                 |
+   |                                 arguments to this enum variant are incorrect
+   |
+help: the type constructed contains `soroban_sdk::ConversionError` due to the type of the argument passed
+  --> contracts\hunty-core\src\test.rs:46:33
+   |
+46 |                 Ok(Err(err)) => Err(err),
+   |                                 ^^^^---^
+   |                                     |
+   |                                     this argument influences the type of `Err`
+note: tuple variant defined here
+  --> /rustc/ac68faa20c58cbccd01ee7208bf3b6e93a7d7f96/library\core\src\result.rs:566:4
+
+error[E0308]: mismatched types
+  --> contracts\hunty-core\src\test.rs:56:37
+   |
+56 |                 Ok(Err(err)) => Err(err),
+   |                                 --- ^^^ expected `HuntErrorCode`, found `ConversionError`
+   |                                 |
+   |                                 arguments to this enum variant are incorrect
+   |
+help: the type constructed contains `soroban_sdk::ConversionError` due to the type of the argument passed
+  --> contracts\hunty-core\src\test.rs:56:33
+   |
+56 |                 Ok(Err(err)) => Err(err),
+   |                                 ^^^^---^
+   |                                     |
+   |                                     this argument influences the type of `Err`
+note: tuple variant defined here
+  --> /rustc/ac68faa20c58cbccd01ee7208bf3b6e93a7d7f96/library\core\src\result.rs:566:4
+
+error[E0308]: mismatched types
+  --> contracts\hunty-core\src\test.rs:79:37
+   |
+79 |                 Ok(Err(err)) => Err(err),
+   |                                 --- ^^^ expected `HuntErrorCode`, found `Error`
+   |                                 |
+   |                                 arguments to this enum variant are incorrect
+   |
+help: the type constructed contains `soroban_sdk::Error` due to the type of the argument passed
+  --> contracts\hunty-core\src\test.rs:79:33
+   |
+79 |                 Ok(Err(err)) => Err(err),
+   |                                 ^^^^---^
+   |                                     |
+   |                                     this argument influences the type of `Err`
+note: tuple variant defined here
+  --> /rustc/ac68faa20c58cbccd01ee7208bf3b6e93a7d7f96/library\core\src\result.rs:566:4
+
+error[E0308]: mismatched types
+  --> contracts\hunty-core\src\test.rs:97:37
+   |
+97 |                 Ok(Err(err)) => Err(err),
+   |                                 --- ^^^ expected `HuntErrorCode`, found `Error`
+   |                                 |
+   |                                 arguments to this enum variant are incorrect
+   |
+help: the type constructed contains `soroban_sdk::Error` due to the type of the argument passed
+  --> contracts\hunty-core\src\test.rs:97:33
+   |
+97 |                 Ok(Err(err)) => Err(err),
+   |                                 ^^^^---^
+   |                                     |
+   |                                     this argument influences the type of `Err`
+note: tuple variant defined here
+  --> /rustc/ac68faa20c58cbccd01ee7208bf3b6e93a7d7f96/library\core\src\result.rs:566:4
+
+error[E0308]: mismatched types
+   --> contracts\hunty-core\src\test.rs:112:37
+    |
+112 |                 Ok(Err(err)) => Err(err),
+    |                                 --- ^^^ expected `HuntErrorCode`, found `ConversionError`
+    |                                 |
+    |                                 arguments to this enum variant are incorrect
+    |
+help: the type constructed contains `soroban_sdk::ConversionError` due to the type of the argument passed
+   --> contracts\hunty-core\src\test.rs:112:33
+    |
+112 |                 Ok(Err(err)) => Err(err),
+    |                                 ^^^^---^
+    |                                     |
+    |                                     this argument influences the type of `Err`
+note: tuple variant defined here
+   --> /rustc/ac68faa20c58cbccd01ee7208bf3b6e93a7d7f96/library\core\src\result.rs:566:4
+
+error[E0308]: mismatched types
+   --> contracts\hunty-core\src\test.rs:127:37
+    |
+127 |                 Ok(Err(err)) => Err(err),
+    |                                 --- ^^^ expected `HuntErrorCode`, found `ConversionError`
+    |                                 |
+    |                                 arguments to this enum variant are incorrect
+    |
+help: the type constructed contains `soroban_sdk::ConversionError` due to the type of the argument passed
+   --> contracts\hunty-core\src\test.rs:127:33
+    |
+127 |                 Ok(Err(err)) => Err(err),
+    |                                 ^^^^---^
+    |                                     |
+    |                                     this argument influences the type of `Err`
+note: tuple variant defined here
+   --> /rustc/ac68faa20c58cbccd01ee7208bf3b6e93a7d7f96/library\core\src\result.rs:566:4
+
+error[E0308]: mismatched types
+   --> contracts\hunty-core\src\test.rs:145:37
+    |
+145 |                 Ok(Err(err)) => Err(err),
+    |                                 --- ^^^ expected `HuntErrorCode`, found `ConversionError`
+    |                                 |
+    |                                 arguments to this enum variant are incorrect
+    |
+help: the type constructed contains `soroban_sdk::ConversionError` due to the type of the argument passed
+   --> contracts\hunty-core\src\test.rs:145:33
+    |
+145 |                 Ok(Err(err)) => Err(err),
+    |                                 ^^^^---^
+    |                                     |
+    |                                     this argument influences the type of `Err`
+note: tuple variant defined here
+   --> /rustc/ac68faa20c58cbccd01ee7208bf3b6e93a7d7f96/library\core\src\result.rs:566:4
+
+error[E0308]: mismatched types
+   --> contracts\hunty-core\src\test.rs:160:37
+    |
+160 |                 Ok(Err(err)) => Err(err),
+    |                                 --- ^^^ expected `HuntErrorCode`, found `ConversionError`
+    |                                 |
+    |                                 arguments to this enum variant are incorrect
+    |
+help: the type constructed contains `soroban_sdk::ConversionError` due to the type of the argument passed
+   --> contracts\hunty-core\src\test.rs:160:33
+    |
+160 |                 Ok(Err(err)) => Err(err),
+    |                                 ^^^^---^
+    |                                     |
+    |                                     this argument influences the type of `Err`
+note: tuple variant defined here
+   --> /rustc/ac68faa20c58cbccd01ee7208bf3b6e93a7d7f96/library\core\src\result.rs:566:4
+
+error[E0308]: mismatched types
+   --> contracts\hunty-core\src\test.rs:170:37
+    |
+170 |                 Ok(Err(err)) => Err(err),
+    |                                 --- ^^^ expected `HuntErrorCode`, found `ConversionError`
+    |                                 |
+    |                                 arguments to this enum variant are incorrect
+    |
+help: the type constructed contains `soroban_sdk::ConversionError` due to the type of the argument passed
+   --> contracts\hunty-core\src\test.rs:170:33
+    |
+170 |                 Ok(Err(err)) => Err(err),
+    |                                 ^^^^---^
+    |                                     |
+    |                                     this argument influences the type of `Err`
+note: tuple variant defined here
+   --> /rustc/ac68faa20c58cbccd01ee7208bf3b6e93a7d7f96/library\core\src\result.rs:566:4
+
+error[E0308]: mismatched types
+   --> contracts\hunty-core\src\test.rs:186:37
+    |
+186 |                 Ok(Err(err)) => Err(err),
+    |                                 --- ^^^ expected `HuntErrorCode`, found `ConversionError`
+    |                                 |
+    |                                 arguments to this enum variant are incorrect
+    |
+help: the type constructed contains `soroban_sdk::ConversionError` due to the type of the argument passed
+   --> contracts\hunty-core\src\test.rs:186:33
+    |
+186 |                 Ok(Err(err)) => Err(err),
+    |                                 ^^^^---^
+    |                                     |
+    |                                     this argument influences the type of `Err`
+note: tuple variant defined here
+   --> /rustc/ac68faa20c58cbccd01ee7208bf3b6e93a7d7f96/library\core\src\result.rs:566:4
+
+error[E0308]: mismatched types
+   --> contracts\hunty-core\src\test.rs:196:37
+    |
+196 |                 Ok(Err(err)) => Err(err),
+    |                                 --- ^^^ expected `HuntErrorCode`, found `ConversionError`
+    |                                 |
+    |                                 arguments to this enum variant are incorrect
+    |
+help: the type constructed contains `soroban_sdk::ConversionError` due to the type of the argument passed
+   --> contracts\hunty-core\src\test.rs:196:33
+    |
+196 |                 Ok(Err(err)) => Err(err),
+    |                                 ^^^^---^
+    |                                     |
+    |                                     this argument influences the type of `Err`
+note: tuple variant defined here
+   --> /rustc/ac68faa20c58cbccd01ee7208bf3b6e93a7d7f96/library\core\src\result.rs:566:4
+
+error[E0308]: mismatched types
+   --> contracts\hunty-core\src\test.rs:206:37
+    |
+206 |                 Ok(Err(err)) => Err(err),
+    |                                 --- ^^^ expected `HuntErrorCode`, found `ConversionError`
+    |                                 |
+    |                                 arguments to this enum variant are incorrect
+    |
+help: the type constructed contains `soroban_sdk::ConversionError` due to the type of the argument passed
+   --> contracts\hunty-core\src\test.rs:206:33
+    |
+206 |                 Ok(Err(err)) => Err(err),
+    |                                 ^^^^---^
+    |                                     |
+    |                                     this argument influences the type of `Err`
+note: tuple variant defined here
+   --> /rustc/ac68faa20c58cbccd01ee7208bf3b6e93a7d7f96/library\core\src\result.rs:566:4
+
+error[E0308]: mismatched types
+   --> contracts\hunty-core\src\test.rs:222:37
+    |
+222 |                 Ok(Err(err)) => Err(err),
+    |                                 --- ^^^ expected `HuntErrorCode`, found `ConversionError`
+    |                                 |
+    |                                 arguments to this enum variant are incorrect
+    |
+help: the type constructed contains `soroban_sdk::ConversionError` due to the type of the argument passed
+   --> contracts\hunty-core\src\test.rs:222:33
+    |
+222 |                 Ok(Err(err)) => Err(err),
+    |                                 ^^^^---^
+    |                                     |
+    |                                     this argument influences the type of `Err`
+note: tuple variant defined here
+   --> /rustc/ac68faa20c58cbccd01ee7208bf3b6e93a7d7f96/library\core\src\result.rs:566:4
+
+error[E0308]: mismatched types
+   --> contracts\hunty-core\src\test.rs:232:37
+    |
+232 |                 Ok(Err(err)) => Err(err),
+    |                                 --- ^^^ expected `HuntErrorCode`, found `ConversionError`
+    |                                 |
+    |                                 arguments to this enum variant are incorrect
+    |
+help: the type constructed contains `soroban_sdk::ConversionError` due to the type of the argument passed
+   --> contracts\hunty-core\src\test.rs:232:33
+    |
+232 |                 Ok(Err(err)) => Err(err),
+    |                                 ^^^^---^
+    |                                     |
+    |                                     this argument influences the type of `Err`
+note: tuple variant defined here
+   --> /rustc/ac68faa20c58cbccd01ee7208bf3b6e93a7d7f96/library\core\src\result.rs:566:4
+
+error[E0308]: mismatched types
+   --> contracts\hunty-core\src\test.rs:247:37
+    |
+247 |                 Ok(Err(err)) => Err(err),
+    |                                 --- ^^^ expected `HuntErrorCode`, found `ConversionError`
+    |                                 |
+    |                                 arguments to this enum variant are incorrect
+    |
+help: the type constructed contains `soroban_sdk::ConversionError` due to the type of the argument passed
+   --> contracts\hunty-core\src\test.rs:247:33
+    |
+247 |                 Ok(Err(err)) => Err(err),
+    |                                 ^^^^---^
+    |                                     |
+    |                                     this argument influences the type of `Err`
+note: tuple variant defined here
+   --> /rustc/ac68faa20c58cbccd01ee7208bf3b6e93a7d7f96/library\core\src\result.rs:566:4
+
+error[E0308]: mismatched types
+   --> contracts\hunty-core\src\test.rs:257:37
+    |
+257 |                 Ok(Err(err)) => Err(err),
+    |                                 --- ^^^ expected `HuntErrorCode`, found `ConversionError`
+    |                                 |
+    |                                 arguments to this enum variant are incorrect
+    |
+help: the type constructed contains `soroban_sdk::ConversionError` due to the type of the argument passed
+   --> contracts\hunty-core\src\test.rs:257:33
+    |
+257 |                 Ok(Err(err)) => Err(err),
+    |                                 ^^^^---^
+    |                                     |
+    |                                     this argument influences the type of `Err`
+note: tuple variant defined here
+   --> /rustc/ac68faa20c58cbccd01ee7208bf3b6e93a7d7f96/library\core\src\result.rs:566:4
+
+error[E0308]: mismatched types
+   --> contracts\hunty-core\src\test.rs:271:37
+    |
+271 |                 Ok(Err(err)) => Err(err),
+    |                                 --- ^^^ expected `HuntErrorCode`, found `ConversionError`
+    |                                 |
+    |                                 arguments to this enum variant are incorrect
+    |
+help: the type constructed contains `soroban_sdk::ConversionError` due to the type of the argument passed
+   --> contracts\hunty-core\src\test.rs:271:33
+    |
+271 |                 Ok(Err(err)) => Err(err),
+    |                                 ^^^^---^
+    |                                     |
+    |                                     this argument influences the type of `Err`
+note: tuple variant defined here
+   --> /rustc/ac68faa20c58cbccd01ee7208bf3b6e93a7d7f96/library\core\src\result.rs:566:4
+
+error[E0308]: mismatched types
+   --> contracts\hunty-core\src\test.rs:302:37
+    |
+302 |                 Ok(Err(err)) => Err(err),
+    |                                 --- ^^^ expected `HuntErrorCode`, found `ConversionError`
+    |                                 |
+    |                                 arguments to this enum variant are incorrect
+    |
+help: the type constructed contains `soroban_sdk::ConversionError` due to the type of the argument passed
+   --> contracts\hunty-core\src\test.rs:302:33
+    |
+302 |                 Ok(Err(err)) => Err(err),
+    |                                 ^^^^---^
+    |                                     |
+    |                                     this argument influences the type of `Err`
+note: tuple variant defined here
+   --> /rustc/ac68faa20c58cbccd01ee7208bf3b6e93a7d7f96/library\core\src\result.rs:566:4
+
+error[E0308]: mismatched types
+   --> contracts\hunty-core\src\test.rs:315:37
+    |
+315 |                 Ok(Err(err)) => Err(err),
+    |                                 --- ^^^ expected `HuntErrorCode`, found `ConversionError`
+    |                                 |
+    |                                 arguments to this enum variant are incorrect
+    |
+help: the type constructed contains `soroban_sdk::ConversionError` due to the type of the argument passed
+   --> contracts\hunty-core\src\test.rs:315:33
+    |
+315 |                 Ok(Err(err)) => Err(err),
+    |                                 ^^^^---^
+    |                                     |
+    |                                     this argument influences the type of `Err`
+note: tuple variant defined here
+   --> /rustc/ac68faa20c58cbccd01ee7208bf3b6e93a7d7f96/library\core\src\result.rs:566:4
+
+error[E0308]: mismatched types
+   --> contracts\hunty-core\src\test.rs:325:37
+    |
+325 |                 Ok(Err(err)) => Err(err),
+    |                                 --- ^^^ expected `HuntErrorCode`, found `ConversionError`
+    |                                 |
+    |                                 arguments to this enum variant are incorrect
+    |
+help: the type constructed contains `soroban_sdk::ConversionError` due to the type of the argument passed
+   --> contracts\hunty-core\src\test.rs:325:33
+    |
+325 |                 Ok(Err(err)) => Err(err),
+    |                                 ^^^^---^
+    |                                     |
+    |                                     this argument influences the type of `Err`
+note: tuple variant defined here
+   --> /rustc/ac68faa20c58cbccd01ee7208bf3b6e93a7d7f96/library\core\src\result.rs:566:4
+
+error[E0308]: mismatched types
+   --> contracts\hunty-core\src\test.rs:339:37
+    |
+339 |                 Ok(Err(err)) => Err(err),
+    |                                 --- ^^^ expected `HuntErrorCode`, found `ConversionError`
+    |                                 |
+    |                                 arguments to this enum variant are incorrect
+    |
+help: the type constructed contains `soroban_sdk::ConversionError` due to the type of the argument passed
+   --> contracts\hunty-core\src\test.rs:339:33
+    |
+339 |                 Ok(Err(err)) => Err(err),
+    |                                 ^^^^---^
+    |                                     |
+    |                                     this argument influences the type of `Err`
+note: tuple variant defined here
+   --> /rustc/ac68faa20c58cbccd01ee7208bf3b6e93a7d7f96/library\core\src\result.rs:566:4
+
+error[E0599]: no method named `get_reward_manager` found for struct `HuntyCoreClient<'a>` in the current scope
+   --> contracts\hunty-core\src\test.rs:347:20
+    |
+347 |             client.get_reward_manager()
+    |                    ^^^^^^^^^^^^^^^^^^
+    |
+   ::: contracts\hunty-core\src\lib.rs:37:1
+    |
+ 37 | #[contract]
+    | ----------- method `get_reward_manager` not found for this struct
+    |
+help: there is a method `set_reward_manager` with a similar name, but with different arguments
+   --> contracts\hunty-core\src\lib.rs:40:1
+    |
+ 40 | #[contractimpl]
+    | ^^^^^^^^^^^^^^^
+    = note: this error originates in the attribute macro `soroban_sdk::contractclient` (in Nightly builds, run with -Z 
+macro-backtrace for more info)
+
+error[E0308]: mismatched types
+   --> contracts\hunty-core\src\test.rs:355:37
+    |
+355 |                 Ok(Err(err)) => Err(err),
+    |                                 --- ^^^ expected `HuntErrorCode`, found `ConversionError`
+    |                                 |
+    |                                 arguments to this enum variant are incorrect
+    |
+help: the type constructed contains `soroban_sdk::ConversionError` due to the type of the argument passed
+   --> contracts\hunty-core\src\test.rs:355:33
+    |
+355 |                 Ok(Err(err)) => Err(err),
+    |                                 ^^^^---^
+    |                                     |
+    |                                     this argument influences the type of `Err`
+note: tuple variant defined here
+   --> /rustc/ac68faa20c58cbccd01ee7208bf3b6e93a7d7f96/library\core\src\result.rs:566:4
+
+warning: use of deprecated method `soroban_sdk::Env::register_contract`: use `register`
+   --> contracts\hunty-core\src\test.rs:367:31
+    |
+367 |         let contract_id = env.register_contract(None, super::HuntyCore);
+    |                               ^^^^^^^^^^^^^^^^^
+    |
+    = note: `#[warn(deprecated)]` on by default
+
+warning: use of deprecated method `soroban_sdk::Env::register_contract`: use `register`
+   --> contracts\hunty-core\src\test.rs:509:31
+    |
+509 |         let contract_id = env.register_contract(None, super::HuntyCore);
+    |                               ^^^^^^^^^^^^^^^^^
+
+warning: use of deprecated method `soroban_sdk::Env::register_contract`: use `register`
+   --> contracts\hunty-core\src\test.rs:966:31
+    |
+966 |         let contract_id = env.register_contract(None, super::HuntyCore);
+    |                               ^^^^^^^^^^^^^^^^^
+
+warning: use of deprecated method `soroban_sdk::Env::register_contract`: use `register`
+    --> contracts\hunty-core\src\test.rs:1074:31
+     |
+1074 |         let contract_id = env.register_contract(None, super::HuntyCore);
+     |                               ^^^^^^^^^^^^^^^^^
+
+warning: use of deprecated method `soroban_sdk::Env::register_contract`: use `register`
+    --> contracts\hunty-core\src\test.rs:1680:31
+     |
+1680 |         let contract_id = env.register_contract(None, super::HuntyCore);
+     |                               ^^^^^^^^^^^^^^^^^
+
+warning: use of deprecated method `soroban_sdk::Env::register_contract`: use `register`
+    --> contracts\hunty-core\src\test.rs:1725:31
+     |
+1725 |         let contract_id = env.register_contract(None, super::HuntyCore);
+     |                               ^^^^^^^^^^^^^^^^^
+
+warning: use of deprecated method `soroban_sdk::Env::register_contract`: use `register`
+    --> contracts\hunty-core\src\test.rs:1851:31
+     |
+1851 |         let contract_id = env.register_contract(None, super::HuntyCore);
+     |                               ^^^^^^^^^^^^^^^^^
+
+warning: use of deprecated method `soroban_sdk::Env::register_contract`: use `register`
+    --> contracts\hunty-core\src\test.rs:1894:31
+     |
+1894 |         let contract_id = env.register_contract(None, super::HuntyCore);
+     |                               ^^^^^^^^^^^^^^^^^
+
+warning: use of deprecated method `soroban_sdk::Env::register_contract`: use `register`
+    --> contracts\hunty-core\src\test.rs:1940:31
+     |
+1940 |         let contract_id = env.register_contract(None, super::HuntyCore);
+     |                               ^^^^^^^^^^^^^^^^^
+
+warning: use of deprecated method `soroban_sdk::Env::register_contract`: use `register`
+    --> contracts\hunty-core\src\test.rs:2601:27
+     |
+2601 |         let core_id = env.register_contract(None, super::HuntyCore);
+     |                           ^^^^^^^^^^^^^^^^^
+
+warning: use of deprecated method `soroban_sdk::Env::register_contract`: use `register`
+    --> contracts\hunty-core\src\test.rs:3186:31
+     |
+3186 |         let contract_id = env.register_contract(None, super::HuntyCore);
+     |                               ^^^^^^^^^^^^^^^^^
+
+warning: use of deprecated method `soroban_sdk::Env::register_contract`: use `register`
+    --> contracts\hunty-core\src\test.rs:3247:31
+     |
+3247 |         let contract_id = env.register_contract(None, super::HuntyCore);
+     |                               ^^^^^^^^^^^^^^^^^
+
+warning: use of deprecated method `soroban_sdk::Env::register_contract`: use `register`
+    --> contracts\hunty-core\src\test.rs:3299:31
+     |
+3299 |         let contract_id = env.register_contract(None, super::HuntyCore);
+     |                               ^^^^^^^^^^^^^^^^^
+
+warning: use of deprecated method `soroban_sdk::Env::register_contract`: use `register`
+    --> contracts\hunty-core\src\test.rs:3346:31
+     |
+3346 |         let contract_id = env.register_contract(None, super::HuntyCore);
+     |                               ^^^^^^^^^^^^^^^^^
+
+warning: use of deprecated method `soroban_sdk::Env::register_contract`: use `register`
+    --> contracts\hunty-core\src\test.rs:3455:31
+     |
+3455 |         let contract_id = env.register_contract(None, super::HuntyCore);
+     |                               ^^^^^^^^^^^^^^^^^
+
+warning: use of deprecated method `soroban_sdk::Env::register_contract`: use `register`
+    --> contracts\hunty-core\src\test.rs:3507:31
+     |
+3507 |         let contract_id = env.register_contract(None, super::HuntyCore);
+     |                               ^^^^^^^^^^^^^^^^^
+
+warning: use of deprecated method `soroban_sdk::Env::register_contract`: use `register`
+    --> contracts\hunty-core\src\test.rs:3605:31
+     |
+3605 |         let contract_id = env.register_contract(None, super::HuntyCore);
+     |                               ^^^^^^^^^^^^^^^^^
+
+warning: use of deprecated method `soroban_sdk::Env::register_contract`: use `register`
+    --> contracts\hunty-core\src\test.rs:3756:31
+     |
+3756 |         let contract_id = env.register_contract(None, super::HuntyCore);
+     |                               ^^^^^^^^^^^^^^^^^
+
+warning: use of deprecated method `soroban_sdk::Env::register_contract`: use `register`
+    --> contracts\hunty-core\src\test.rs:3904:31
+     |
+3904 |         let contract_id = env.register_contract(None, super::HuntyCore);
+     |                               ^^^^^^^^^^^^^^^^^
+
+warning: use of deprecated method `soroban_sdk::Env::register_contract`: use `register`
+    --> contracts\hunty-core\src\test.rs:3972:31
+     |
+3972 |         let contract_id = env.register_contract(None, super::HuntyCore);
+     |                               ^^^^^^^^^^^^^^^^^
+
+warning: use of deprecated method `soroban_sdk::Env::register_contract`: use `register`
+    --> contracts\hunty-core\src\test.rs:4039:27
+     |
+4039 |         let core_id = env.register_contract(None, super::HuntyCore);
+     |                           ^^^^^^^^^^^^^^^^^
+
+warning: use of deprecated method `soroban_sdk::Env::register_contract`: use `register`
+    --> contracts\hunty-core\src\test.rs:4040:35
+     |
+4040 |         let nft_contract_id = env.register_contract(None, NftReward);
+     |                                   ^^^^^^^^^^^^^^^^^
+
+warning: use of deprecated method `soroban_sdk::Env::register_contract`: use `register`
+    --> contracts\hunty-core\src\test.rs:4193:27
+     |
+4193 |         let core_id = env.register_contract(None, super::HuntyCore);
+     |                           ^^^^^^^^^^^^^^^^^
+
+warning: use of deprecated method `soroban_sdk::Env::register_contract`: use `register`
+    --> contracts\hunty-core\src\test.rs:4282:27
+     |
+4282 |         let core_id = env.register_contract(None, super::HuntyCore);
+     |                           ^^^^^^^^^^^^^^^^^
+
+warning: use of deprecated method `soroban_sdk::Env::register_contract`: use `register`
+    --> contracts\hunty-core\src\test.rs:4378:27
+     |
+4378 |         let core_id = env.register_contract(None, super::HuntyCore);
+     |                           ^^^^^^^^^^^^^^^^^
+
+warning: use of deprecated method `soroban_sdk::Env::register_contract`: use `register`
+    --> contracts\hunty-core\src\test.rs:4379:35
+     |
+4379 |         let nft_contract_id = env.register_contract(None, NftReward);
+     |                                   ^^^^^^^^^^^^^^^^^
+
+warning: use of deprecated method `soroban_sdk::Env::register_contract`: use `register`
+    --> contracts\hunty-core\src\test.rs:4536:31
+     |
+4536 |         let contract_id = env.register_contract(None, super::HuntyCore);
+     |                               ^^^^^^^^^^^^^^^^^
+
+error[E0061]: this function takes 7 arguments but 6 arguments were supplied
+    --> contracts\hunty-core\src\test.rs:4551:13
+     |
+4551 |               HuntyCore::add_clue(
+     |  _____________^^^^^^^^^^^^^^^^^^^-
+4552 | |                 env.clone(),
+4553 | |                 hid,
+4554 | |                 String::from_str(env, "Q"),
+...    |
+4557 | |                 true,
+4558 | |             )
+     | |_____________- argument #7 of type `u32` is missing
+     |
+note: associated function defined here
+    --> contracts\hunty-core\src\test.rs:132:16
+     |
+ 132 |         pub fn add_clue(
+     |                ^^^^^^^^
+...
+ 139 |             difficulty: u32,
+     |             ---------------
+help: provide the argument
+     |
+4551 |             HuntyCore::add_clue(
+ ...
+4557 |                 true,
+4558 ~                 /* u32 */,
+4559 ~             )
+     |
+
+warning: use of deprecated method `soroban_sdk::Env::register_contract`: use `register`
+    --> contracts\hunty-core\src\test.rs:4620:31
+     |
+4620 |         let contract_id = env.register_contract(None, super::HuntyCore);
+     |                               ^^^^^^^^^^^^^^^^^
+
+warning: use of deprecated method `soroban_sdk::Env::register_contract`: use `register`
+    --> contracts\hunty-core\src\test.rs:4738:31
+     |
+4738 |         let contract_id = env.register_contract(None, super::HuntyCore);
+     |                               ^^^^^^^^^^^^^^^^^
+
+warning: use of deprecated method `soroban_sdk::Env::register_contract`: use `register`
+    --> contracts\hunty-core\src\test.rs:4917:27
+     |
+4917 |         let core_id = env.register_contract(None, super::HuntyCore);
+     |                           ^^^^^^^^^^^^^^^^^
+
+warning: unused import: `Register`
+   --> contracts\hunty-core\src\test.rs:362:74
+    |
+362 |     use soroban_sdk::testutils::{Address as _, Events as _, Ledger as _, Register as _};
+    |                                                                          ^^^^^^^^
+
+warning: unused import: `Address`
+   --> contracts\hunty-core\src\test.rs:362:34
+    |
+362 |     use soroban_sdk::testutils::{Address as _, Events as _, Ledger as _, Register as _};
+    |                                  ^^^^^^^
+
+warning: unused import: `Ledger`
+   --> contracts\hunty-core\src\test.rs:362:61
+    |
+362 |     use soroban_sdk::testutils::{Address as _, Events as _, Ledger as _, Register as _};
+    |                                                             ^^^^^^
+
+warning: unused variable: `hunt_id1`
+   --> contracts\hunty-core\src\test.rs:824:14
+    |
+824 |         let (hunt_id1, hunt_id2, hunt1, hunt2) = with_core_contract(&env, |env, _cid| {
+    |              ^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_hunt_id1`
+    |
+    = note: `#[warn(unused_variables)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused variable: `hunt_id2`
+   --> contracts\hunty-core\src\test.rs:824:24
+    |
+824 |         let (hunt_id1, hunt_id2, hunt1, hunt2) = with_core_contract(&env, |env, _cid| {
+    |                        ^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_hunt_id2`
+
+warning: unused variable: `attacker`
+    --> contracts\hunty-core\src\test.rs:1980:13
+     |
+1980 |         let attacker = Address::generate(&env);
+     |             ^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_attacker`
+
+warning: unused variable: `attacker`
+    --> contracts\hunty-core\src\test.rs:2698:13
+     |
+2698 |         let attacker = Address::generate(&env);
+     |             ^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_attacker`
+
+warning: unused variable: `attacker`
+    --> contracts\hunty-core\src\test.rs:2734:13
+     |
+2734 |         let attacker = Address::generate(&env);
+     |             ^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_attacker`
+
+warning: unused variable: `question`
+    --> contracts\hunty-core\src\test.rs:2735:13
+     |
+2735 |         let question = String::from_str(&env, "Valid question");
+     |             ^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_question`
+
+warning: unused variable: `answer`
+    --> contracts\hunty-core\src\test.rs:2736:13
+     |
+2736 |         let answer = String::from_str(&env, "a");
+     |             ^^^^^^ help: if this is intentional, prefix it with an underscore: `_answer`
+
+warning: unused variable: `token_admin`
+    --> contracts\hunty-core\src\test.rs:4043:48
+     |
+4043 |         let (reward_manager_id, token_address, token_admin) =
+     |                                                ^^^^^^^^^^^ help: if this is intentional, prefix it with an 
+underscore: `_token_admin`
+
+warning: unused variable: `token_address`
+    --> contracts\hunty-core\src\test.rs:4283:33
+     |
+4283 |         let (reward_manager_id, token_address, _) = setup_reward_manager(&env, None);
+     |                                 ^^^^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: 
+`_token_address`
+
+Some errors have detailed explanations: E0061, E0308, E0599.
+For more information about an error, try `rustc --explain E0061`.
+warning: `hunty-core` (lib test) generated 47 warnings (1 duplicate)
+error: could not compile `hunty-core` (lib test) due to 25 previous errors; 47 warnings emitted
