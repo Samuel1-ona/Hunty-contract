@@ -33,7 +33,7 @@ pub struct Hunt {
     pub reward_config: RewardConfig,
     pub total_clues: u32,
     pub required_clues: u32,
-    pub completed_count: u32,
+    pub max_submissions_per_minute: u32,
 }
 
 /// Stored clue with SHA256 answer hash. The hash is never exposed via get_clue/list_clues or events.
@@ -84,6 +84,31 @@ pub struct Location {
     pub radius: u32,
 }
 
+impl Default for Location {
+    fn default() -> Self {
+        Self {
+            latitude: 0,
+            longitude: 0,
+            radius: 0,
+        }
+    }
+}
+
+/// Internal storage representation of player progress.
+/// Does not store `player` or `hunt_id` — those are already the storage key.
+#[contracttype]
+#[derive(Clone, Debug)]
+pub struct StoredPlayerProgress {
+    pub completed_clues: Vec<u32>,
+    pub total_score: u32,
+    pub started_at: u64,
+    pub completed_at: u64,
+    pub is_completed: bool,
+    pub reward_claimed: bool,
+    pub recent_submissions: Vec<u64>,
+}
+
+/// Public view of player progress, with `player` and `hunt_id` reconstructed from the key.
 #[contracttype]
 #[derive(Clone, Debug)]
 pub struct PlayerProgress {
@@ -95,6 +120,7 @@ pub struct PlayerProgress {
     pub completed_at: u64,
     pub is_completed: bool,
     pub reward_claimed: bool,
+    pub recent_submissions: Vec<u64>,
 }
 
 impl PlayerProgress {
@@ -108,6 +134,35 @@ impl PlayerProgress {
             completed_at: 0,
             is_completed: false,
             reward_claimed: false,
+            recent_submissions: Vec::new(env),
+        }
+    }
+
+    /// Convert to the compact form stored on-chain (drops redundant key fields).
+    pub fn to_stored(&self) -> StoredPlayerProgress {
+        StoredPlayerProgress {
+            completed_clues: self.completed_clues.clone(),
+            total_score: self.total_score,
+            started_at: self.started_at,
+            completed_at: self.completed_at,
+            is_completed: self.is_completed,
+            reward_claimed: self.reward_claimed,
+            recent_submissions: self.recent_submissions.clone(),
+        }
+    }
+
+    /// Reconstruct from stored form plus the key fields.
+    pub fn from_stored(stored: StoredPlayerProgress, player: Address, hunt_id: u64) -> Self {
+        Self {
+            player,
+            hunt_id,
+            completed_clues: stored.completed_clues,
+            total_score: stored.total_score,
+            started_at: stored.started_at,
+            completed_at: stored.completed_at,
+            is_completed: stored.is_completed,
+            reward_claimed: stored.reward_claimed,
+            recent_submissions: stored.recent_submissions,
         }
     }
 
@@ -120,11 +175,13 @@ impl PlayerProgress {
         false
     }
 
-    pub fn complete_clue(&mut self, _env: &Env, clue_id: u32, points: u32) {
+    pub fn complete_clue(&mut self, _env: &Env, clue_id: u32, points: u32) -> Result<(), crate::errors::HuntErrorCode> {
         if !self.has_completed_clue(clue_id) {
             self.completed_clues.push_back(clue_id);
-            self.total_score += points;
+            self.total_score = self.total_score.checked_add(points)
+                .ok_or(crate::errors::HuntErrorCode::ScoreOverflow)?;
         }
+        Ok(())
     }
 }
 
@@ -230,6 +287,20 @@ pub struct PlayerRegisteredEvent {
 
 #[contracttype]
 #[derive(Clone, Debug)]
+pub struct PlayerBannedEvent {
+    pub hunt_id: u64,
+    pub player: Address,
+}
+
+#[contracttype]
+#[derive(Clone, Debug)]
+pub struct PlayerUnbannedEvent {
+    pub hunt_id: u64,
+    pub player: Address,
+}
+
+#[contracttype]
+#[derive(Clone, Debug)]
 pub struct AnswerIncorrectEvent {
     pub hunt_id: u64,
     pub player: Address,
@@ -257,4 +328,13 @@ pub struct HuntStatistics {
     pub completion_rate_percent: u32,
     pub total_score_sum: u64,
     pub average_score: u32,
+}
+
+/// Rate limit status for hunt creation by a creator address.
+#[contracttype]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RateLimitStatus {
+    pub creations_today: u32,
+    pub daily_limit: u32,
+    pub cooldown_seconds: u64,
 }

@@ -23,21 +23,6 @@
           "sub_invocations": []
         }
       ]
-    ],
-    [
-      [
-        "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAK3IM",
-        {
-          "function": {
-            "contract_fn": {
-              "contract_address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
-              "function_name": "",
-              "args": []
-            }
-          },
-          "sub_invocations": []
-        }
-      ]
     ]
   ],
   "ledger": {
@@ -195,7 +180,16 @@
                     "executable": {
                       "wasm": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
                     },
-                    "storage": null
+                    "storage": [
+                      {
+                        "key": {
+                          "symbol": "CVER"
+                        },
+                        "val": {
+                          "u32": 1
+                        }
+                      }
+                    ]
                   }
                 }
               }

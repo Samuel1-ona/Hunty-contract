@@ -57,6 +57,8 @@ fn testnet_full_hunt_lifecycle_simulation() {
             1,
             player.clone(),
             String::from_str(&env, "paris"),
+            1,
+            env.ledger().timestamp(),
         )
         .unwrap();
 

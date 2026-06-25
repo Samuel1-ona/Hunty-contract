@@ -10,6 +10,17 @@ pub use crate::types::{
 };
 use crate::xlm_handler::XlmHandler;
 
+// Funding validation constants
+// 1 XLM = 10_000_000 stroops (Stellar's base unit)
+/// Minimum funding amount: 1 XLM (prevents dust attacks)
+const MIN_FUNDING_AMOUNT: i128 = 10_000_000;
+
+/// Maximum single funding amount: 1 billion XLM (prevents overflow and unreasonable deposits)
+const MAX_FUNDING_AMOUNT: i128 = 1_000_000_000 * 10_000_000;
+
+/// Maximum pool balance: 1 billion XLM (prevents overflow)
+const MAX_POOL_BALANCE: i128 = 1_000_000_000 * 10_000_000;
+
 #[contract]
 pub struct RewardManager;
 
@@ -71,6 +82,23 @@ pub struct AdminWithdrawEvent {
     pub hunt_id: u64,
     pub admin: Address,
     pub amount: i128,
+}
+
+/// Event emitted when daily pool cap warning (80% usage) is reached.
+#[contracttype]
+#[derive(Clone, Debug)]
+pub struct DailyPoolCapWarningEvent {
+    pub hunt_id: u64,
+    pub used: i128,
+    pub cap: i128,
+}
+
+/// Event emitted when global daily cap warning (80% usage) is reached.
+#[contracttype]
+#[derive(Clone, Debug)]
+pub struct GlobalDailyCapWarningEvent {
+    pub used: i128,
+    pub cap: i128,
 }
 
 /// Event emitted when the default NFT reward contract is set or updated.
@@ -263,6 +291,12 @@ impl RewardManager {
     /// Only the original pool creator is authorized to fund it.
     /// Transfers XLM from the funder to this contract and records the balance.
     ///
+    /// # Validation
+    /// - Minimum funding: 1 XLM (10,000,000 stroops) to prevent dust attacks
+    /// - Maximum single funding: 1 billion XLM to prevent overflow
+    /// - Pool balance limit: 1 billion XLM total to prevent overflow
+    /// - Rejects zero or negative amounts
+    ///
     /// # Arguments
     /// * `funder` - The address funding the pool (must be the pool creator)
     /// * `hunt_id` - The hunt to fund
@@ -272,6 +306,9 @@ impl RewardManager {
     /// * `PoolNotFound` - Pool has not been created yet
     /// * `Unauthorized` - Funder is not the pool creator
     /// * `InvalidAmount` - Amount is <= 0
+    /// * `BelowMinimumFunding` - Amount is less than 1 XLM (dust attack prevention)
+    /// * `ExceedsMaximumFunding` - Amount exceeds 1 billion XLM
+    /// * `PoolBalanceOverflow` - Adding this amount would exceed pool balance limit
     /// * `NotInitialized` - XLM token address not set
     pub fn fund_reward_pool(
         env: Env,
@@ -282,6 +319,16 @@ impl RewardManager {
 
         if amount <= 0 {
             return Err(RewardErrorCode::InvalidAmount);
+        }
+
+        // Validate minimum funding amount (1 XLM) to prevent dust attacks
+        if amount < MIN_FUNDING_AMOUNT {
+            return Err(RewardErrorCode::BelowMinimumFunding);
+        }
+
+        // Validate maximum single funding amount to prevent overflow
+        if amount > MAX_FUNDING_AMOUNT {
+            return Err(RewardErrorCode::ExceedsMaximumFunding);
         }
 
         let pool_config =
@@ -296,17 +343,27 @@ impl RewardManager {
         let xlm_token = Storage::get_xlm_token(&env)
             .ok_or(RewardErrorCode::NotInitialized)?;
 
+        // Check for overflow before adding to pool balance
+        let current = Storage::get_pool_balance(&env, hunt_id);
+        let new_balance = current.checked_add(amount)
+            .ok_or(RewardErrorCode::PoolBalanceOverflow)?;
+        
+        // Validate the new balance doesn't exceed maximum pool balance
+        if new_balance > MAX_POOL_BALANCE {
+            return Err(RewardErrorCode::PoolBalanceOverflow);
+        }
+
         // Transfer XLM from funder to this contract
         let contract_addr = env.current_contract_address();
         let client = soroban_sdk::token::Client::new(&env, &xlm_token);
         client.transfer(&funder, &contract_addr, &amount);
 
         // Update pool balance and cumulative deposit total
-        let current = Storage::get_pool_balance(&env, hunt_id);
-        let new_balance = current + amount;
         Storage::set_pool_balance(&env, hunt_id, new_balance);
 
-        let total_deposited = Storage::get_pool_total_deposited(&env, hunt_id) + amount;
+        let total_deposited = Storage::get_pool_total_deposited(&env, hunt_id)
+            .checked_add(amount)
+            .ok_or(RewardErrorCode::PoolBalanceOverflow)?;
         Storage::set_pool_total_deposited(&env, hunt_id, total_deposited);
 
         env.events().publish(
@@ -398,25 +455,22 @@ impl RewardManager {
         }
     }
 
-    /// Main entry point for reward distribution. Determines reward type from configuration,
-    /// routes to XLM and/or NFT handlers, and ensures atomic all-or-nothing execution.
-    ///
-    /// # Arguments
-    /// * `hunt_id` - The hunt being rewarded
-    /// * `player_address` - The player receiving rewards
-    /// * `reward_config` - Configuration specifying XLM amount and/or NFT metadata
-    ///
-    /// # Returns
-    /// `Ok(())` on success
-    ///
-    /// # Errors
-    /// * `InvalidConfig` - No reward type configured or invalid values
-    /// * `NotInitialized` - XLM token not set (when XLM rewards requested)
-    /// * `AlreadyDistributed` - Rewards already distributed for this hunt/player
-    /// * `InsufficientPool` - Pool has insufficient XLM for requested amount
-    /// * `InvalidAmount` - XLM amount <= 0 (when XLM requested)
-    /// * `BelowMinimumAmount` - XLM amount is below the pool's minimum distribution threshold
-    /// * `NftMintFailed` - NFT minting failed (when NFT requested)
+    pub fn set_daily_pool_cap(env: Env, admin: Address, hunt_id: u64, cap: i128) -> Result<(), RewardErrorCode> {
+        admin.require_auth();
+        let configured_admin = Storage::get_admin(&env).ok_or(RewardErrorCode::NotInitialized)?;
+        if configured_admin != admin { return Err(RewardErrorCode::Unauthorized); }
+        Storage::set_daily_pool_cap(&env, hunt_id, cap);
+        Ok(())
+    }
+
+    pub fn set_daily_global_cap(env: Env, admin: Address, cap: i128) -> Result<(), RewardErrorCode> {
+        admin.require_auth();
+        let configured_admin = Storage::get_admin(&env).ok_or(RewardErrorCode::NotInitialized)?;
+        if configured_admin != admin { return Err(RewardErrorCode::Unauthorized); }
+        Storage::set_daily_global_cap(&env, cap);
+        Ok(())
+    }
+
     pub fn distribute_rewards(
         env: Env,
         hunt_id: u64,
@@ -463,17 +517,31 @@ impl RewardManager {
 
             let contract_addr = env.current_contract_address();
 
-            // Defence-in-depth: confirm the contract's actual on-chain XLM
-            // balance is sufficient before transferring. The tracked
-            // pool_balance check above catches accounting errors in this
-            // contract's own bookkeeping, but XlmHandler::validate_pool
-            // catches the case where tracked and actual balances have
-            // diverged (e.g. someone moved funds out of band, or a bug
-            // elsewhere drained the contract without updating tracking).
-            // Without this check, a divergent state would cause the
-            // client.transfer() call below to panic at runtime — see #131.
             if !XlmHandler::validate_pool(&env, &xlm_token, &contract_addr, amount) {
                 return Err(RewardErrorCode::PoolBalanceDivergence);
+            }
+
+            // Check caps
+            let day = env.ledger().timestamp() / 86400;
+            Storage::add_daily_pool_distributed(&env, hunt_id, day, amount);
+            Storage::add_daily_global_distributed(&env, day, amount);
+
+            let pool_cap = Storage::get_daily_pool_cap(&env, hunt_id);
+            if pool_cap > 0 {
+                let used = Storage::get_daily_pool_distributed(&env, hunt_id, day);
+                if used > pool_cap { return Err(RewardErrorCode::DailyCapExceeded); }
+                if used >= (pool_cap * 8 / 10) {
+                    env.events().publish(symbol_short!("DP_WARN"), DailyPoolCapWarningEvent { hunt_id, used, cap: pool_cap });
+                }
+            }
+
+            let global_cap = Storage::get_daily_global_cap(&env);
+            if global_cap > 0 {
+                let global_used = Storage::get_daily_global_distributed(&env, day);
+                if global_used > global_cap { return Err(RewardErrorCode::GlobalDailyCapExceeded); }
+                if global_used >= (global_cap * 8 / 10) {
+                    env.events().publish(symbol_short!("DG_WARN"), GlobalDailyCapWarningEvent { used: global_used, cap: global_cap });
+                }
             }
 
             XlmHandler::distribute_xlm(
@@ -486,10 +554,8 @@ impl RewardManager {
             xlm_amount = amount;
             Storage::set_pool_balance(&env, hunt_id, pool_balance - amount);
 
-            // Track cumulative distributed amount
             let total_distributed = Storage::get_pool_total_distributed(&env, hunt_id) + amount;
             Storage::set_pool_total_distributed(&env, hunt_id, total_distributed);
-            // Update protocol-level global total distributed
             let global_total = Storage::get_total_xlm_distributed(&env) + amount;
             Storage::set_total_xlm_distributed(&env, global_total);
         }
@@ -520,7 +586,6 @@ impl RewardManager {
             )?);
         }
 
-        // All operations succeeded — update state atomically
         Storage::set_distributed(&env, hunt_id, &player_address);
         Storage::set_distribution_record(
             &env,
@@ -529,7 +594,6 @@ impl RewardManager {
             &DistributionRecord { xlm_amount, nft_id },
         );
 
-        // Emit RewardsDistributed event
         let event = RewardsDistributedEvent {
             hunt_id,
             player: player_address.clone(),
@@ -685,7 +749,6 @@ impl RewardManager {
 
     /// Returns true if the given NftReward contract meets the minimum required version.
     pub fn check_nft_reward_compatibility(env: Env, nft_reward_address: Address) -> bool {
-        use soroban_sdk::IntoVal;
         let ver: u32 = env.invoke_contract(
             &nft_reward_address,
             &soroban_sdk::Symbol::new(&env, "contract_version"),
