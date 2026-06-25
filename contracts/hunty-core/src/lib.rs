@@ -5,7 +5,7 @@ use crate::types::{
     AnswerIncorrectEvent, Clue, ClueAddedEvent, ClueCompletedEvent, ClueInfo, Hunt,
     HuntActivatedEvent, HuntCancelledEvent, HuntCompletedEvent, HuntCreatedEvent,
     HuntDeactivatedEvent, HuntStatistics, HuntStatus, LeaderboardEntry, PlayerProgress,
-    PlayerRegisteredEvent, RewardClaimedEvent, RewardConfig,
+    PlayerRegisteredEvent, RateLimitStatus, RewardClaimedEvent, RewardConfig,
 };
 use reward_interface::RewardErrorCode;
 use soroban_sdk::{
@@ -72,8 +72,10 @@ impl HuntyCore {
             return Err(HuntErrorCode::InvalidDescription);
         }
 
-        // Get current timestamp
         let current_time = env.ledger().timestamp();
+        rate_limit::RateLimiter::check_and_increment(&env, &creator, current_time)?;
+
+        // Get current timestamp
 
         // Generate unique hunt ID
         let hunt_id = Storage::next_hunt_id(&env);
@@ -99,6 +101,7 @@ impl HuntyCore {
             reward_config,
             total_clues: 0, // Empty clue list initially
             required_clues: 0,
+            completed_count: 0,
         };
 
         // Store the hunt
@@ -880,6 +883,45 @@ impl HuntyCore {
         })
     }
 
+    /// Returns hunt creation rate limit status including cooldown for a creator.
+    pub fn get_hunt_creation_rate_limit(env: Env, creator: Address) -> RateLimitStatus {
+        rate_limit::RateLimiter::get_status(&env, &creator, env.ledger().timestamp())
+    }
+
+    /// Initializes the rate-limit admin (callable once when no admin is configured).
+    pub fn initialize_rate_limit_admin(env: Env, admin: Address) -> Result<(), HuntErrorCode> {
+        admin.require_auth();
+        if Storage::get_rate_limit_admin(&env).is_some() {
+            return Err(HuntErrorCode::Unauthorized);
+        }
+        Storage::set_rate_limit_admin(&env, &admin);
+        Storage::set_default_hunt_creation_limit(&env, rate_limit::DEFAULT_HUNT_CREATION_LIMIT);
+        Ok(())
+    }
+
+    /// Sets the default daily hunt creation limit for all creators.
+    pub fn set_default_hunt_creation_limit(
+        env: Env,
+        admin: Address,
+        limit: u32,
+    ) -> Result<(), HuntErrorCode> {
+        rate_limit::RateLimiter::require_rate_limit_admin(&env, &admin)?;
+        Storage::set_default_hunt_creation_limit(&env, limit);
+        Ok(())
+    }
+
+    /// Sets a per-creator daily hunt creation limit override.
+    pub fn set_creator_hunt_limit_override(
+        env: Env,
+        admin: Address,
+        creator: Address,
+        limit: u32,
+    ) -> Result<(), HuntErrorCode> {
+        rate_limit::RateLimiter::require_rate_limit_admin(&env, &admin)?;
+        Storage::set_creator_limit_override(&env, &creator, limit);
+        Ok(())
+    }
+
     /// Returns the on-chain storage schema version (0 when uninitialized).
     pub fn get_schema_version(env: Env) -> u32 {
         migration::HuntyCoreMigration::get_schema_version(&env)
@@ -911,6 +953,7 @@ impl HuntyCore {
 mod errors;
 mod migration;
 mod monitoring;
+mod rate_limit;
 mod storage;
 pub mod types;
 

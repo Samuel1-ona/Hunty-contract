@@ -26,6 +26,7 @@ pub enum HuntErrorCode {
     RewardAlreadyClaimed = 19,
     RewardDistributionFailed = 20,
     NoRewardsConfigured = 21,
+    RateLimitExceeded = 22,
 }
 
 #[derive(Debug)]

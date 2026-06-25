@@ -33,6 +33,7 @@ pub struct Hunt {
     pub reward_config: RewardConfig,
     pub total_clues: u32,
     pub required_clues: u32,
+    pub completed_count: u32,
 }
 
 /// Stored clue with SHA256 answer hash. The hash is never exposed via get_clue/list_clues or events.
@@ -256,4 +257,13 @@ pub struct HuntStatistics {
     pub completion_rate_percent: u32,
     pub total_score_sum: u64,
     pub average_score: u32,
+}
+
+/// Rate limit status for hunt creation by a creator address.
+#[contracttype]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RateLimitStatus {
+    pub creations_today: u32,
+    pub daily_limit: u32,
+    pub cooldown_seconds: u64,
 }

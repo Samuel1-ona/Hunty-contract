@@ -399,4 +399,59 @@ impl Storage {
     pub fn get_contract_version(env: &Env) -> Option<u32> {
         env.storage().instance().get(&symbol_short!("CVER"))
     }
+
+    // ========== Hunt creation rate limiting ==========
+
+    pub fn get_rate_limit_admin(env: &Env) -> Option<Address> {
+        env.storage().instance().get(&symbol_short!("HRLADM"))
+    }
+
+    pub fn set_rate_limit_admin(env: &Env, admin: &Address) {
+        env.storage().instance().set(&symbol_short!("HRLADM"), admin);
+    }
+
+    pub fn get_default_hunt_creation_limit(env: &Env) -> u32 {
+        env.storage()
+            .instance()
+            .get(&symbol_short!("HRLDEF"))
+            .unwrap_or(crate::rate_limit::DEFAULT_HUNT_CREATION_LIMIT)
+    }
+
+    pub fn set_default_hunt_creation_limit(env: &Env, limit: u32) {
+        env.storage().instance().set(&symbol_short!("HRLDEF"), &limit);
+    }
+
+    pub fn get_creator_limit_override(env: &Env, creator: &Address) -> Option<u32> {
+        let key = (symbol_short!("HRLOVR"), creator.clone());
+        env.storage().persistent().get(&key)
+    }
+
+    pub fn set_creator_limit_override(env: &Env, creator: &Address, limit: u32) {
+        let key = (symbol_short!("HRLOVR"), creator.clone());
+        env.storage().persistent().set(&key, &limit);
+    }
+
+    pub fn get_effective_hunt_creation_limit(env: &Env, creator: &Address) -> u32 {
+        Self::get_creator_limit_override(env, creator)
+            .unwrap_or_else(|| Self::get_default_hunt_creation_limit(env))
+    }
+
+    fn creator_daily_count_key(creator: &Address, day: u64) -> (soroban_sdk::Symbol, Address, u64) {
+        (symbol_short!("HRLCT"), creator.clone(), day)
+    }
+
+    pub fn get_creator_daily_hunt_count(env: &Env, creator: &Address, day: u64) -> u32 {
+        let key = Self::creator_daily_count_key(creator, day);
+        env.storage().persistent().get(&key).unwrap_or(0)
+    }
+
+    pub fn set_creator_daily_hunt_count(
+        env: &Env,
+        creator: &Address,
+        day: u64,
+        count: u32,
+    ) {
+        let key = Self::creator_daily_count_key(creator, day);
+        env.storage().persistent().set(&key, &count);
+    }
 }

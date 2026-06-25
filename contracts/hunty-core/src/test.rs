@@ -2889,4 +2889,94 @@ mod test {
         });
         assert_eq!(result, Err(HuntErrorCode::PlayerNotRegistered));
     }
+
+    #[test]
+    fn test_create_hunt_rate_limit_default() {
+        let env = Env::default();
+        env.ledger().set_timestamp(1_700_000_000);
+        let creator = Address::generate(&env);
+
+        for i in 0..10 {
+            let title = String::from_str(&env, &format!("Hunt {}", i));
+            let result = with_core_contract(&env, |env, _cid| {
+                HuntyCore::create_hunt(
+                    env.clone(),
+                    creator.clone(),
+                    title,
+                    String::from_str(env, "Desc"),
+                    None,
+                    None,
+                )
+            });
+            assert!(result.is_ok(), "hunt {} should succeed", i);
+        }
+
+        let blocked = with_core_contract(&env, |env, _cid| {
+            HuntyCore::create_hunt(
+                env.clone(),
+                creator.clone(),
+                String::from_str(env, "One too many"),
+                String::from_str(env, "Desc"),
+                None,
+                None,
+            )
+        });
+        assert_eq!(blocked, Err(HuntErrorCode::RateLimitExceeded));
+
+        let status = with_core_contract(&env, |env, _cid| {
+            HuntyCore::get_hunt_creation_rate_limit(env.clone(), creator.clone())
+        });
+        assert_eq!(status.creations_today, 10);
+        assert_eq!(status.daily_limit, 10);
+        assert!(status.cooldown_seconds > 0);
+    }
+
+    #[test]
+    fn test_admin_can_override_creator_rate_limit() {
+        let env = Env::default();
+        env.mock_all_auths_allowing_non_root_auth();
+        env.ledger().set_timestamp(1_700_000_000);
+        let admin = Address::generate(&env);
+        let creator = Address::generate(&env);
+
+        with_core_contract(&env, |env, _cid| {
+            HuntyCore::initialize_rate_limit_admin(env.clone(), admin.clone()).unwrap();
+            HuntyCore::set_creator_hunt_limit_override(
+                env.clone(),
+                admin.clone(),
+                creator.clone(),
+                2,
+            )
+            .unwrap();
+            Ok(())
+        })
+        .unwrap();
+
+        for i in 0..2 {
+            let title = String::from_str(&env, &format!("Override {}", i));
+            let result = with_core_contract(&env, |env, _cid| {
+                HuntyCore::create_hunt(
+                    env.clone(),
+                    creator.clone(),
+                    title,
+                    String::from_str(env, "Desc"),
+                    None,
+                    None,
+                )
+            });
+            assert!(result.is_ok());
+        }
+
+        let blocked = with_core_contract(&env, |env, _cid| {
+            HuntyCore::create_hunt(
+                env.clone(),
+                creator.clone(),
+                String::from_str(env, "Blocked"),
+                String::from_str(env, "Desc"),
+                None,
+                None,
+            )
+        });
+        assert_eq!(blocked, Err(HuntErrorCode::RateLimitExceeded));
+    }
 }
