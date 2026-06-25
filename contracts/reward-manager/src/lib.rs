@@ -62,6 +62,11 @@ pub struct NftContractSetEvent {
 
 #[contractimpl]
 impl RewardManager {
+    /// Current version of this contract. Bump when making breaking changes.
+    pub const CONTRACT_VERSION: u32 = 1;
+    /// Minimum NftReward version this contract requires.
+    pub const REQUIRED_NFT_REWARD_VERSION: u32 = 1;
+
     /// Initializes the RewardManager with the XLM token contract address (SAC).
     /// Must be called once before any reward distribution.
     pub fn initialize(env: Env, admin: Address, xlm_token: Address) -> Result<(), RewardErrorCode> {
@@ -72,6 +77,7 @@ impl RewardManager {
         admin.require_auth();
         Storage::set_admin(&env, &admin);
         Storage::set_xlm_token(&env, &xlm_token);
+        Storage::set_contract_version(&env, Self::CONTRACT_VERSION);
         Ok(())
     }
 
@@ -649,9 +655,19 @@ impl RewardManager {
         Ok(())
     }
 
-    /// Returns the contract version.
-    pub fn contract_version() -> u32 {
-        1
+    /// Returns the on-chain version stored during initialize, or the compiled constant.
+    pub fn contract_version(env: Env) -> u32 {
+        Storage::get_contract_version(&env).unwrap_or(Self::CONTRACT_VERSION)
+    }
+
+    /// Returns true if the given NftReward contract meets the minimum required version.
+    pub fn check_nft_reward_compatibility(env: Env, nft_reward_address: Address) -> bool {
+        let ver: u32 = env.invoke_contract(
+            &nft_reward_address,
+            &soroban_sdk::Symbol::new(&env, "contract_version"),
+            soroban_sdk::Vec::new(&env),
+        );
+        ver >= Self::REQUIRED_NFT_REWARD_VERSION
     }
 
     pub fn get_schema_version(env: Env) -> u32 {

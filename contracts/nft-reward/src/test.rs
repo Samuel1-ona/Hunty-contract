@@ -4,7 +4,7 @@ extern crate std;
 use crate::{NftMetadata, NftReward, NftRewardClient};
 use soroban_sdk::{
     testutils::{Address as _, Events as _, Ledger as _},
-    Address, Env, IntoVal, Map, String, Symbol, Val,
+    Address, Env, IntoVal, Map, String, Symbol, TryFromVal, Val, Vec,
 };
 
 fn setup_env() -> Env {
@@ -338,7 +338,7 @@ fn test_transfer_nft_success() {
     let nft_id = mint_transferable(&env, &client, 1, &from, &metadata);
     assert_eq!(client.owner_of(&nft_id), Some(from.clone()));
 
-    client.transfer_nft(&nft_id, &from, &to);
+    client.transfer_nft(&nft_id, &from, &to, &from);
 
     assert_eq!(client.owner_of(&nft_id), Some(to.clone()));
     assert_eq!(client.get_nft_owner(&nft_id), Some(to.clone()));
@@ -364,7 +364,7 @@ fn test_transfer_nft_updates_player_nfts() {
     assert_eq!(alice_nfts.len(), 2);
     assert!(alice_nfts.get(0).unwrap() == nft1 || alice_nfts.get(0).unwrap() == nft2);
 
-    client.transfer_nft(&nft1, &alice, &bob);
+    client.transfer_nft(&nft1, &alice, &bob, &alice);
 
     let alice_nfts = client.get_player_nfts(&alice, &0, &100);
     assert_eq!(alice_nfts.len(), 1);
@@ -390,7 +390,7 @@ fn test_transfer_nft_requires_auth() {
     let _nft_id = client.mint_reward_nft(&from, &1, &from, &metadata);
 
     // This should fail - from has not authorized
-    client.transfer_nft(&1, &from, &to);
+    client.transfer_nft(&1, &from, &to, &from);
 }
 
 #[test]
@@ -402,7 +402,7 @@ fn test_transfer_nft_nonexistent() {
     let from = Address::generate(&env);
     let to = Address::generate(&env);
 
-    client.transfer_nft(&999, &from, &to);
+    client.transfer_nft(&999, &from, &to, &from);
 }
 
 #[test]
@@ -419,7 +419,7 @@ fn test_transfer_nft_not_owner() {
     let nft_id = client.mint_reward_nft(&owner, &1, &owner, &metadata);
 
     // Attacker tries to transfer - with mock_all_auths they "auth" but NotOwner check fails
-    client.transfer_nft(&nft_id, &attacker, &to);
+    client.transfer_nft(&nft_id, &attacker, &to, &attacker);
 }
 
 #[test]
@@ -433,7 +433,7 @@ fn test_transfer_nft_invalid_recipient_same_as_from() {
 
     let nft_id = client.mint_reward_nft(&owner, &1, &owner, &metadata);
 
-    client.transfer_nft(&nft_id, &owner, &owner);
+    client.transfer_nft(&nft_id, &owner, &owner, &owner);
 }
 
 #[test]
@@ -446,7 +446,7 @@ fn test_transfer_nft_emits_event() {
     let metadata = create_metadata(&env, "Event NFT", "Desc", "ipfs://event");
 
     let nft_id = mint_transferable(&env, &client, 1, &from, &metadata);
-    client.transfer_nft(&nft_id, &from, &to);
+    client.transfer_nft(&nft_id, &from, &to, &from);
 
     // Transfer succeeded; NftTransferred event is emitted by transfer_nft
     assert_eq!(client.owner_of(&nft_id), Some(to));
@@ -474,4 +474,132 @@ fn test_get_nft_owner_matches_owner_of() {
 
     assert_eq!(client.owner_of(&nft_id), client.get_nft_owner(&nft_id));
     assert_eq!(client.get_nft_owner(&nft_id), Some(player));
+}
+
+// --- Operator management tests ---
+
+#[test]
+fn test_set_and_is_operator() {
+    let env = setup_env();
+    let client = NftRewardClient::new(&env, &env.register(NftReward, ()));
+
+    let owner = Address::generate(&env);
+    let operator = Address::generate(&env);
+
+    assert!(!client.is_operator(&owner, &operator));
+
+    client.set_operator(&owner, &operator);
+
+    assert!(client.is_operator(&owner, &operator));
+}
+
+#[test]
+fn test_remove_operator() {
+    let env = setup_env();
+    let client = NftRewardClient::new(&env, &env.register(NftReward, ()));
+
+    let owner = Address::generate(&env);
+    let operator = Address::generate(&env);
+
+    client.set_operator(&owner, &operator);
+    assert!(client.is_operator(&owner, &operator));
+
+    client.remove_operator(&owner, &operator);
+    assert!(!client.is_operator(&owner, &operator));
+}
+
+#[test]
+fn test_operator_can_transfer_nft() {
+    let env = setup_env();
+    let client = NftRewardClient::new(&env, &env.register(NftReward, ()));
+
+    let owner = Address::generate(&env);
+    let operator = Address::generate(&env);
+    let recipient = Address::generate(&env);
+    let metadata = create_metadata(&env, "Op NFT", "Desc", "ipfs://op");
+
+    let nft_id = mint_transferable(&env, &client, 1, &owner, &metadata);
+
+    client.set_operator(&owner, &operator);
+
+    // operator calls transfer on behalf of owner
+    client.transfer_nft(&nft_id, &owner, &recipient, &operator);
+
+    assert_eq!(client.owner_of(&nft_id), Some(recipient));
+}
+
+#[test]
+#[should_panic]
+fn test_non_operator_cannot_transfer_nft() {
+    let env = setup_env();
+    let client = NftRewardClient::new(&env, &env.register(NftReward, ()));
+
+    let owner = Address::generate(&env);
+    let stranger = Address::generate(&env);
+    let recipient = Address::generate(&env);
+    let metadata = create_metadata(&env, "Op NFT", "Desc", "ipfs://op2");
+
+    let nft_id = mint_transferable(&env, &client, 1, &owner, &metadata);
+
+    // stranger has no operator approval -- should panic (NotOperator)
+    client.transfer_nft(&nft_id, &owner, &recipient, &stranger);
+}
+
+#[test]
+fn test_set_operator_emits_event() {
+    let env = setup_env();
+    let client = NftRewardClient::new(&env, &env.register(NftReward, ()));
+
+    let owner = Address::generate(&env);
+    let operator = Address::generate(&env);
+
+    client.set_operator(&owner, &operator);
+
+    let events = env.events().all();
+    let (_contract, topics, _data): (Address, Vec<Val>, Val) =
+        events.get(events.len() - 1).unwrap();
+    assert_eq!(
+        Symbol::try_from_val(&env, &topics.get(0).unwrap()).unwrap(),
+        Symbol::new(&env, "OperatorChanged")
+    );
+}
+
+#[test]
+fn test_remove_operator_emits_event() {
+    let env = setup_env();
+    let client = NftRewardClient::new(&env, &env.register(NftReward, ()));
+
+    let owner = Address::generate(&env);
+    let operator = Address::generate(&env);
+
+    client.set_operator(&owner, &operator);
+    client.remove_operator(&owner, &operator);
+
+    let events = env.events().all();
+    let (_contract, topics, _data): (Address, Vec<Val>, Val) =
+        events.get(events.len() - 1).unwrap();
+    assert_eq!(
+        Symbol::try_from_val(&env, &topics.get(0).unwrap()).unwrap(),
+        Symbol::new(&env, "OperatorChanged")
+    );
+}
+
+#[test]
+fn test_revoked_operator_cannot_transfer() {
+    let env = setup_env();
+    let client = NftRewardClient::new(&env, &env.register(NftReward, ()));
+
+    let owner = Address::generate(&env);
+    let operator = Address::generate(&env);
+    let recipient = Address::generate(&env);
+    let metadata = create_metadata(&env, "Revoke Op NFT", "Desc", "ipfs://rev");
+
+    let nft_id = mint_transferable(&env, &client, 1, &owner, &metadata);
+
+    client.set_operator(&owner, &operator);
+    client.remove_operator(&owner, &operator);
+
+    // Attempting transfer with revoked operator should return an error
+    let result = client.try_transfer_nft(&nft_id, &owner, &recipient, &operator);
+    assert!(result.is_err());
 }

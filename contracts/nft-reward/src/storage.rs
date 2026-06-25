@@ -157,4 +157,39 @@ impl Storage {
         }
         ids
     }
+
+    // --- Operator management ---
+
+    /// Key for operator approval: (OPER, owner, operator)
+    fn operator_key(owner: &Address, operator: &Address) -> (soroban_sdk::Symbol, Address, Address) {
+        (symbol_short!("OPER"), owner.clone(), operator.clone())
+    }
+
+    /// Grants operator approval: `operator` can manage all NFTs owned by `owner`.
+    pub fn set_operator(env: &Env, owner: &Address, operator: &Address) {
+        let key = Self::operator_key(owner, operator);
+        env.storage().persistent().set(&key, &true);
+    }
+
+    /// Revokes operator approval.
+    pub fn remove_operator(env: &Env, owner: &Address, operator: &Address) {
+        let key = Self::operator_key(owner, operator);
+        env.storage().persistent().remove(&key);
+    }
+
+    /// Returns true if `operator` is approved to manage all NFTs of `owner`.
+    pub fn is_operator(env: &Env, owner: &Address, operator: &Address) -> bool {
+        let key = Self::operator_key(owner, operator);
+        env.storage().persistent().get(&key).unwrap_or(false)
+    }
+
+    // --- Contract version ---
+
+    pub fn set_contract_version(env: &Env, version: u32) {
+        env.storage().instance().set(&symbol_short!("CVER"), &version);
+    }
+
+    pub fn get_contract_version(env: &Env) -> Option<u32> {
+        env.storage().instance().get(&symbol_short!("CVER"))
+    }
 }

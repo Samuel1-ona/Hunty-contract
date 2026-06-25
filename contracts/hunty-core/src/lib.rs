@@ -26,6 +26,11 @@ pub struct HuntyCore;
 
 #[contractimpl]
 impl HuntyCore {
+    /// Current version of this contract. Bump when making breaking changes.
+    pub const CONTRACT_VERSION: u32 = 1;
+    /// Minimum RewardManager version this contract requires.
+    pub const REQUIRED_REWARD_MANAGER_VERSION: u32 = 1;
+
     /// Creates a new scavenger hunt with the provided metadata.
     ///
     /// # Arguments
@@ -900,6 +905,21 @@ impl HuntyCore {
     /// Rolls back to the schema version captured before the last migration.
     pub fn rollback_migration(env: Env, admin: Address) -> Option<migration::MigrationReport> {
         migration::HuntyCoreMigration::rollback_migration(&env, admin)
+    }
+
+    /// Returns the on-chain version stored during initialize, or the compiled constant.
+    pub fn contract_version(env: Env) -> u32 {
+        Storage::get_contract_version(&env).unwrap_or(Self::CONTRACT_VERSION)
+    }
+
+    /// Returns true if the given RewardManager contract meets the minimum required version.
+    pub fn check_reward_mgr_compat(env: Env, reward_manager_address: Address) -> bool {
+        let ver: u32 = env.invoke_contract(
+            &reward_manager_address,
+            &soroban_sdk::Symbol::new(&env, "contract_version"),
+            soroban_sdk::Vec::new(&env),
+        );
+        ver >= Self::REQUIRED_REWARD_MANAGER_VERSION
     }
 
     /// Returns contract health metrics for operator dashboards.
