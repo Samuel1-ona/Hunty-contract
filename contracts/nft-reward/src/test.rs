@@ -89,6 +89,7 @@ fn test_initialize_stores_admin() {
 }
 
 #[test]
+#[should_panic(expected = "HostError")]
 fn test_initialize_requires_auth() {
     let env = Env::default();
     env.ledger().set_timestamp(1000);
@@ -178,10 +179,16 @@ fn test_metadata_stored_correctly() {
     let nft_id = client.mint_reward_nft(&player, &42, &player, &metadata);
     let nft = client.get_nft(&nft_id).unwrap();
 
-    assert_eq!(nft.metadata.title, String::from_str(&env, "Treasure Hunter Trophy"));
+    assert_eq!(
+        nft.metadata.title,
+        String::from_str(&env, "Treasure Hunter Trophy")
+    );
     assert_eq!(
         nft.metadata.description,
-        String::from_str(&env, "Awarded for completing the legendary treasure hunt in record time")
+        String::from_str(
+            &env,
+            "Awarded for completing the legendary treasure hunt in record time"
+        )
     );
     assert_eq!(
         nft.metadata.image_uri,
@@ -238,9 +245,15 @@ fn test_multiple_nfts_can_be_minted() {
         "Description for hunt 4",
         "Description for hunt 5",
     ];
-    let uris = ["ipfs://hunt1", "ipfs://hunt2", "ipfs://hunt3", "ipfs://hunt4", "ipfs://hunt5"];
+    let uris = [
+        "ipfs://hunt1",
+        "ipfs://hunt2",
+        "ipfs://hunt3",
+        "ipfs://hunt4",
+        "ipfs://hunt5",
+    ];
 
-    let mut ids = soroban_sdk::Vec::new(&env);
+    let mut ids: soroban_sdk::Vec<u64> = soroban_sdk::Vec::new(&env);
     for i in 0..5 {
         let metadata = create_metadata(&env, titles[i], descs[i], uris[i]);
         let nft_id = client.mint_reward_nft(&player, &(i as u64 + 1), &player, &metadata);
@@ -302,12 +315,18 @@ fn test_get_nft_metadata_returns_complete_info() {
 
     assert_eq!(meta.nft_id, nft_id);
     assert_eq!(meta.hunt_id, 42);
-    assert_eq!(meta.hunt_title, String::from_str(&env, "Legendary City Hunt"));
+    assert_eq!(
+        meta.hunt_title,
+        String::from_str(&env, "Legendary City Hunt")
+    );
     assert_eq!(meta.completion_timestamp, 1000);
     assert_eq!(meta.completion_player, player);
     assert_eq!(meta.current_owner, player);
     assert_eq!(meta.title, String::from_str(&env, "Epic Hunt Trophy"));
-    assert_eq!(meta.description, String::from_str(&env, "Completed legendary hunt"));
+    assert_eq!(
+        meta.description,
+        String::from_str(&env, "Completed legendary hunt")
+    );
     assert_eq!(meta.image_uri, String::from_str(&env, "ipfs://trophy"));
     assert_eq!(meta.rarity, 4);
     assert_eq!(meta.tier, 1);
@@ -331,7 +350,10 @@ fn test_update_nft_metadata_owner_only() {
     );
 
     let nft = client.get_nft(&nft_id).unwrap();
-    assert_eq!(nft.metadata.description, String::from_str(&env, "Updated description"));
+    assert_eq!(
+        nft.metadata.description,
+        String::from_str(&env, "Updated description")
+    );
     assert_eq!(nft.metadata.image_uri, String::from_str(&env, "ipfs://new"));
     assert_eq!(nft.metadata.title, String::from_str(&env, "Original"));
 }
@@ -424,7 +446,7 @@ fn test_transfer_nft_requires_auth() {
     let _nft_id = client.mint_reward_nft(&from, &1, &from, &metadata);
 
     // This should fail - from has not authorized
-    client.transfer_nft(&1, &from, &to);
+    client.transfer_nft(&1, &from, &to, &from);
 }
 
 #[test]
@@ -480,7 +502,7 @@ fn test_transfer_nft_emits_event() {
     let metadata = create_metadata(&env, "Event NFT", "Desc", "ipfs://event");
 
     let nft_id = mint_transferable(&env, &client, 1, &from, &metadata);
-    client.transfer_nft(&nft_id, &from, &to);
+    client.transfer_nft(&nft_id, &from, &to, &from);
 
     // Transfer succeeded; NftTransferred event is emitted by transfer_nft
     assert_eq!(client.owner_of(&nft_id), Some(to));

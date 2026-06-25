@@ -17,6 +17,8 @@ impl Storage {
     const HUNTY_CORE_KEY: soroban_sdk::Symbol = symbol_short!("HCORE");
     const TOTAL_XLM_DST_KEY: soroban_sdk::Symbol = symbol_short!("TXDST");
     const IN_DISTRIBUTION_KEY: soroban_sdk::Symbol = symbol_short!("IN_DIST");
+    const PAUSED_KEY: soroban_sdk::Symbol = symbol_short!("PAUSED");
+    const EMERGENCY_LOG_KEY: soroban_sdk::Symbol = symbol_short!("EMLOG");
 
     // ========== XLM Token Address ==========
 
@@ -41,7 +43,9 @@ impl Storage {
     // ========== HuntyCore Contract Address (optional) ==========
 
     pub fn set_hunty_core(env: &Env, address: &Address) {
-        env.storage().persistent().set(&Self::HUNTY_CORE_KEY, address);
+        env.storage()
+            .persistent()
+            .set(&Self::HUNTY_CORE_KEY, address);
     }
 
     pub fn get_hunty_core(env: &Env) -> Option<Address> {
@@ -148,17 +152,24 @@ impl Storage {
     // ========== Global Total XLM Distributed (across all hunts) ==========
 
     pub fn set_total_xlm_distributed(env: &Env, amount: i128) {
-        env.storage().persistent().set(&Self::TOTAL_XLM_DST_KEY, &amount);
+        env.storage()
+            .persistent()
+            .set(&Self::TOTAL_XLM_DST_KEY, &amount);
     }
 
     pub fn get_total_xlm_distributed(env: &Env) -> i128 {
-        env.storage().persistent().get(&Self::TOTAL_XLM_DST_KEY).unwrap_or(0)
+        env.storage()
+            .persistent()
+            .get(&Self::TOTAL_XLM_DST_KEY)
+            .unwrap_or(0)
     }
 
     // ========== Reentrancy Guard ==========
 
     pub fn set_in_distribution(env: &Env, value: bool) {
-        env.storage().persistent().set(&Self::IN_DISTRIBUTION_KEY, &value);
+        env.storage()
+            .persistent()
+            .set(&Self::IN_DISTRIBUTION_KEY, &value);
     }
 
     pub fn is_in_distribution(env: &Env) -> bool {
@@ -190,10 +201,48 @@ impl Storage {
         (Self::POOL_DST_KEY, hunt_id)
     }
 
+    // ========== Pause / Emergency State ==========
+
+    pub fn set_paused(env: &Env, paused: bool) {
+        env.storage().instance().set(&Self::PAUSED_KEY, &paused);
+    }
+
+    pub fn is_paused(env: &Env) -> bool {
+        env.storage()
+            .instance()
+            .get(&Self::PAUSED_KEY)
+            .unwrap_or(false)
+    }
+
+    pub fn log_emergency_withdrawal(env: &Env, log_entry: &crate::EmergencyWithdrawalLogEntry) {
+        let key = Self::emergency_log_key();
+        let mut logs: soroban_sdk::Vec<crate::EmergencyWithdrawalLogEntry> = env
+            .storage()
+            .instance()
+            .get(&key)
+            .unwrap_or_else(|| soroban_sdk::Vec::new(env));
+        logs.push_back(log_entry.clone());
+        env.storage().instance().set(&key, &logs);
+    }
+
+    pub fn get_emergency_logs(env: &Env) -> soroban_sdk::Vec<crate::EmergencyWithdrawalLogEntry> {
+        let key = Self::emergency_log_key();
+        env.storage()
+            .instance()
+            .get(&key)
+            .unwrap_or_else(|| soroban_sdk::Vec::new(env))
+    }
+
+    fn emergency_log_key() -> soroban_sdk::Symbol {
+        Self::EMERGENCY_LOG_KEY
+    }
+
     // --- Contract version ---
 
     pub fn set_contract_version(env: &Env, version: u32) {
-        env.storage().instance().set(&symbol_short!("CVER"), &version);
+        env.storage()
+            .instance()
+            .set(&symbol_short!("CVER"), &version);
     }
 
     pub fn get_contract_version(env: &Env) -> Option<u32> {

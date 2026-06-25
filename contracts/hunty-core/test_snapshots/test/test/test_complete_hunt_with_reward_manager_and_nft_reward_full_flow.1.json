@@ -502,7 +502,7 @@
             },
             "ext": "v0"
           },
-          4095
+          500000
         ]
       ],
       [
@@ -533,7 +533,7 @@
             },
             "ext": "v0"
           },
-          4095
+          500000
         ]
       ],
       [
@@ -578,7 +578,7 @@
             },
             "ext": "v0"
           },
-          4095
+          300000
         ]
       ],
       [
@@ -627,7 +627,7 @@
             },
             "ext": "v0"
           },
-          4095
+          300000
         ]
       ],
       [
@@ -678,7 +678,7 @@
                         "symbol": "answer_hash"
                       },
                       "val": {
-                        "bytes": "d4735e3a265e16eee03f59718b9b5d03019c07d8b6c51f90da3a666eec13ab35"
+                        "bytes": "fe87f59675b116753069fcd1521acacb1a39ebfba8dd9d23e64d78f40977f3e1"
                       }
                     },
                     {
@@ -719,7 +719,7 @@
             },
             "ext": "v0"
           },
-          4095
+          300000
         ]
       ],
       [
@@ -765,6 +765,14 @@
                       },
                       "val": {
                         "u64": 1700000000
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "completed_count"
+                      },
+                      "val": {
+                        "u32": 1
                       }
                     },
                     {
@@ -901,7 +909,7 @@
             },
             "ext": "v0"
           },
-          4095
+          100000
         ]
       ],
       [
@@ -950,7 +958,7 @@
             },
             "ext": "v0"
           },
-          4095
+          100000
         ]
       ],
       [
@@ -1070,7 +1078,7 @@
             },
             "ext": "v0"
           },
-          4095
+          100000
         ]
       ],
       [
@@ -1190,6 +1198,14 @@
                 "durability": "persistent",
                 "val": {
                   "map": [
+                    {
+                      "key": {
+                        "symbol": "completion_player"
+                      },
+                      "val": {
+                        "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4"
+                      }
+                    },
                     {
                       "key": {
                         "symbol": "hunt_id"
@@ -1510,6 +1526,37 @@
                 "durability": "persistent",
                 "val": {
                   "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAOLZM"
+                }
+              }
+            },
+            "ext": "v0"
+          },
+          4095
+        ]
+      ],
+      [
+        {
+          "contract_data": {
+            "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAMDR4",
+            "key": {
+              "symbol": "IN_DIST"
+            },
+            "durability": "persistent"
+          }
+        },
+        [
+          {
+            "last_modified_ledger_seq": 0,
+            "data": {
+              "contract_data": {
+                "ext": "v0",
+                "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAMDR4",
+                "key": {
+                  "symbol": "IN_DIST"
+                },
+                "durability": "persistent",
+                "val": {
+                  "bool": false
                 }
               }
             },
@@ -1967,7 +2014,16 @@
                     "executable": {
                       "wasm": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
                     },
-                    "storage": null
+                    "storage": [
+                      {
+                        "key": {
+                          "symbol": "CVER"
+                        },
+                        "val": {
+                          "u32": 1
+                        }
+                      }
+                    ]
                   }
                 }
               }

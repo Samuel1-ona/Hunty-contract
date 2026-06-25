@@ -1,10 +1,49 @@
 use crate::errors::HuntError;
 use crate::types::{Clue, Hunt, PlayerProgress};
-use soroban_sdk::{symbol_short, Address, Env, Vec};
+use soroban_sdk::{symbol_short, Address, Env, IntoVal, Vec};
 
 /// Storage access layer for hunts, clues, and player progress.
 /// Provides type-safe, efficient storage operations with consistent key management.
 pub struct Storage;
+
+// ========== TTL Constants ==========
+/// Default TTL threshold (ledgers) - extend when below this.
+const TTL_THRESHOLD_CRITICAL: u32 = 50_000;
+/// Default TTL extend to (ledgers) - for admin/config data.
+const TTL_EXTEND_CRITICAL: u32 = 500_000;
+/// TTL threshold for active hunt data (ledgers).
+const TTL_THRESHOLD_ACTIVE: u32 = 30_000;
+/// TTL extend to for active hunt data (ledgers) - ~30 days at 5s/ledger.
+const TTL_EXTEND_ACTIVE: u32 = 300_000;
+/// TTL threshold for default data (ledgers).
+const TTL_THRESHOLD_DEFAULT: u32 = 10_000;
+/// TTL extend to for default data (ledgers) - ~7 days.
+const TTL_EXTEND_DEFAULT: u32 = 100_000;
+/// TTL threshold for completed/archived data (ledgers).
+const TTL_THRESHOLD_SHORT: u32 = 5_000;
+/// TTL extend to for completed/archived data (ledgers) - ~3 days.
+const TTL_EXTEND_SHORT: u32 = 50_000;
+
+/// TTL policy categories for different data types.
+pub enum TtlPolicy {
+    Critical,
+    Active,
+    Default,
+    Short,
+}
+
+/// Extends TTL for a storage key based on the given policy.
+pub fn extend_ttl<K: IntoVal<Env, soroban_sdk::Val>>(env: &Env, key: &K, policy: TtlPolicy) {
+    let (threshold, extend_to) = match policy {
+        TtlPolicy::Critical => (TTL_THRESHOLD_CRITICAL, TTL_EXTEND_CRITICAL),
+        TtlPolicy::Active => (TTL_THRESHOLD_ACTIVE, TTL_EXTEND_ACTIVE),
+        TtlPolicy::Default => (TTL_THRESHOLD_DEFAULT, TTL_EXTEND_DEFAULT),
+        TtlPolicy::Short => (TTL_THRESHOLD_SHORT, TTL_EXTEND_SHORT),
+    };
+    env.storage()
+        .persistent()
+        .extend_ttl(key, threshold, extend_to);
+}
 
 impl Storage {
     // Symbol constants for key prefixes to prevent collisions
@@ -31,6 +70,14 @@ impl Storage {
     pub fn save_hunt(env: &Env, hunt: &Hunt) {
         let key = Self::hunt_key(hunt.hunt_id);
         env.storage().persistent().set(&key, hunt);
+        let policy = match hunt.status {
+            crate::types::HuntStatus::Active => TtlPolicy::Active,
+            crate::types::HuntStatus::Completed | crate::types::HuntStatus::Cancelled => {
+                TtlPolicy::Short
+            }
+            _ => TtlPolicy::Default,
+        };
+        extend_ttl(env, &key, policy);
     }
 
     /// Retrieves a hunt by ID, returning an Option.
@@ -43,7 +90,18 @@ impl Storage {
     /// * `Some(Hunt)` if the hunt exists, `None` otherwise
     pub fn get_hunt(env: &Env, hunt_id: u64) -> Option<Hunt> {
         let key = Self::hunt_key(hunt_id);
-        env.storage().persistent().get(&key)
+        let result: Option<Hunt> = env.storage().persistent().get(&key);
+        if let Some(ref hunt) = result {
+            let policy = match hunt.status {
+                crate::types::HuntStatus::Active => TtlPolicy::Active,
+                crate::types::HuntStatus::Completed | crate::types::HuntStatus::Cancelled => {
+                    TtlPolicy::Short
+                }
+                _ => TtlPolicy::Default,
+            };
+            extend_ttl(env, &key, policy);
+        }
+        result
     }
 
     /// Retrieves a hunt by ID or returns an error if not found.
@@ -72,6 +130,7 @@ impl Storage {
         // Store the clue with composite key
         let key = Self::clue_key(hunt_id, clue.clue_id);
         env.storage().persistent().set(&key, clue);
+        extend_ttl(env, &key, TtlPolicy::Active);
 
         // Update the list of clue IDs for this hunt
         Self::add_clue_to_list(env, hunt_id, clue.clue_id);
@@ -88,7 +147,11 @@ impl Storage {
     /// * `Some(Clue)` if the clue exists, `None` otherwise
     pub fn get_clue(env: &Env, hunt_id: u64, clue_id: u32) -> Option<Clue> {
         let key = Self::clue_key(hunt_id, clue_id);
-        env.storage().persistent().get(&key)
+        let result: Option<Clue> = env.storage().persistent().get(&key);
+        if result.is_some() {
+            extend_ttl(env, &key, TtlPolicy::Active);
+        }
+        result
     }
 
     /// Retrieves a clue or returns an error if not found.
@@ -140,6 +203,12 @@ impl Storage {
         // Store the progress with composite key (hunt_id + player address)
         let key = Self::progress_key(progress.hunt_id, &progress.player);
         env.storage().persistent().set(&key, progress);
+        let policy = if progress.is_completed || progress.reward_claimed {
+            TtlPolicy::Short
+        } else {
+            TtlPolicy::Default
+        };
+        extend_ttl(env, &key, policy);
 
         // Update the list of players for this hunt
         Self::add_player_to_list(env, progress.hunt_id, &progress.player);
@@ -160,7 +229,16 @@ impl Storage {
         player: &Address,
     ) -> Option<PlayerProgress> {
         let key = Self::progress_key(hunt_id, player);
-        env.storage().persistent().get(&key)
+        let result: Option<PlayerProgress> = env.storage().persistent().get(&key);
+        if let Some(ref progress) = result {
+            let policy = if progress.is_completed || progress.reward_claimed {
+                TtlPolicy::Short
+            } else {
+                TtlPolicy::Default
+            };
+            extend_ttl(env, &key, policy);
+        }
+        result
     }
 
     /// Retrieves player progress or returns an error if not found.
@@ -269,15 +347,17 @@ impl Storage {
             clue_ids.push_back(clue_id);
             env.storage().persistent().set(&key, &clue_ids);
         }
+        extend_ttl(env, &key, TtlPolicy::Active);
     }
 
     /// Retrieves the list of clue IDs for a hunt.
     fn get_clue_ids_for_hunt(env: &Env, hunt_id: u64) -> Vec<u32> {
         let key = Self::clues_list_key(hunt_id);
-        env.storage()
-            .persistent()
-            .get(&key)
-            .unwrap_or_else(|| Vec::new(env))
+        let result: Option<Vec<u32>> = env.storage().persistent().get(&key);
+        if result.is_some() {
+            extend_ttl(env, &key, TtlPolicy::Active);
+        }
+        result.unwrap_or_else(|| Vec::new(env))
     }
 
     /// Adds a player address to the list of players for a hunt.
@@ -305,15 +385,17 @@ impl Storage {
             players.push_back(player.clone());
             env.storage().persistent().set(&key, &players);
         }
+        extend_ttl(env, &key, TtlPolicy::Default);
     }
 
     /// Retrieves the list of player addresses for a hunt.
     fn get_player_addresses_for_hunt(env: &Env, hunt_id: u64) -> Vec<Address> {
         let key = Self::players_list_key(hunt_id);
-        env.storage()
-            .persistent()
-            .get(&key)
-            .unwrap_or_else(|| Vec::new(env))
+        let result: Option<Vec<Address>> = env.storage().persistent().get(&key);
+        if result.is_some() {
+            extend_ttl(env, &key, TtlPolicy::Default);
+        }
+        result.unwrap_or_else(|| Vec::new(env))
     }
 
     // ========== Hunt Counter Functions ==========
@@ -331,6 +413,7 @@ impl Storage {
         let current: u64 = env.storage().persistent().get(&key).unwrap_or(0);
         let next = current + 1;
         env.storage().persistent().set(&key, &next);
+        extend_ttl(env, &key, TtlPolicy::Critical);
         next
     }
 
@@ -343,7 +426,11 @@ impl Storage {
     /// The current hunt counter value (0 if no hunts have been created)
     pub fn get_hunt_counter(env: &Env) -> u64 {
         let key = Self::HUNT_COUNTER_KEY;
-        env.storage().persistent().get(&key).unwrap_or(0)
+        let result: Option<u64> = env.storage().persistent().get(&key);
+        if result.is_some() {
+            extend_ttl(env, &key, TtlPolicy::Critical);
+        }
+        result.unwrap_or(0)
     }
 
     // ========== Clue Counter (per hunt) Functions ==========
@@ -362,6 +449,7 @@ impl Storage {
         let current: u32 = env.storage().persistent().get(&key).unwrap_or(0);
         let next = current + 1;
         env.storage().persistent().set(&key, &next);
+        extend_ttl(env, &key, TtlPolicy::Active);
         next
     }
 
@@ -375,7 +463,11 @@ impl Storage {
     /// The number of clues added so far for the hunt (0 if none)
     pub fn get_clue_counter(env: &Env, hunt_id: u64) -> u32 {
         let key = Self::clue_counter_key(hunt_id);
-        env.storage().persistent().get(&key).unwrap_or(0)
+        let result: Option<u32> = env.storage().persistent().get(&key);
+        if result.is_some() {
+            extend_ttl(env, &key, TtlPolicy::Active);
+        }
+        result.unwrap_or(0)
     }
 
     // ========== Reward Manager Storage Functions ==========
@@ -384,16 +476,23 @@ impl Storage {
         env.storage()
             .persistent()
             .set(&Self::REWARD_MGR_KEY, address);
+        extend_ttl(env, &Self::REWARD_MGR_KEY, TtlPolicy::Critical);
     }
 
     pub fn get_reward_manager(env: &Env) -> Option<Address> {
-        env.storage().persistent().get(&Self::REWARD_MGR_KEY)
+        let result: Option<Address> = env.storage().persistent().get(&Self::REWARD_MGR_KEY);
+        if result.is_some() {
+            extend_ttl(env, &Self::REWARD_MGR_KEY, TtlPolicy::Critical);
+        }
+        result
     }
 
     // --- Contract version ---
 
     pub fn set_contract_version(env: &Env, version: u32) {
-        env.storage().instance().set(&symbol_short!("CVER"), &version);
+        env.storage()
+            .instance()
+            .set(&symbol_short!("CVER"), &version);
     }
 
     pub fn get_contract_version(env: &Env) -> Option<u32> {

@@ -112,7 +112,9 @@ impl Storage {
         env.storage()
             .persistent()
             .set(&Self::MAX_SUPPLY_KEY, &max_supply);
-        env.storage().persistent().set(&Self::INITIALIZED_KEY, &true);
+        env.storage()
+            .persistent()
+            .set(&Self::INITIALIZED_KEY, &true);
     }
 
     pub fn get_max_supply(env: &Env) -> Option<u64> {
@@ -170,6 +172,18 @@ impl Storage {
         ids
     }
 
+    /// Saves the reward manager address.
+    pub fn save_reward_manager(env: &Env, address: &Address) {
+        env.storage().instance().set(&Self::REWARD_MGR_KEY, address);
+    }
+
+    fn operator_key(
+        owner: &Address,
+        operator: &Address,
+    ) -> (soroban_sdk::Symbol, Address, Address) {
+        (symbol_short!("OPKEY"), owner.clone(), operator.clone())
+    }
+
     // --- Operator management ---
 
     /// Grants operator approval: `operator` can manage all NFTs owned by `owner`.
@@ -190,17 +204,12 @@ impl Storage {
         env.storage().persistent().get(&key).unwrap_or(false)
     }
 
-    /// Returns the reward manager address (used for cross-contract auth).
-    pub fn get_reward_manager(env: &Env) -> Option<Address> {
-        env.storage()
-            .instance()
-            .get(&symbol_short!("RWMGR"))
-    }
-
     // --- Contract version ---
 
     pub fn set_contract_version(env: &Env, version: u32) {
-        env.storage().instance().set(&symbol_short!("CVER"), &version);
+        env.storage()
+            .instance()
+            .set(&symbol_short!("CVER"), &version);
     }
 
     pub fn get_contract_version(env: &Env) -> Option<u32> {

@@ -24,10 +24,7 @@ pub struct MigrationFramework;
 impl MigrationFramework {
     /// Reads the stored schema version, defaulting to 0 when uninitialized.
     pub fn detect_version(env: &Env) -> u32 {
-        env.storage()
-            .instance()
-            .get(&VERSION_KEY)
-            .unwrap_or(0)
+        env.storage().instance().get(&VERSION_KEY).unwrap_or(0)
     }
 
     /// Sets the schema version on first initialization.

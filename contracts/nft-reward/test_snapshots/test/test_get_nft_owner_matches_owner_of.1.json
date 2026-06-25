@@ -90,6 +90,14 @@
                   "map": [
                     {
                       "key": {
+                        "symbol": "completion_player"
+                      },
+                      "val": {
+                        "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4"
+                      }
+                    },
+                    {
+                      "key": {
                         "symbol": "hunt_id"
                       },
                       "val": {

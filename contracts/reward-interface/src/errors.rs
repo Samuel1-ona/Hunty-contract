@@ -21,4 +21,8 @@ pub enum RewardErrorCode {
     ReentrancyDetected = 14,
     /// The tracked pool balance diverged from the actual XLM token balance.
     PoolBalanceDivergence = 15,
+    /// Contract is paused and cannot perform operations.
+    ContractPaused = 16,
+    /// Emergency withdrawal failed.
+    EmergencyWithdrawalFailed = 17,
 }

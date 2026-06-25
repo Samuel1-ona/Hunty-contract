@@ -1,7 +1,7 @@
-use soroban_sdk::testutils::{Address as _, Ledger as _};
-use soroban_sdk::{token, Address, Env, String};
 use hunty_core::HuntyCore;
 use reward_manager::RewardManager;
+use soroban_sdk::testutils::{Address as _, Ledger as _};
+use soroban_sdk::{token, Address, Env, String};
 
 fn setup_reward_manager(env: &Env) -> (Address, Address) {
     let reward_manager_id = env.register(RewardManager, ());
@@ -10,8 +10,7 @@ fn setup_reward_manager(env: &Env) -> (Address, Address) {
     let token_address = token_contract.address();
 
     env.as_contract(&reward_manager_id, || {
-        RewardManager::initialize(env.clone(), token_admin.clone(), token_address.clone())
-            .unwrap();
+        RewardManager::initialize(env.clone(), token_admin.clone(), token_address.clone()).unwrap();
     });
 
     (reward_manager_id, token_address)

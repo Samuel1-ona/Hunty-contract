@@ -20,6 +20,18 @@ const MAX_LEADERBOARD_SIZE: u32 = 20;
 /// Maximum number of player records scanned when building leaderboard responses.
 /// This prevents unbounded gas growth for large hunts.
 const MAX_LEADERBOARD_SCAN_SIZE: u32 = 200;
+/// Maximum batch size for paginated list operations (gas protection).
+const MAX_BATCH_SIZE: u32 = 50;
+/// Default page size for paginated queries.
+const DEFAULT_PAGE_SIZE: u32 = 20;
+/// Estimated gas cost for a basic storage read (used for gas estimation documentation).
+const _ESTIMATED_GAS_STORAGE_READ: u32 = 5_000;
+/// Estimated gas cost for a basic storage write.
+const _ESTIMATED_GAS_STORAGE_WRITE: u32 = 10_000;
+/// Estimated gas cost for hashing an answer.
+const _ESTIMATED_GAS_HASH: u32 = 3_000;
+/// Estimated gas cost per cross-contract call.
+const _ESTIMATED_GAS_CROSS_CONTRACT: u32 = 50_000;
 
 #[contract]
 pub struct HuntyCore;
@@ -99,6 +111,7 @@ impl HuntyCore {
             reward_config,
             total_clues: 0, // Empty clue list initially
             required_clues: 0,
+            completed_count: 0,
         };
 
         // Store the hunt
@@ -160,9 +173,9 @@ impl HuntyCore {
         if qlen == 0 || qlen > MAX_QUESTION_LENGTH {
             return Err(HuntErrorCode::InvalidQuestion);
         }
-        let answer_hash =
-            Self::normalize_and_hash_answer(&env, &answer).map_err(HuntErrorCode::from)?;
         let clue_id = Storage::next_clue_id(&env, hunt_id);
+        let answer_hash = Self::normalize_and_hash_answer(&env, hunt_id, clue_id, &answer)
+            .map_err(HuntErrorCode::from)?;
         let clue = Clue {
             clue_id,
             question: question.clone(),
@@ -200,10 +213,13 @@ impl HuntyCore {
     }
 
     /// Returns all clues for a hunt (question, points, required). Answer hashes are not exposed.
+    /// This loads all clues; for large hunts use `list_clues_paginated` to limit gas cost.
+    /// Estimated gas: O(n) where n = total_clues, ~5_000 gas per clue.
     pub fn list_clues(env: Env, hunt_id: u64) -> Vec<ClueInfo> {
         let raw = Storage::list_clues_for_hunt(&env, hunt_id);
         let mut out = Vec::new(&env);
-        for i in 0..raw.len() {
+        let limit = core::cmp::min(raw.len(), MAX_BATCH_SIZE);
+        for i in 0..limit {
             let c = raw.get(i).unwrap();
             out.push_back(ClueInfo {
                 clue_id: c.clue_id,
@@ -215,8 +231,52 @@ impl HuntyCore {
         out
     }
 
+    /// Returns a paginated slice of clues for a hunt. Useful for large hunts to bound gas.
+    /// Page is 0-indexed. Max page_size is capped at MAX_BATCH_SIZE (50).
+    /// Estimated gas: O(page_size) ~5_000 gas per clue + 10_000 overhead.
+    pub fn list_clues_paginated(
+        env: Env,
+        hunt_id: u64,
+        page: u32,
+        page_size: u32,
+    ) -> Vec<ClueInfo> {
+        let raw = Storage::list_clues_for_hunt(&env, hunt_id);
+        let effective_page_size = core::cmp::min(page_size, MAX_BATCH_SIZE);
+        let start = (page as usize).saturating_mul(effective_page_size as usize);
+        let end = core::cmp::min(
+            start.saturating_add(effective_page_size as usize),
+            raw.len() as usize,
+        );
+        let mut out = Vec::new(&env);
+        for i in start..end {
+            if let Some(c) = raw.get(i as u32) {
+                out.push_back(ClueInfo {
+                    clue_id: c.clue_id,
+                    question: c.question,
+                    points: c.points,
+                    is_required: c.is_required,
+                });
+            }
+        }
+        out
+    }
+
     /// Normalizes answer (trim, lowercase) and returns SHA256 hash as BytesN<32>.
-    fn normalize_and_hash_answer(env: &Env, answer: &String) -> Result<BytesN<32>, HuntError> {
+    /// Uses hunt_id and clue_id as salt to prevent length-extension attacks and
+    /// rainbow table precomputation (see #397).
+    ///
+    /// Hashing scheme: SHA256(hunt_id || clue_id || normalized_answer)
+    ///
+    /// Test vectors:
+    /// - hunt_id=1, clue_id=1, answer="hello" -> hash includes prefix [0,0,0,0,0,0,0,1, 0,0,0,1]
+    /// - hunt_id=1, clue_id=2, answer="HELLO" -> same normalized="hello", different hash due to clue_id
+    /// - hunt_id=2, clue_id=1, answer="hello" -> different hash due to hunt_id
+    fn normalize_and_hash_answer(
+        env: &Env,
+        hunt_id: u64,
+        clue_id: u32,
+        answer: &String,
+    ) -> Result<BytesN<32>, HuntError> {
         let n = answer.len();
         if n == 0 {
             return Err(HuntError::InvalidAnswer);
@@ -224,10 +284,14 @@ impl HuntyCore {
         if n > MAX_ANSWER_LENGTH {
             return Err(HuntError::InvalidAnswer);
         }
-        let mut buf = [0u8; 256];
-        answer.copy_into_slice(&mut buf[..n as usize]);
-        let mut start = 0usize;
-        let mut end = n as usize;
+        let mut buf = [0u8; 256 + 12]; // extra 12 bytes for hunt_id + clue_id salt
+                                       // Write salt prefix: hunt_id (8 bytes big-endian) + clue_id (4 bytes big-endian)
+        buf[..8].copy_from_slice(&hunt_id.to_be_bytes());
+        buf[8..12].copy_from_slice(&clue_id.to_be_bytes());
+        answer.copy_into_slice(&mut buf[12..12 + n as usize]);
+        let total_len = 12 + n as usize;
+        let mut start = 12usize;
+        let mut end = total_len;
         while start < end && Self::is_ascii_space(buf[start]) {
             start += 1;
         }
@@ -242,7 +306,7 @@ impl HuntyCore {
                 *b += b'a' - b'A';
             }
         }
-        let normalized = Bytes::from_slice(env, &buf[start..end]);
+        let normalized = Bytes::from_slice(env, &buf[..end]);
         let hash = env.crypto().sha256(&normalized);
         Ok(hash.to_bytes())
     }
@@ -420,8 +484,7 @@ impl HuntyCore {
     pub fn complete_hunt(env: Env, hunt_id: u64, player: Address) -> Result<(), HuntErrorCode> {
         player.require_auth();
 
-        let mut hunt =
-            Storage::get_hunt_or_error(&env, hunt_id).map_err(HuntErrorCode::from)?;
+        let mut hunt = Storage::get_hunt_or_error(&env, hunt_id).map_err(HuntErrorCode::from)?;
 
         let mut progress = Storage::get_player_progress_or_error(&env, hunt_id, &player)
             .map_err(HuntErrorCode::from)?;
@@ -457,23 +520,33 @@ impl HuntyCore {
                 None
             };
             let (nft_contract, nft_title, nft_desc, nft_uri, nft_hunt_title) = if nft_awarded {
-                hunt.reward_config.nft_contract.clone().map(|nft_contract| {
-                    (
-                        Some(nft_contract),
-                        hunt.title.clone(),
-                        hunt.description.clone(),
+                hunt.reward_config
+                    .nft_contract
+                    .clone()
+                    .map(|nft_contract| {
+                        (
+                            Some(nft_contract),
+                            hunt.title.clone(),
+                            hunt.description.clone(),
+                            String::from_str(&env, ""),
+                            hunt.title.clone(),
+                        )
+                    })
+                    .unwrap_or((
+                        None,
                         String::from_str(&env, ""),
-                        hunt.title.clone(),
-                    )
-                }).unwrap_or((
+                        String::from_str(&env, ""),
+                        String::from_str(&env, ""),
+                        String::from_str(&env, ""),
+                    ))
+            } else {
+                (
                     None,
                     String::from_str(&env, ""),
                     String::from_str(&env, ""),
                     String::from_str(&env, ""),
                     String::from_str(&env, ""),
-                ))
-            } else {
-                (None, String::from_str(&env, ""), String::from_str(&env, ""), String::from_str(&env, ""), String::from_str(&env, ""))
+                )
             };
             let rm_reward_config = reward_interface::RewardConfig {
                 xlm_amount,
@@ -627,8 +700,8 @@ impl HuntyCore {
             return Err(HuntErrorCode::ClueAlreadyCompleted);
         }
 
-        let submitted_hash =
-            Self::normalize_and_hash_answer(&env, &answer).map_err(HuntErrorCode::from)?;
+        let submitted_hash = Self::normalize_and_hash_answer(&env, hunt_id, clue_id, &answer)
+            .map_err(HuntErrorCode::from)?;
 
         if submitted_hash != clue.answer_hash {
             // Answer is incorrect - emit analytics event and return error
@@ -657,7 +730,8 @@ impl HuntyCore {
 
             // Emit HuntCompleted event with rank
             // Increment completed count and obtain rank
-            let mut hunt_mut = Storage::get_hunt(&env, hunt_id).ok_or(HuntErrorCode::HuntNotFound)?;
+            let mut hunt_mut =
+                Storage::get_hunt(&env, hunt_id).ok_or(HuntErrorCode::HuntNotFound)?;
             hunt_mut.completed_count += 1;
             let rank = hunt_mut.completed_count;
             // Save updated hunt before publishing event
@@ -840,10 +914,7 @@ impl HuntyCore {
 
     /// Returns aggregate statistics for a hunt (read-only): total players, completion rate, average score.
     /// Returns error if hunt does not exist.
-    pub fn get_hunt_statistics(
-        env: Env,
-        hunt_id: u64,
-    ) -> Result<HuntStatistics, HuntErrorCode> {
+    pub fn get_hunt_statistics(env: Env, hunt_id: u64) -> Result<HuntStatistics, HuntErrorCode> {
         let _ = Storage::get_hunt(&env, hunt_id).ok_or(HuntErrorCode::HuntNotFound)?;
         let players = Storage::get_hunt_players(&env, hunt_id);
         let total_players = players.len();
@@ -892,7 +963,12 @@ impl HuntyCore {
     }
 
     /// Runs storage migrations up to `target_version`. Set `dry_run` to simulate without writes.
-    pub fn run_migration(env: Env, admin: Address, target_version: u32, dry_run: bool) -> migration::MigrationReport {
+    pub fn run_migration(
+        env: Env,
+        admin: Address,
+        target_version: u32,
+        dry_run: bool,
+    ) -> migration::MigrationReport {
         admin.require_auth();
         migration::HuntyCoreMigration::run_migration(&env, target_version, dry_run)
     }

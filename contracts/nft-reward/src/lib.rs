@@ -1,7 +1,7 @@
 #![cfg_attr(not(test), no_std)]
 use soroban_sdk::{
-    contract, contractimpl, contracttype, panic_with_error, symbol_short, Address, Env, Map, String,
-    Symbol, Val, Vec,
+    contract, contractimpl, contracttype, panic_with_error, symbol_short, Address, Env, Map,
+    String, Symbol, Val, Vec,
 };
 
 /// Core display metadata for an NFT (title, description, image URI).
@@ -101,6 +101,15 @@ pub struct AdminImageUrisUpdatedEvent {
     pub updated_count: u32,
 }
 
+/// Event emitted when operator status changes for an owner.
+#[contracttype]
+#[derive(Clone, Debug)]
+pub struct OperatorChangedEvent {
+    pub owner: Address,
+    pub operator: Address,
+    pub approved: bool,
+}
+
 mod errors;
 pub use errors::NftErrorCode;
 mod migration;
@@ -112,6 +121,8 @@ pub struct NftReward;
 
 #[contractimpl]
 impl NftReward {
+    /// Current contract version for compatibility checks.
+    pub const CONTRACT_VERSION: u32 = 2;
     /// Initializes the NFT reward contract with an admin address and optional max supply cap.
     /// Call this once to set the admin who can manage the contract.
     pub fn initialize(
@@ -284,6 +295,7 @@ impl NftReward {
             nft_id,
             hunt_id,
             owner: player_address.clone(),
+            completion_player: player_address.clone(),
             metadata: metadata.clone(),
             transferable,
             minted_at,
@@ -371,19 +383,34 @@ impl NftReward {
 
         let total = Storage::get_nft_counter(&env);
         let mut updated: u32 = 0;
+        let old_len = old_prefix.len() as usize;
+        let new_len = new_prefix.len() as usize;
 
         for nft_id in 1..=total {
             if let Some(mut nft) = Storage::get_nft(&env, nft_id) {
                 let uri = nft.metadata.image_uri.clone();
-                let uri_str = uri.as_str();
+                let uri_len = uri.len() as usize;
+                if uri_len >= old_len {
+                    let mut uri_buf = [0u8; 512];
+                    let mut old_buf = [0u8; 256];
+                    let mut new_buf = [0u8; 256];
+                    uri.copy_into_slice(&mut uri_buf[..uri_len]);
+                    old_prefix.copy_into_slice(&mut old_buf[..old_len]);
+                    new_prefix.copy_into_slice(&mut new_buf[..new_len]);
 
-                if uri_str.starts_with(old_prefix.as_str()) {
-                    let suffix = uri_str.strip_prefix(old_prefix.as_str()).unwrap_or("");
-                    let new_uri = String::from_str(&env, new_prefix.as_str())
-                        .concat(&String::from_str(&env, suffix));
-                    nft.metadata.image_uri = new_uri;
-                    Storage::save_nft(&env, &nft);
-                    updated += 1;
+                    if uri_buf[..old_len] == old_buf[..old_len] {
+                        let suffix_len = uri_len - old_len;
+                        let mut combined = [0u8; 768];
+                        combined[..new_len].copy_from_slice(&new_buf[..new_len]);
+                        combined[new_len..new_len + suffix_len]
+                            .copy_from_slice(&uri_buf[old_len..uri_len]);
+                        nft.metadata.image_uri = soroban_sdk::String::from_bytes(
+                            &env,
+                            &combined[..new_len + suffix_len],
+                        );
+                        Storage::save_nft(&env, &nft);
+                        updated += 1;
+                    }
                 }
             }
         }
@@ -487,15 +514,10 @@ impl NftReward {
     ///
     /// # Authorization
     /// The `owner` must authorize this call. The caller must also be the current owner.
-    pub fn burn(
-        env: Env,
-        nft_id: u64,
-        owner: Address,
-    ) -> Result<(), crate::errors::NftErrorCode> {
+    pub fn burn(env: Env, nft_id: u64, owner: Address) -> Result<(), crate::errors::NftErrorCode> {
         owner.require_auth();
 
-        let nft = Storage::get_nft(&env, nft_id)
-            .ok_or(crate::errors::NftErrorCode::NftNotFound)?;
+        let nft = Storage::get_nft(&env, nft_id).ok_or(crate::errors::NftErrorCode::NftNotFound)?;
 
         if nft.owner != owner {
             return Err(crate::errors::NftErrorCode::NotOwner);
@@ -562,8 +584,8 @@ impl NftReward {
     ) -> Result<(), crate::errors::NftErrorCode> {
         caller.require_auth();
 
-        let mut nft = Storage::get_nft(&env, nft_id)
-            .ok_or(crate::errors::NftErrorCode::NftNotFound)?;
+        let mut nft =
+            Storage::get_nft(&env, nft_id).ok_or(crate::errors::NftErrorCode::NftNotFound)?;
 
         if nft.owner != from_address {
             return Err(crate::errors::NftErrorCode::NotOwner);
@@ -644,7 +666,11 @@ impl NftReward {
         Storage::set_operator(&env, &owner, &operator);
         env.events().publish(
             (Symbol::new(&env, "OperatorChanged"), owner.clone()),
-            OperatorChangedEvent { owner, operator, approved: true },
+            OperatorChangedEvent {
+                owner,
+                operator,
+                approved: true,
+            },
         );
     }
 
@@ -657,7 +683,11 @@ impl NftReward {
         Storage::remove_operator(&env, &owner, &operator);
         env.events().publish(
             (Symbol::new(&env, "OperatorChanged"), owner.clone()),
-            OperatorChangedEvent { owner, operator, approved: false },
+            OperatorChangedEvent {
+                owner,
+                operator,
+                approved: false,
+            },
         );
     }
 
