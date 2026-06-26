@@ -5,7 +5,7 @@ use crate::storage::Storage;
 use crate::types::{
     AnswerIncorrectEvent, Clue, ClueAddedEvent, ClueCompletedEvent, ClueInfo, ClueRemovedEvent,
     Hunt, HuntActivatedEvent, HuntCancelledEvent, HuntCompletedEvent, HuntCreatedEvent,
-    HuntDeactivatedEvent, HuntStatistics, HuntStatus, LeaderboardEntry, PlayerProgress,
+    HuntDeactivatedEvent, HuntStatistics, HuntStatus, HuntStatusChangedEvent, LeaderboardEntry, PlayerProgress,
     PlayerRegisteredEvent, RewardClaimedEvent, RewardConfig, TimeBonusConfig,
 };
 use alloc::string::String as StdString;
@@ -565,7 +565,7 @@ impl HuntyCore {
             &env,
             hunt_id,
             HuntStatus::Active,
-            HuntStatus::Draft,
+            HuntStatus::Paused,
             env.ledger().timestamp(),
         );
 
@@ -889,8 +889,14 @@ impl HuntyCore {
         if hunt.reward_config.claimed_count >= hunt.reward_config.max_winners {
             hunt.status = HuntStatus::Completed;
 
-            // Optionally, we could emit a HuntStatusChangedEvent or HuntEndedEvent here
-            // if we want to notify clients that the hunt is completely finished.
+            // Emit HuntStatusChanged event for completion
+            Self::emit_hunt_status_changed(
+                &env,
+                hunt_id,
+                HuntStatus::Active,
+                HuntStatus::Completed,
+                env.ledger().timestamp(),
+            );
         }
 
         Storage::save_hunt(env, &hunt);
