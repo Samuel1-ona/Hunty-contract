@@ -367,6 +367,20 @@ pub struct HuntCreatedEvent {
 }
 
 #[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CreatorBlacklistedEvent {
+    pub creator: Address,
+    pub admin: Address,
+}
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CreatorRemovedFromBlacklistEvent {
+    pub creator: Address,
+    pub admin: Address,
+}
+
+#[contracttype]
 #[derive(Clone, Debug)]
 pub struct HuntStatusChangedEvent {
     pub hunt_id: u64,

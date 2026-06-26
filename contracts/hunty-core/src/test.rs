@@ -22,7 +22,9 @@ mod test {
     // Bring Soroban testutils traits into scope (generate addresses, set ledger info, register contracts).
     use crate::errors::{HuntError, HuntErrorCode};
     use crate::storage::Storage;
-    use crate::types::{HuntStatus, TimeBonusConfig};
+    use crate::types::{
+        CreatorBlacklistedEvent, CreatorRemovedFromBlacklistEvent, HuntStatus, TimeBonusConfig,
+    };
     use crate::HuntyCore;
     use nft_reward::{NftMetadata, NftReward};
     use reward_manager::RewardManager;
@@ -2464,6 +2466,94 @@ mod test {
             assert_eq!(progress.reward_claimed, false);
             assert!(progress.started_at > 0);
             assert_eq!(progress.completed_at, 0);
+        });
+    }
+
+    #[test]
+    fn test_blacklist_creator_blocks_hunt_creation_and_emits_event() {
+        let env = Env::default();
+        env.ledger().set_timestamp(1_700_000_000);
+        env.mock_all_auths();
+
+        let admin = Address::generate(&env);
+        let creator = Address::generate(&env);
+
+        with_core_contract(&env, |env, cid| {
+            HuntyCore::initialize_admin(env.clone(), admin.clone()).unwrap();
+            HuntyCore::blacklist_creator(env.clone(), admin.clone(), creator.clone()).unwrap();
+
+            assert!(HuntyCore::is_blacklisted(env.clone(), creator.clone()));
+
+            let err = HuntyCore::create_hunt(
+                env.clone(),
+                creator.clone(),
+                String::from_str(env, "Blacklisted Hunt"),
+                String::from_str(env, "Should not be created"),
+                None,
+                None,
+            )
+            .unwrap_err();
+            assert_eq!(err, HuntErrorCode::AddressBlacklisted);
+
+            let events = env.events().all();
+            let (contract, topics, data): (Address, Vec<Val>, Val) =
+                events.get(events.len() - 1).unwrap();
+            assert_eq!(contract, cid.clone().into());
+            assert_eq!(topics.len(), 2);
+            assert_eq!(
+                Symbol::try_from_val(env, &topics.get(0).unwrap()).unwrap(),
+                Symbol::new(env, "CreatorBlacklisted")
+            );
+            assert_eq!(u64::try_from_val(env, &topics.get(1).unwrap()).unwrap(), 0);
+
+            let event = CreatorBlacklistedEvent::try_from_val(env, &data).unwrap();
+            assert_eq!(event.creator, creator);
+            assert_eq!(event.admin, admin);
+        });
+    }
+
+    #[test]
+    fn test_remove_from_blacklist_allows_hunt_creation_and_emits_event() {
+        let env = Env::default();
+        env.ledger().set_timestamp(1_700_000_000);
+        env.mock_all_auths();
+
+        let admin = Address::generate(&env);
+        let creator = Address::generate(&env);
+
+        with_core_contract(&env, |env, cid| {
+            HuntyCore::initialize_admin(env.clone(), admin.clone()).unwrap();
+            HuntyCore::blacklist_creator(env.clone(), admin.clone(), creator.clone()).unwrap();
+            HuntyCore::remove_from_blacklist(env.clone(), admin.clone(), creator.clone())
+                .unwrap();
+
+            assert!(!HuntyCore::is_blacklisted(env.clone(), creator.clone()));
+
+            let hunt_id = HuntyCore::create_hunt(
+                env.clone(),
+                creator.clone(),
+                String::from_str(env, "Recovered Hunt"),
+                String::from_str(env, "Should be created"),
+                None,
+                None,
+            )
+            .unwrap();
+            assert_eq!(hunt_id, 1);
+
+            let events = env.events().all();
+            let (contract, topics, data): (Address, Vec<Val>, Val) =
+                events.get(events.len() - 1).unwrap();
+            assert_eq!(contract, cid.clone().into());
+            assert_eq!(topics.len(), 2);
+            assert_eq!(
+                Symbol::try_from_val(env, &topics.get(0).unwrap()).unwrap(),
+                Symbol::new(env, "HuntCreated")
+            );
+            assert_eq!(u64::try_from_val(env, &topics.get(1).unwrap()).unwrap(), hunt_id);
+
+            let event = CreatorRemovedFromBlacklistEvent::try_from_val(env, &data).unwrap();
+            assert_eq!(event.creator, creator);
+            assert_eq!(event.admin, admin);
         });
     }
 

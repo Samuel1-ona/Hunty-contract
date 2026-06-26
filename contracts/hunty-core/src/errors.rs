@@ -31,6 +31,7 @@ pub enum HuntErrorCode {
     NoRequiredClues = 22,
     InvalidRarity = 23,
     InvalidTimeBonusConfig = 24,
+    AddressBlacklisted = 25,
 }
 
 #[derive(Debug)]
@@ -59,6 +60,7 @@ pub enum HuntError {
     NoRequiredClues { hunt_id: u64 },
     InvalidRarity { value: u32 },
     InvalidTimeBonusConfig,
+    AddressBlacklisted,
 }
 
 impl fmt::Display for HuntError {
@@ -143,6 +145,9 @@ impl fmt::Display for HuntError {
             HuntError::InvalidTimeBonusConfig => {
                 write!(f, "Invalid time bonus configuration")
             }
+            HuntError::AddressBlacklisted => {
+                write!(f, "Address is blacklisted from creating hunts")
+            }
         }
     }
 }
@@ -174,6 +179,7 @@ impl From<HuntError> for HuntErrorCode {
             HuntError::NoRequiredClues { .. } => HuntErrorCode::NoRequiredClues,
             HuntError::InvalidRarity { .. } => HuntErrorCode::InvalidRarity,
             HuntError::InvalidTimeBonusConfig => HuntErrorCode::InvalidTimeBonusConfig,
+            HuntError::AddressBlacklisted => HuntErrorCode::AddressBlacklisted,
         }
     }
 }

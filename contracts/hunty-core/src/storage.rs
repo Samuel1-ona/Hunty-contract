@@ -1,6 +1,6 @@
 use crate::errors::HuntError;
 use crate::types::{Clue, Hunt, PlayerProgress, StoredPlayerProgress};
-use soroban_sdk::{symbol_short, Address, Env, Vec};
+use soroban_sdk::{symbol_short, Address, Env, Map, Vec};
 
 // ~30 days at 5s/ledger. Instance TTL is bumped on every write — one call covers all keys.
 const INSTANCE_TTL_THRESHOLD: u32 = 518_400;
@@ -29,6 +29,7 @@ impl Storage {
     const REWARD_MGR_KEY: soroban_sdk::Symbol = symbol_short!("RWDMGR");
     const ADMIN_KEY: soroban_sdk::Symbol = symbol_short!("ADMIN");
     const PAUSED_KEY: soroban_sdk::Symbol = symbol_short!("PAUSED");
+    const BLACKLIST_KEY: soroban_sdk::Symbol = symbol_short!("BLKLST");
 
     // ========== Hunt Storage Functions ==========
 
@@ -347,5 +348,27 @@ impl Storage {
             .instance()
             .get(&Self::PAUSED_KEY)
             .unwrap_or(false)
+    }
+
+    pub fn set_creator_blacklisted(env: &Env, creator: &Address, blacklisted: bool) {
+        let mut blacklist: Map<Address, bool> = env
+            .storage()
+            .instance()
+            .get(&Self::BLACKLIST_KEY)
+            .unwrap_or(Map::new(env));
+        blacklist.set(creator.clone(), blacklisted);
+        env.storage().instance().set(&Self::BLACKLIST_KEY, &blacklist);
+        env.storage()
+            .instance()
+            .extend_ttl(INSTANCE_TTL_THRESHOLD, INSTANCE_TTL_EXTEND_TO);
+    }
+
+    pub fn is_creator_blacklisted(env: &Env, creator: &Address) -> bool {
+        let blacklist: Map<Address, bool> = env
+            .storage()
+            .instance()
+            .get(&Self::BLACKLIST_KEY)
+            .unwrap_or(Map::new(env));
+        blacklist.get(creator.clone()).unwrap_or(false)
     }
 }

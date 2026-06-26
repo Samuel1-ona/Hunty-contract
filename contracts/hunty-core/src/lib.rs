@@ -4,9 +4,10 @@ use crate::errors::{HuntError, HuntErrorCode};
 use crate::storage::Storage;
 use crate::types::{
     AnswerIncorrectEvent, Clue, ClueAddedEvent, ClueCompletedEvent, ClueInfo, ClueRemovedEvent,
-    Hunt, HuntActivatedEvent, HuntCancelledEvent, HuntCompletedEvent, HuntCreatedEvent,
-    HuntDeactivatedEvent, HuntStatistics, HuntStatus, LeaderboardEntry, PlayerProgress,
-    PlayerRegisteredEvent, RewardClaimedEvent, RewardConfig, TimeBonusConfig,
+    CreatorBlacklistedEvent, CreatorRemovedFromBlacklistEvent, Hunt, HuntActivatedEvent,
+    HuntCancelledEvent, HuntCompletedEvent, HuntCreatedEvent, HuntDeactivatedEvent,
+    HuntStatistics, HuntStatus, LeaderboardEntry, PlayerProgress, PlayerRegisteredEvent,
+    RewardClaimedEvent, RewardConfig, TimeBonusConfig,
 };
 use alloc::string::String as StdString;
 use reward_manager::RewardErrorCode;
@@ -47,6 +48,44 @@ impl HuntyCore {
 
         Storage::set_admin(&env, &admin);
         Ok(())
+    }
+
+    pub fn blacklist_creator(
+        env: Env,
+        admin: Address,
+        creator: Address,
+    ) -> Result<(), HuntErrorCode> {
+        Self::require_admin(&env, &admin)?;
+        Storage::set_creator_blacklisted(&env, &creator, true);
+        env.events().publish(
+            (Symbol::new(&env, "CreatorBlacklisted"), 0u64),
+            CreatorBlacklistedEvent {
+                creator: creator.clone(),
+                admin: admin.clone(),
+            },
+        );
+        Ok(())
+    }
+
+    pub fn remove_from_blacklist(
+        env: Env,
+        admin: Address,
+        creator: Address,
+    ) -> Result<(), HuntErrorCode> {
+        Self::require_admin(&env, &admin)?;
+        Storage::set_creator_blacklisted(&env, &creator, false);
+        env.events().publish(
+            (Symbol::new(&env, "CreatorRemovedFromBlacklist"), 0u64),
+            CreatorRemovedFromBlacklistEvent {
+                creator: creator.clone(),
+                admin: admin.clone(),
+            },
+        );
+        Ok(())
+    }
+
+    pub fn is_blacklisted(env: Env, creator: Address) -> bool {
+        Storage::is_creator_blacklisted(&env, &creator)
     }
 
     /// Pauses new player registrations and answer submissions.
@@ -112,9 +151,9 @@ impl HuntyCore {
         start_time: Option<u64>,
         end_time: Option<u64>,
     ) -> Result<u64, HuntErrorCode> {
-        // Validate creator address - in Soroban, Address is always valid if constructed,
-        // but we ensure it's not a zero/null address pattern if needed
-        // For now, we accept any valid Address type
+        if Storage::is_creator_blacklisted(&env, &creator) {
+            return Err(HuntErrorCode::AddressBlacklisted);
+        }
 
         // Validate title
         let title_len = title.len();
