@@ -4,3 +4,6 @@ target
 # Local settings
 .soroban
 .stellar
+
+# Claude Code worktrees
+.claude/worktrees/

@@ -23,18 +23,14 @@ pub enum HuntErrorCode {
     TooManyClues = 16,
     InvalidQuestion = 17,
     RefundFailed = 18,
-    NoCluesAdded = 19,
-    HuntNotCompleted = 20,
-    RewardAlreadyClaimed = 21,
-    RewardDistributionFailed = 22,
-    NoRewardsConfigured = 23,
-    NoRequiredClues = 24,
-    InvalidRarity = 25,
-    InvalidTimeBonusConfig = 26,
-    InvalidEndTime = 27,
-    ContractPaused = 28,
-    InvalidDifficulty = 29,
-    InvalidPoints = 30,
+    NoCluesAdded = 17,
+    HuntNotCompleted = 18,
+    RewardAlreadyClaimed = 19,
+    RewardDistributionFailed = 20,
+    NoRewardsConfigured = 21,
+    NoRequiredClues = 22,
+    InvalidRarity = 23,
+    InvalidTimeBonusConfig = 24,
 }
 
 #[derive(Debug)]
@@ -52,18 +48,18 @@ pub enum HuntError {
     InvalidTitle { reason: String },
     InvalidDescription { reason: String },
     InvalidAddress,
-    InvalidMaxAttempts,
-    MaxAttemptsExceeded,
     TooManyClues { hunt_id: u64, limit: u32 },
     InvalidQuestion,
     HuntNotCompleted { hunt_id: u64 },
     RewardAlreadyClaimed { hunt_id: u64 },
     RewardDistributionFailed { hunt_id: u64 },
     NoRewardsConfigured { hunt_id: u64 },
+    DuplicateSubmission { hunt_id: u64, clue_id: u32 },
+    SubmissionExpired { submitted_at: u64, current_time: u64 },
+    BannedPlayer { hunt_id: u64, player: soroban_sdk::Address },
     NoRequiredClues { hunt_id: u64 },
     InvalidRarity { value: u32 },
     InvalidTimeBonusConfig,
-    InvalidEndTime,
 }
 
 impl fmt::Display for HuntError {
@@ -115,12 +111,6 @@ impl fmt::Display for HuntError {
             HuntError::InvalidAddress => {
                 write!(f, "Invalid address")
             }
-            HuntError::InvalidMaxAttempts => {
-                write!(f, "Invalid max attempts value")
-            }
-            HuntError::MaxAttemptsExceeded => {
-                write!(f, "Max answer attempts exceeded for this clue")
-            }
             HuntError::TooManyClues { hunt_id, limit } => {
                 write!(f, "Too many clues for hunt {} (limit {})", hunt_id, limit)
             }
@@ -139,14 +129,34 @@ impl fmt::Display for HuntError {
             HuntError::NoRewardsConfigured { hunt_id } => {
                 write!(f, "No rewards configured for hunt {}", hunt_id)
             }
+            HuntError::DuplicateSubmission { hunt_id, clue_id } => {
+                write!(
+                    f,
+                    "Duplicate submission detected for hunt {} clue {}",
+                    hunt_id, clue_id
+                )
+            }
+            HuntError::SubmissionExpired {
+                submitted_at,
+                current_time,
+            } => {
+                write!(
+                    f,
+                    "Submission expired or invalid: submitted_at {}, current_time {}",
+                    submitted_at, current_time
+                )
+            }
+            HuntError::BannedPlayer { hunt_id, player } => {
+                write!(f, "Player {:?} is banned from hunt {}", player, hunt_id)
+            }
             HuntError::NoRequiredClues { hunt_id } => {
                 write!(f, "Hunt {} has no required clues; at least one required clue must exist before activation", hunt_id)
             }
-            HuntError::InvalidEndTime => {
-                write!(f, "Invalid end time: must be in the future")
+            HuntError::RateLimitExceeded { cooldown_remaining } => {
+                write!(f, "Rate limit exceeded. Try again in {} seconds", cooldown_remaining)
             }
-            HuntError::InvalidTimeBonusConfig => {
-                write!(f, "Invalid time bonus configuration")
+            HuntError::ScoreOverflow => {
+                write!(f, "Score calculation overflow")
             }
             HuntError::InvalidRarity { value } => {
                 write!(f, "Invalid rarity value: {}", value)
@@ -171,18 +181,18 @@ impl From<HuntError> for HuntErrorCode {
             HuntError::InvalidTitle { .. } => HuntErrorCode::InvalidTitle,
             HuntError::InvalidDescription { .. } => HuntErrorCode::InvalidDescription,
             HuntError::InvalidAddress => HuntErrorCode::InvalidAddress,
-            HuntError::InvalidMaxAttempts => HuntErrorCode::InvalidMaxAttempts,
-            HuntError::MaxAttemptsExceeded => HuntErrorCode::MaxAttemptsExceeded,
             HuntError::TooManyClues { .. } => HuntErrorCode::TooManyClues,
             HuntError::InvalidQuestion => HuntErrorCode::InvalidQuestion,
             HuntError::HuntNotCompleted { .. } => HuntErrorCode::HuntNotCompleted,
             HuntError::RewardAlreadyClaimed { .. } => HuntErrorCode::RewardAlreadyClaimed,
             HuntError::RewardDistributionFailed { .. } => HuntErrorCode::RewardDistributionFailed,
             HuntError::NoRewardsConfigured { .. } => HuntErrorCode::NoRewardsConfigured,
+            HuntError::DuplicateSubmission { .. } => HuntErrorCode::DuplicateSubmission,
+            HuntError::SubmissionExpired { .. } => HuntErrorCode::SubmissionExpired,
+            HuntError::BannedPlayer { .. } => HuntErrorCode::BannedPlayer,
             HuntError::NoRequiredClues { .. } => HuntErrorCode::NoRequiredClues,
             HuntError::InvalidRarity { .. } => HuntErrorCode::InvalidRarity,
             HuntError::InvalidTimeBonusConfig => HuntErrorCode::InvalidTimeBonusConfig,
-            HuntError::InvalidEndTime => HuntErrorCode::InvalidEndTime,
         }
     }
 }

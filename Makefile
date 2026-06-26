@@ -1,4 +1,4 @@
-WASM_DIR := target/wasm32-unknown-unknown/release
+WASM_DIR := target/wasm32v1-none/release
 BINDINGS_DIR := bindings
 
 .PHONY: build bindings all clean
@@ -12,15 +12,15 @@ bindings: build
 	stellar contract bindings typescript \
 		--wasm $(WASM_DIR)/hunty_core.wasm \
 		--output-dir $(BINDINGS_DIR)/hunty-core \
-		--contract-name hunty-core
+		--overwrite
 	stellar contract bindings typescript \
 		--wasm $(WASM_DIR)/reward_manager.wasm \
 		--output-dir $(BINDINGS_DIR)/reward-manager \
-		--contract-name reward-manager
+		--overwrite
 	stellar contract bindings typescript \
 		--wasm $(WASM_DIR)/nft_reward.wasm \
 		--output-dir $(BINDINGS_DIR)/nft-reward \
-		--contract-name nft-reward
+		--overwrite
 
 clean:
 	cargo clean

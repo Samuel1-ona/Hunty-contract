@@ -2829,6 +2829,7 @@ mod test {
                 String::from_str(env, "Desc"),
                 None,
                 None,
+                0,
             )
             .unwrap();
             HuntyCore::add_clue(env.clone(), hunt_id, question, answer, 1, true, 1).unwrap();
@@ -3154,7 +3155,8 @@ mod test {
         assert!(progress.is_completed);
         assert!(progress.completed_at > 0);
     }
-    #[test]
+
+    #[test]
     fn test_pause_contract_blocks_answer_submission_until_unpaused() {
         let env = Env::default();
         env.ledger().set_timestamp(1_700_000_000);
