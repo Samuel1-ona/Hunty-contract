@@ -720,6 +720,25 @@ impl Storage {
     pub fn get_admin(env: &Env) -> Option<Address> {
         env.storage().instance().get(&Self::ADMIN_KEY)
     }
+
+    const PENDING_ADMIN_KEY: soroban_sdk::Symbol = symbol_short!("ADM_PEND");
+
+    /// Stores a proposed admin address pending acceptance via `accept_admin`.
+    pub fn set_pending_admin(env: &Env, admin: &Address) {
+        env.storage()
+            .instance()
+            .set(&Self::PENDING_ADMIN_KEY, admin);
+    }
+
+    /// Returns the proposed admin address, if any.
+    pub fn get_pending_admin(env: &Env) -> Option<Address> {
+        env.storage().instance().get(&Self::PENDING_ADMIN_KEY)
+    }
+
+    /// Clears any proposed admin address.
+    pub fn clear_pending_admin(env: &Env) {
+        env.storage().instance().remove(&Self::PENDING_ADMIN_KEY);
+    }
     
     // Backward compatibility: general pause
     const PAUSE_KEY: soroban_sdk::Symbol = symbol_short!("PAUSE");

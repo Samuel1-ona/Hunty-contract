@@ -17,6 +17,7 @@ pub const ACTION_UNPAUSE: Symbol = symbol_short!("UNPAUSE");
 pub const ACTION_ADMIN_ADDED: Symbol = symbol_short!("ADM_ADD");
 pub const ACTION_ADMIN_REMOVED: Symbol = symbol_short!("ADM_REM");
 pub const ACTION_ADMIN_TRANSFERRED: Symbol = symbol_short!("ADM_TRF");
+pub const ACTION_ADMIN_PROPOSED: Symbol = symbol_short!("ADM_PROP");
 pub const ACTION_BLACKLIST_ADD: Symbol = symbol_short!("BLK_ADD");
 pub const ACTION_BLACKLIST_REMOVE: Symbol = symbol_short!("BLK_REM");
 pub const ACTION_EMERGENCY: Symbol = symbol_short!("EMERGENCY");

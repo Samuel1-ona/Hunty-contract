@@ -35,6 +35,8 @@ pub enum HuntErrorCode {
     RegistrationsPaused = 28,
     AnswersPaused = 29,
     RewardsPaused = 30,
+    NoPendingAdmin = 31,
+    PendingAdminMismatch = 32,
 }
 
 #[derive(Debug)]
@@ -67,6 +69,9 @@ pub enum HuntError {
     RegistrationsPaused,
     AnswersPaused,
     RewardsPaused,
+    NoPendingAdmin,
+    PendingAdminMismatch { expected: soroban_sdk::Address, actual: soroban_sdk::Address },
+    AdminAlreadyProposed { pending: soroban_sdk::Address },
 }
 
 impl fmt::Display for HuntError {
@@ -174,6 +179,19 @@ impl fmt::Display for HuntError {
             HuntError::RewardsPaused => {
                 write!(f, "Reward claims are currently paused")
             }
+            HuntError::NoPendingAdmin => {
+                write!(f, "No pending admin rotation to accept")
+            }
+            HuntError::PendingAdminMismatch { expected, actual } => {
+                write!(
+                    f,
+                    "Pending admin mismatch: expected {}, got {}",
+                    expected, actual
+                )
+            }
+            HuntError::AdminAlreadyProposed { pending } => {
+                write!(f, "Admin rotation already proposed for {}", pending)
+            }
         }
     }
 }
@@ -209,6 +227,11 @@ impl From<HuntError> for HuntErrorCode {
             HuntError::RegistrationsPaused => HuntErrorCode::RegistrationsPaused,
             HuntError::AnswersPaused => HuntErrorCode::AnswersPaused,
             HuntError::RewardsPaused => HuntErrorCode::RewardsPaused,
+            HuntError::NoPendingAdmin => HuntErrorCode::NoPendingAdmin,
+            HuntError::PendingAdminMismatch { .. } => {
+                HuntErrorCode::PendingAdminMismatch
+            }
+            HuntError::AdminAlreadyProposed { .. } => HuntErrorCode::Unauthorized,
         }
     }
 }

@@ -1180,6 +1180,61 @@ pub fn initialize_admin(
     Ok(())
 }
 
+/// Step one of a two-step admin key rotation.
+///
+/// The current admin proposes a new admin. The change is NOT applied until the
+/// proposed address calls `accept_admin`, which prevents accidental lockout: a
+/// typo in `propose_new_admin` can simply be overwritten or ignored, and the
+/// current admin never loses access until the new admin actively accepts.
+pub fn propose_new_admin(
+    env: Env,
+    admin: Address,
+    new_admin: Address,
+) -> Result<(), HuntErrorCode> {
+    admin.require_auth();
+
+    let current_admin =
+        Storage::get_admin(&env).ok_or(HuntErrorCode::Unauthorized)?;
+    if current_admin != admin {
+        return Err(HuntErrorCode::Unauthorized);
+    }
+
+    // A pending rotation can be overwritten by the current admin at any time.
+    Storage::set_pending_admin(&env, &new_admin);
+
+    env.events().publish(
+        (Symbol::new(&env, "ADMIN"), Symbol::new(&env, "ADM_PROP")),
+        (admin, new_admin),
+    );
+
+    Ok(())
+}
+
+/// Step two of a two-step admin key rotation.
+///
+/// The proposed new admin accepts the role, completing the rotation. Only the
+/// address stored by `propose_new_admin` may accept, so a wrong proposal cannot
+/// silently take over the contract.
+pub fn accept_admin(env: Env, new_admin: Address) -> Result<(), HuntErrorCode> {
+    new_admin.require_auth();
+
+    let pending = Storage::get_pending_admin(&env).ok_or(HuntErrorCode::NoPendingAdmin)?;
+    if pending != new_admin {
+        return Err(HuntErrorCode::PendingAdminMismatch);
+    }
+
+    let old_admin = Storage::get_admin(&env);
+    Storage::set_admin(&env, &new_admin);
+    Storage::clear_pending_admin(&env);
+
+    env.events().publish(
+        (Symbol::new(&env, "ADMIN"), Symbol::new(&env, "ADM_TRF")),
+        (old_admin, new_admin),
+    );
+
+    Ok(())
+}
+
 pub fn add_global_view_only(
     env: Env,
     admin: Address,
