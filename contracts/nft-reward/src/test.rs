@@ -1887,3 +1887,32 @@ fn test_admin_update_image_uris_empty_prefix_replacement() {
         String::from_str(&env, "https://prefixed/ipfs://something")
     );
 }
+
+#[test]
+fn test_all_nft_error_codes_are_unique() {
+    let mut seen = std::collections::BTreeSet::new();
+    let variants: &[(crate::errors::NftErrorCode, &str)] = &[
+        (crate::errors::NftErrorCode::NftNotFound, "NftNotFound"),
+        (crate::errors::NftErrorCode::Unauthorized, "Unauthorized"),
+        (crate::errors::NftErrorCode::NotOwner, "NotOwner"),
+        (crate::errors::NftErrorCode::InvalidRecipient, "InvalidRecipient"),
+        (crate::errors::NftErrorCode::SoulboundNft, "SoulboundNft"),
+        (crate::errors::NftErrorCode::InvalidRarity, "InvalidRarity"),
+        (crate::errors::NftErrorCode::AlreadyInitialized, "AlreadyInitialized"),
+        (crate::errors::NftErrorCode::MaxSupplyReached, "MaxSupplyReached"),
+        (crate::errors::NftErrorCode::NotInitialized, "NotInitialized"),
+        (crate::errors::NftErrorCode::NotOperator, "NotOperator"),
+        (crate::errors::NftErrorCode::NftNotTransferable, "NftNotTransferable"),
+        (crate::errors::NftErrorCode::NftLocked, "NftLocked"),
+        (crate::errors::NftErrorCode::InvalidMetadata, "InvalidMetadata"),
+    ];
+    for (variant, name) in variants {
+        let code = *variant as u32;
+        assert!(
+            seen.insert(code),
+            "Duplicate NftErrorCode value {} for variant '{}'",
+            code,
+            name
+        );
+    }
+}

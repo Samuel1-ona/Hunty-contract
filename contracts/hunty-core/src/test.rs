@@ -117,6 +117,59 @@ mod test {
     }
 
     #[test]
+    fn test_all_error_codes_are_unique() {
+        let mut seen = std::collections::BTreeSet::new();
+        let variants: &[(HuntErrorCode, &str)] = &[
+            (HuntErrorCode::HuntNotFound, "HuntNotFound"),
+            (HuntErrorCode::ClueNotFound, "ClueNotFound"),
+            (HuntErrorCode::InvalidHuntStatus, "InvalidHuntStatus"),
+            (HuntErrorCode::PlayerNotRegistered, "PlayerNotRegistered"),
+            (HuntErrorCode::ClueAlreadyCompleted, "ClueAlreadyCompleted"),
+            (HuntErrorCode::InvalidAnswer, "InvalidAnswer"),
+            (HuntErrorCode::HuntNotActive, "HuntNotActive"),
+            (HuntErrorCode::Unauthorized, "Unauthorized"),
+            (HuntErrorCode::InsufficientRewardPool, "InsufficientRewardPool"),
+            (HuntErrorCode::DuplicateRegistration, "DuplicateRegistration"),
+            (HuntErrorCode::InvalidTitle, "InvalidTitle"),
+            (HuntErrorCode::InvalidDescription, "InvalidDescription"),
+            (HuntErrorCode::InvalidAddress, "InvalidAddress"),
+            (HuntErrorCode::TooManyClues, "TooManyClues"),
+            (HuntErrorCode::InvalidQuestion, "InvalidQuestion"),
+            (HuntErrorCode::RefundFailed, "RefundFailed"),
+            (HuntErrorCode::NoCluesAdded, "NoCluesAdded"),
+            (HuntErrorCode::HuntNotCompleted, "HuntNotCompleted"),
+            (HuntErrorCode::RewardAlreadyClaimed, "RewardAlreadyClaimed"),
+            (HuntErrorCode::RewardDistributionFailed, "RewardDistributionFailed"),
+            (HuntErrorCode::NoRewardsConfigured, "NoRewardsConfigured"),
+            (HuntErrorCode::DuplicateSubmission, "DuplicateSubmission"),
+            (HuntErrorCode::SubmissionExpired, "SubmissionExpired"),
+            (HuntErrorCode::BannedPlayer, "BannedPlayer"),
+            (HuntErrorCode::NoRequiredClues, "NoRequiredClues"),
+            (HuntErrorCode::RateLimitExceeded, "RateLimitExceeded"),
+            (HuntErrorCode::ScoreOverflow, "ScoreOverflow"),
+            (HuntErrorCode::RegistrationsPaused, "RegistrationsPaused"),
+            (HuntErrorCode::AnswersPaused, "AnswersPaused"),
+            (HuntErrorCode::RewardsPaused, "RewardsPaused"),
+            (HuntErrorCode::HuntEndTimeInPast, "HuntEndTimeInPast"),
+            (HuntErrorCode::NoPendingAdmin, "NoPendingAdmin"),
+            (HuntErrorCode::PendingAdminMismatch, "PendingAdminMismatch"),
+            (HuntErrorCode::InvalidRarity, "InvalidRarity"),
+            (HuntErrorCode::InvalidTimeBonusConfig, "InvalidTimeBonusConfig"),
+            (HuntErrorCode::AddressBlacklisted, "AddressBlacklisted"),
+            (HuntErrorCode::ContractPaused, "ContractPaused"),
+        ];
+        for (variant, name) in variants {
+            let code = *variant as u32;
+            assert!(
+                seen.insert(code),
+                "Duplicate HuntErrorCode value {} for variant '{}'",
+                code,
+                name
+            );
+        }
+    }
+
+    #[test]
     fn test_hunt_not_found_message() {
         let err = HuntError::HuntNotFound { hunt_id: 42 };
 
