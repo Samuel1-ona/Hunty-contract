@@ -124,8 +124,8 @@ pub struct StoredPlayerProgress {
     pub total_score: u32,
     pub started_at: u64,
     pub completed_at: u64,
-    pub is_completed: bool,
-    pub reward_claimed: bool,
+    /// Packed boolean flags: bit 0 = is_completed, bit 1 = reward_claimed
+    pub flags: u8,
     pub recent_submissions: Vec<u64>,
 }
 
@@ -159,6 +159,28 @@ impl PlayerProgress {
         }
     }
 
+    /// Extract is_completed flag from packed flags byte
+    fn flags_to_is_completed(flags: u8) -> bool {
+        (flags & 0x01) != 0
+    }
+
+    /// Extract reward_claimed flag from packed flags byte
+    fn flags_to_reward_claimed(flags: u8) -> bool {
+        (flags & 0x02) != 0
+    }
+
+    /// Pack boolean flags into a single byte
+    fn bools_to_flags(is_completed: bool, reward_claimed: bool) -> u8 {
+        let mut flags = 0u8;
+        if is_completed {
+            flags |= 0x01;
+        }
+        if reward_claimed {
+            flags |= 0x02;
+        }
+        flags
+    }
+
     /// Convert to the compact form stored on-chain (drops redundant key fields).
     pub fn to_stored(&self) -> StoredPlayerProgress {
         StoredPlayerProgress {
@@ -166,8 +188,7 @@ impl PlayerProgress {
             total_score: self.total_score,
             started_at: self.started_at,
             completed_at: self.completed_at,
-            is_completed: self.is_completed,
-            reward_claimed: self.reward_claimed,
+            flags: Self::bools_to_flags(self.is_completed, self.reward_claimed),
             recent_submissions: self.recent_submissions.clone(),
         }
     }
@@ -181,8 +202,8 @@ impl PlayerProgress {
             total_score: stored.total_score,
             started_at: stored.started_at,
             completed_at: stored.completed_at,
-            is_completed: stored.is_completed,
-            reward_claimed: stored.reward_claimed,
+            is_completed: Self::flags_to_is_completed(stored.flags),
+            reward_claimed: Self::flags_to_reward_claimed(stored.flags),
             recent_submissions: stored.recent_submissions,
         }
     }
