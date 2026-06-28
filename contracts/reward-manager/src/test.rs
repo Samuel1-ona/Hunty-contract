@@ -1879,4 +1879,163 @@ use soroban_sdk::{symbol_short, token, Address, Env, Symbol, Vec};
             );
         });
     }
+
+    // ========== Reward Pool Edge Cases ==========
+
+    /// Test reward pool with exactly enough balance for one distribution
+    #[test]
+    fn test_reward_pool_exact_balance_one_distribution() {
+        let env = Env::default();
+        env.mock_all_auths_allowing_non_root_auth();
+        let (contract_id, token_address, token_admin) = setup(&env);
+        let creator = Address::generate(&env);
+        let player = Address::generate(&env);
+
+        mint_tokens(&env, &token_address, &token_admin, &creator, 5_000_000);
+
+        env.as_contract(&contract_id, || {
+            initialize_contract(&env, &token_address);
+            RewardManager::create_reward_pool(env.clone(), creator.clone(), 1, 0).unwrap();
+            RewardManager::fund_reward_pool(env.clone(), creator.clone(), 1, 5_000_000).unwrap();
+
+            // Distribute exactly the pool balance
+            let result = RewardManager::distribute_rewards(
+                env.clone(),
+                1,
+                player.clone(),
+                xlm_only_config(&env, 5_000_000),
+            );
+
+            assert!(result.is_ok());
+            assert_eq!(RewardManager::get_pool_balance(env.clone(), 1), 0);
+        });
+
+        // Verify player received the reward
+        assert_eq!(get_balance(&env, &token_address, &player), 5_000_000);
+    }
+
+    /// Test reward pool with zero balance
+    #[test]
+    fn test_reward_pool_zero_balance() {
+        let env = Env::default();
+        env.mock_all_auths_allowing_non_root_auth();
+        let (contract_id, token_address, token_admin) = setup(&env);
+        let creator = Address::generate(&env);
+        let player = Address::generate(&env);
+
+        env.as_contract(&contract_id, || {
+            initialize_contract(&env, &token_address);
+            RewardManager::create_reward_pool(env.clone(), creator.clone(), 1, 0).unwrap();
+
+            // Try to distribute from empty pool
+            let result = RewardManager::distribute_rewards(
+                env.clone(),
+                1,
+                player.clone(),
+                xlm_only_config(&env, 1_000_000),
+            );
+            assert_eq!(result, Err(RewardErrorCode::InsufficientPool));
+        });
+
+        // Player didn't receive anything
+        assert_eq!(get_balance(&env, &token_address, &player), 0);
+    }
+
+    /// Test reward pool with very large balance (overflow check)
+    #[test]
+    fn test_reward_pool_very_large_balance() {
+        let env = Env::default();
+        env.mock_all_auths_allowing_non_root_auth();
+        let (contract_id, token_address, token_admin) = setup(&env);
+        let creator = Address::generate(&env);
+        let player = Address::generate(&env);
+
+        // Use a very large but valid amount (under i128::MAX / 2)
+        let large_amount = i128::MAX / 2;
+        mint_tokens(&env, &token_address, &token_admin, &creator, large_amount);
+
+        let distribute_amount = large_amount / 2;
+        env.as_contract(&contract_id, || {
+            initialize_contract(&env, &token_address);
+            RewardManager::create_reward_pool(env.clone(), creator.clone(), 1, 0).unwrap();
+            // Fund the large amount
+            let fund_result = RewardManager::fund_reward_pool(env.clone(), creator.clone(), 1, large_amount);
+            assert!(fund_result.is_ok());
+            assert_eq!(RewardManager::get_pool_balance(env.clone(), 1), large_amount);
+
+            // Distribute a portion of it
+            let distribute_result = RewardManager::distribute_rewards(
+                env.clone(),
+                1,
+                player.clone(),
+                xlm_only_config(&env, distribute_amount),
+            );
+            assert!(distribute_result.is_ok());
+            assert_eq!(RewardManager::get_pool_balance(env.clone(), 1), large_amount - distribute_amount);
+        });
+
+        // Verify player received their reward
+        assert_eq!(get_balance(&env, &token_address, &player), distribute_amount);
+    }
+
+    /// Test pool drained mid-distribution scenario
+    #[test]
+    fn test_reward_pool_drained_mid_distribution() {
+        let env = Env::default();
+        env.mock_all_auths_allowing_non_root_auth();
+        let (contract_id, token_address, token_admin) = setup(&env);
+        let creator = Address::generate(&env);
+        let admin = Address::generate(&env);
+        let player1 = Address::generate(&env);
+        let player2 = Address::generate(&env);
+        let recipient = Address::generate(&env);
+
+        // Fund pool with 10_000_000
+        mint_tokens(&env, &token_address, &token_admin, &creator, 10_000_000);
+
+        env.as_contract(&contract_id, || {
+            initialize_contract(&env, &token_address);
+            RewardManager::create_reward_pool(env.clone(), creator.clone(), 1, 0).unwrap();
+            RewardManager::fund_reward_pool(env.clone(), creator.clone(), 1, 10_000_000).unwrap();
+        });
+
+        // First distribution to player1 (5_000_000)
+        env.as_contract(&contract_id, || {
+            let result = RewardManager::distribute_rewards(
+                env.clone(),
+                1,
+                player1.clone(),
+                xlm_only_config(&env, 5_000_000),
+            );
+            assert!(result.is_ok());
+        });
+
+        // Admin withdraw remaining 5_000_000
+        env.as_contract(&contract_id, || {
+            let withdraw_result = RewardManager::admin_withdraw_unclaimed(
+                env.clone(),
+                admin.clone(),
+                1,
+                recipient.clone(),
+                0, // Withdraw all
+            );
+            assert!(withdraw_result.is_ok());
+        });
+
+        // Now try to distribute to player2 - should fail
+        env.as_contract(&contract_id, || {
+            let result = RewardManager::distribute_rewards(
+                env.clone(),
+                1,
+                player2.clone(),
+                xlm_only_config(&env, 5_000_000),
+            );
+            assert_eq!(result, Err(RewardErrorCode::InsufficientPool));
+        });
+
+        // Verify balances
+        assert_eq!(get_balance(&env, &token_address, &player1), 5_000_000);
+        assert_eq!(get_balance(&env, &token_address, &recipient), 5_000_000);
+        assert_eq!(get_balance(&env, &token_address, &player2), 0);
+    }
 }
