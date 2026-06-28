@@ -10,4 +10,7 @@ pub enum NftErrorCode {
     InvalidRecipient = 4,
     SoulboundNft = 5,
     InvalidRarity = 6,
+    InvalidTitle = 7,
+    InvalidDescription = 8,
+    InvalidImageUri = 9,
 }

@@ -81,6 +81,10 @@ mod errors;
 mod storage;
 use storage::Storage;
 
+const MAX_TITLE_LENGTH: u32 = 200;
+const MAX_DESCRIPTION_LENGTH: u32 = 2000;
+const MAX_IMAGE_URI_LENGTH: u32 = 500;
+
 #[contract]
 pub struct NftReward;
 
@@ -105,6 +109,7 @@ impl NftReward {
         if metadata.rarity > 5 {
             panic!("InvalidRarity");
         }
+        Self::validate_metadata(&metadata);
         let minted_at = env.ledger().timestamp();
 
         let nft_id = Storage::next_nft_id(&env);
@@ -233,6 +238,18 @@ impl NftReward {
     ) -> Result<(), crate::errors::NftErrorCode> {
         updater.require_auth();
 
+        let desc_len = new_description.len();
+        if desc_len > MAX_DESCRIPTION_LENGTH {
+            return Err(crate::errors::NftErrorCode::InvalidDescription);
+        }
+        let uri_len = new_image_uri.len();
+        if uri_len > MAX_IMAGE_URI_LENGTH {
+            return Err(crate::errors::NftErrorCode::InvalidImageUri);
+        }
+        if uri_len > 0 && !Self::is_valid_image_uri(&new_image_uri) {
+            return Err(crate::errors::NftErrorCode::InvalidImageUri);
+        }
+
         let mut nft = Storage::get_nft(&env, nft_id).ok_or(crate::errors::NftErrorCode::NftNotFound)?;
 
         if nft.owner != updater {
@@ -292,6 +309,43 @@ impl NftReward {
         _to_address: Address,
     ) -> Result<(), crate::errors::NftErrorCode> {
         Err(crate::errors::NftErrorCode::SoulboundNft)
+    }
+
+    fn validate_metadata(metadata: &NftMetadata) {
+        let title_len = metadata.title.len();
+        if title_len == 0 || title_len > MAX_TITLE_LENGTH {
+            panic!("InvalidTitle");
+        }
+        let desc_len = metadata.description.len();
+        if desc_len > MAX_DESCRIPTION_LENGTH {
+            panic!("InvalidDescription");
+        }
+        let uri_len = metadata.image_uri.len();
+        if uri_len > MAX_IMAGE_URI_LENGTH {
+            panic!("InvalidImageUri");
+        }
+        if uri_len > 0 && !Self::is_valid_image_uri(&metadata.image_uri) {
+            panic!("InvalidImageUri");
+        }
+    }
+
+    fn is_valid_image_uri(uri: &String) -> bool {
+        let len = uri.len();
+        if len >= 8 {
+            let mut prefix = [0u8; 8];
+            uri.copy_into_slice(&mut prefix);
+            if &prefix == b"https://" {
+                return true;
+            }
+        }
+        if len >= 7 {
+            let mut prefix = [0u8; 7];
+            uri.copy_into_slice(&mut prefix);
+            if &prefix == b"ipfs://" {
+                return true;
+            }
+        }
+        false
     }
 }
 

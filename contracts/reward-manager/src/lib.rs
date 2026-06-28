@@ -354,6 +354,34 @@ impl RewardManager {
             if reward_config.nft_rarity > 5 {
                 return Err(RewardErrorCode::InvalidConfig);
             }
+            let nft_title_len = reward_config.nft_title.len();
+            if nft_title_len == 0 || nft_title_len > 200 {
+                return Err(RewardErrorCode::InvalidConfig);
+            }
+            let nft_desc_len = reward_config.nft_description.len();
+            if nft_desc_len > 2000 {
+                return Err(RewardErrorCode::InvalidConfig);
+            }
+            let nft_uri_len = reward_config.nft_image_uri.len();
+            if nft_uri_len > 500 {
+                return Err(RewardErrorCode::InvalidConfig);
+            }
+            if nft_uri_len > 0 {
+                let mut valid = false;
+                if nft_uri_len >= 8 {
+                    let mut prefix = [0u8; 8];
+                    reward_config.nft_image_uri.copy_into_slice(&mut prefix);
+                    valid = &prefix == b"https://";
+                }
+                if !valid && nft_uri_len >= 7 {
+                    let mut prefix = [0u8; 7];
+                    reward_config.nft_image_uri.copy_into_slice(&mut prefix);
+                    valid = &prefix == b"ipfs://";
+                }
+                if !valid {
+                    return Err(RewardErrorCode::InvalidConfig);
+                }
+            }
             let nft_contract = reward_config
                 .nft_contract
                 .as_ref()
