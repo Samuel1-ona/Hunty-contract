@@ -8,6 +8,7 @@ const MAX_URI_LEN: usize = 512;
 const MAX_NFT_TITLE_BYTES: u32 = 128;
 const MAX_NFT_DESCRIPTION_BYTES: u32 = 1024;
 const MAX_NFT_URI_BYTES: u32 = 512;
+const MAX_SCAN_LIMIT: u32 = 1000;
 
 /// Core display metadata for an NFT (title, description, image URI).
 /// Supports off-chain storage references to keep gas costs low.
@@ -580,6 +581,48 @@ impl NftReward {
     /// Returns the total number of NFTs minted so far.
     pub fn total_supply(env: Env) -> u64 {
         Storage::get_nft_counter(&env)
+    }
+
+    /// Returns the total count of NFTs currently in the contract.
+    /// Equivalent to total_supply() but with a dedicated function name for clarity.
+    pub fn get_total_nft_count(env: Env) -> u64 {
+        Storage::get_nft_counter(&env)
+    }
+
+    /// Lists all NFTs minted by the contract with pagination support.
+    ///
+    /// Returns a vector of NftData structs, paginated by offset and limit.
+    /// The limit is bounded to MAX_SCAN_LIMIT (1000) to prevent excessive gas consumption.
+    ///
+    /// # Arguments
+    /// * `env` - The Soroban environment
+    /// * `offset` - The starting index for pagination (0-based)
+    /// * `limit` - The maximum number of NFTs to return (capped at MAX_SCAN_LIMIT)
+    ///
+    /// # Returns
+    /// Vec<NftData> - A vector of NFT data structures, bounded by limit or remaining NFTs
+    pub fn list_all_nfts(env: Env, offset: u32, limit: u32) -> Vec<NftData> {
+        let all_nft_ids = Storage::get_all_nft_ids(&env);
+        let total_count = all_nft_ids.len();
+
+        if offset >= total_count {
+            return Vec::new(&env);
+        }
+
+        // Apply bounded scan limit to prevent excessive gas consumption
+        let bounded_limit = limit.min(MAX_SCAN_LIMIT);
+        let end = offset.saturating_add(bounded_limit).min(total_count);
+
+        let mut result = Vec::new(&env);
+        for i in offset..end {
+            if let Some(nft_id) = all_nft_ids.get(i) {
+                if let Some(nft_data) = Storage::get_nft(&env, nft_id) {
+                    result.push_back(nft_data);
+                }
+            }
+        }
+
+        result
     }
 
     /// Returns the owner of an NFT.
