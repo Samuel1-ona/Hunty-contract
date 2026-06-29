@@ -61,3 +61,27 @@ pub struct ValidationResult {
     /// Required amount that was checked against.
     pub required: i128,
 }
+
+/// Operation type for the pool audit log.
+#[contracttype]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum PoolOperation {
+    Create,
+    Fund,
+    Distribute,
+    Withdraw,
+}
+
+/// A single entry in the pool audit log.
+#[contracttype]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PoolAuditEntry {
+    /// Who triggered the operation.
+    pub actor: Address,
+    /// Operation performed.
+    pub operation: PoolOperation,
+    /// Timestamp (ledger time).
+    pub timestamp: u64,
+    /// The XLM amount involved, if applicable.
+    pub amount: Option<i128>,
+}

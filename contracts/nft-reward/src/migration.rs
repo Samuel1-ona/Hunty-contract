@@ -1,6 +1,6 @@
 use crate::storage::Storage;
 use crate::METADATA_SCHEMA_VERSION;
-use hunty_migration::MigrationFramework;
+use hunty_migration::{MigrationFramework, UpgradeAuthorization, UpgradeAuthError};
 use soroban_sdk::{Address, Env};
 
 pub use hunty_migration::MigrationReport;
@@ -22,7 +22,7 @@ impl NftRewardMigration {
     pub fn run_migration(env: &Env, target_version: u32, dry_run: bool) -> MigrationReport {
         let mut current = MigrationFramework::detect_version(env);
         if current >= target_version {
-            return Ok(MigrationFramework::build_report(
+            return MigrationFramework::build_report(
                 env,
                 current,
                 target_version,
@@ -30,7 +30,7 @@ impl NftRewardMigration {
                 dry_run,
                 true,
                 "already at target",
-            ));
+            );
         }
 
         if !dry_run {
@@ -113,4 +113,71 @@ impl NftRewardMigration {
 
     /// v1 -> v2: placeholder for future metadata layout changes.
     fn migrate_v1_to_v2(_env: &Env) {}
+
+    fn configured_admin(env: &Env) -> Option<Address> {
+        Storage::get_admin(env)
+    }
+
+    pub fn propose_upgrade(
+        env: &Env,
+        admin: &Address,
+        target_version: u32,
+    ) -> Result<hunty_migration::UpgradeProposal, hunty_migration::UpgradeAuthError> {
+        hunty_migration::UpgradeAuthorization::require_admin(env, admin, Self::configured_admin(env))?;
+        let now = env.ledger().timestamp();
+        Ok(hunty_migration::UpgradeAuthorization::propose_upgrade(env, admin, target_version, now))
+    }
+
+    pub fn set_upgrade_timelock(
+        env: &Env,
+        admin: &Address,
+        delay_seconds: u64,
+    ) -> Result<(), hunty_migration::UpgradeAuthError> {
+        hunty_migration::UpgradeAuthorization::require_admin(env, admin, Self::configured_admin(env))?;
+        hunty_migration::UpgradeAuthorization::set_timelock_seconds(env, delay_seconds);
+        Ok(())
+    }
+
+    pub fn get_upgrade_proposal(env: &Env) -> Option<hunty_migration::UpgradeProposal> {
+        hunty_migration::UpgradeAuthorization::get_proposal(env)
+    }
+
+    pub fn get_upgrade_timelock(env: &Env) -> u64 {
+        hunty_migration::UpgradeAuthorization::get_timelock_seconds(env)
+    }
+
+    pub fn get_upgrade_history(env: &Env, offset: u32, limit: u32) -> soroban_sdk::Vec<hunty_migration::UpgradeHistoryEntry> {
+        hunty_migration::UpgradeAuthorization::get_history(env, offset, limit)
+    }
+
+    pub fn upgrade_proposed_event(proposal: &hunty_migration::UpgradeProposal) -> hunty_migration::UpgradeProposedEvent {
+        hunty_migration::UpgradeProposedEvent {
+            target_version: proposal.target_version,
+            proposed_at: proposal.proposed_at,
+            effective_at: proposal.effective_at,
+            proposer: proposal.proposer.clone(),
+        }
+    }
+
+    pub fn upgrade_executed_event(
+        from_version: u32,
+        to_version: u32,
+        executed_at: u64,
+        executor: Address,
+    ) -> hunty_migration::UpgradeExecutedEvent {
+        hunty_migration::UpgradeExecutedEvent {
+            from_version,
+            to_version,
+            executed_at,
+            executor,
+        }
+    }
+
+    pub fn upgrade_proposed_topic(env: &Env) -> (soroban_sdk::Symbol,) {
+        (soroban_sdk::Symbol::new(env, "UpgradeProposed"),)
+    }
+
+    pub fn upgrade_executed_topic(env: &Env) -> (soroban_sdk::Symbol,) {
+        (soroban_sdk::Symbol::new(env, "UpgradeExecuted"),)
+    }
 }

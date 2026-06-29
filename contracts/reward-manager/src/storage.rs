@@ -1,7 +1,6 @@
 use soroban_sdk::{symbol_short, Address, Env};
 
-use crate::types::{DistributionRecord, RewardPoolConfig};
-
+use crate::types::{DistributionRecord, RewardPoolConfig, PoolAuditEntry, PoolOperation};
 pub struct Storage;
 
 impl Storage {
@@ -27,6 +26,10 @@ impl Storage {
     const IN_DISTRIBUTION_KEY: soroban_sdk::Symbol = symbol_short!("IN_");
     const PAUSED_KEY: soroban_sdk::Symbol = symbol_short!("PA");
     const EMERGENCY_LOG_KEY: soroban_sdk::Symbol = symbol_short!("EML");
+    const AUDIT_COUNT_KEY: soroban_sdk::Symbol = symbol_short!("ACNT");
+    const AUDIT_LOG_KEY: soroban_sdk::Symbol = symbol_short!("ALOG");
+
+    pub const MAX_AUDIT_ENTRIES_PER_POOL: u64 = 100;
 
     // ========== Admin ==========
 
@@ -274,6 +277,29 @@ impl Storage {
 
     fn pool_dst_key(hunt_id: u64) -> (soroban_sdk::Symbol, u64) {
         (Self::POOL_DST_KEY, hunt_id)
+    }
+
+    // ========== Audit Log ==========
+
+    pub fn append_audit_entry(env: &Env, hunt_id: u64, entry: PoolAuditEntry) {
+        let count_key = (Self::AUDIT_COUNT_KEY, hunt_id);
+        let current_count: u64 = env.storage().persistent().get(&count_key).unwrap_or(0);
+        
+        let index = current_count % Self::MAX_AUDIT_ENTRIES_PER_POOL;
+        let log_key = (Self::AUDIT_LOG_KEY, hunt_id, index);
+        
+        env.storage().persistent().set(&log_key, &entry);
+        env.storage().persistent().set(&count_key, &(current_count + 1));
+    }
+
+    pub fn get_pool_audit_count(env: &Env, hunt_id: u64) -> u64 {
+        let count_key = (Self::AUDIT_COUNT_KEY, hunt_id);
+        env.storage().persistent().get(&count_key).unwrap_or(0)
+    }
+
+    pub fn get_pool_audit_entry(env: &Env, hunt_id: u64, index: u64) -> Option<PoolAuditEntry> {
+        let log_key = (Self::AUDIT_LOG_KEY, hunt_id, index % Self::MAX_AUDIT_ENTRIES_PER_POOL);
+        env.storage().persistent().get(&log_key)
     }
 
     // ========== Pause / Emergency State ==========

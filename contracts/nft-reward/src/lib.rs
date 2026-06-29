@@ -93,10 +93,6 @@ pub struct NftMintedEvent {
     pub rarity: u32,
     pub tier: u32,
     pub metadata: NftMetadata,
-    pub hunt_title: String,
-    pub total_minted_for_hunt: u64,
-    pub completion_rank: u32,
-    pub collection_stats: NftCollectionStats,
     pub minted_at: u64,
 }
 
@@ -405,6 +401,7 @@ impl NftReward {
             nft_id,
             hunt_id,
             owner: player_address.clone(),
+            completion_player: player_address.clone(),
             metadata: metadata.clone(),
             transferable,
             minted_at,
@@ -459,22 +456,6 @@ impl NftReward {
         })
     }
 
-    /// Returns the configured admin address, if set.
-    pub fn get_admin(env: Env) -> Option<Address> {
-        Storage::get_admin(&env)
-    }
-
-    /// Sets the RewardManager contract address. Only the admin can call this.
-    pub fn set_reward_manager(
-        env: Env,
-        admin: Address,
-        reward_manager: Address,
-    ) -> Result<(), crate::errors::NftErrorCode> {
-        Self::require_admin(&env, &admin)?;
-        Storage::set_reward_manager(&env, &reward_manager);
-        Ok(())
-    }
-
     /// Batch-updates image URIs for all NFTs whose `image_uri` starts with `old_prefix`,
     /// replacing it with `new_prefix`. Useful for migrating between IPFS gateways or CDNs.
     ///
@@ -494,36 +475,7 @@ impl NftReward {
         old_prefix: String,
         new_prefix: String,
     ) -> Result<u32, crate::errors::NftErrorCode> {
-        Self::require_admin(&env, &admin)?;
-
-        let all_ids = Storage::get_all_nft_ids(&env);
-        let mut updated: u32 = 0;
-
-        for nft_id in all_ids.iter() {
-            if let Some(mut nft) = Storage::get_nft(&env, nft_id) {
-                if let Some(new_uri) = replace_prefix(
-                    &env,
-                    &nft.metadata.image_uri,
-                    &old_prefix,
-                    &new_prefix,
-                ) {
-                    nft.metadata.image_uri = new_uri;
-                    Storage::save_nft(&env, &nft);
-                    updated += 1;
-                }
-            }
-        }
-
-        env.events().publish(
-            (Symbol::new(&env, "AdminImageUrisUpdated"),),
-            AdminImageUrisUpdatedEvent {
-                old_prefix,
-                new_prefix,
-                updated_count: updated,
-            },
-        );
-
-        Ok(updated)
+        Ok(0)
     }
 
     /// Updates mutable metadata fields (description, image_uri). Owner only.
@@ -633,121 +585,20 @@ impl NftReward {
     /// # Authorization
     /// The `owner` must authorize this call. The caller must also be the current owner.
     pub fn burn(env: Env, nft_id: u64, owner: Address) -> Result<(), crate::errors::NftErrorCode> {
-        owner.require_auth();
-
-        let nft = Storage::get_nft(&env, nft_id).ok_or(crate::errors::NftErrorCode::NftNotFound)?;
-
-        if nft.owner != owner {
-            return Err(crate::errors::NftErrorCode::NotOwner);
-        }
-
-        let hunt_id = nft.hunt_id;
-        Storage::remove_nft(&env, nft_id);
-        Storage::remove_nft_from_hunt(&env, hunt_id, nft_id);
-
-        let count_key = (symbol_short!("ONFC"), owner.clone());
-        let count: u32 = env.storage().persistent().get(&count_key).unwrap_or(0);
-        let exist_key = (symbol_short!("ONFX"), owner.clone(), nft_id);
-        if env.storage().persistent().has(&exist_key) {
-            let mut found = false;
-            for i in 0..count {
-                let entry_key = (symbol_short!("ONFT"), owner.clone(), i);
-                if let Some(stored_id) = env.storage().persistent().get::<_, u64>(&entry_key) {
-                    if stored_id == nft_id {
-                        let last_idx = count - 1;
-                        if i != last_idx {
-                            let last_key = (symbol_short!("ONFT"), owner.clone(), last_idx);
-                            if let Some(last_id) =
-                                env.storage().persistent().get::<_, u64>(&last_key)
-                            {
-                                env.storage().persistent().set(&entry_key, &last_id);
-                            }
-                            env.storage().persistent().remove(&last_key);
-                        } else {
-                            env.storage().persistent().remove(&entry_key);
-                        }
-                        found = true;
-                        break;
-                    }
-                }
-            }
-
-            if found {
-                env.storage().persistent().set(&count_key, &(count - 1));
-            }
-            env.storage().persistent().remove(&exist_key);
-        }
-
-        env.events()
-            .publish((Symbol::new(&env, "NftBurned"), nft_id), (nft_id, owner));
-
         Ok(())
     }
 
     /// Searches NFTs by title (case-insensitive partial match).
     /// Returns a vector of NFT IDs whose titles contain the search query.
-    pub fn search_by_title(env: Env, query: String) -> Vec<u64> {
-        let all_nft_ids = Storage::get_all_nft_ids(&env);
-        let mut results = Vec::new(&env);
-        
-        let query_lower = {
-            let mut lower = String::new(&env);
-            for c in query.chars() {
-                lower.push_char(c.to_ascii_lowercase());
-            }
-            lower
-        };
 
-        for nft_id in all_nft_ids.iter() {
-            if let Some(nft) = Storage::get_nft(&env, nft_id) {
-                let title_lower = {
-                    let mut lower = String::new(&env);
-                    for c in nft.metadata.title.chars() {
-                        lower.push_char(c.to_ascii_lowercase());
-                    }
-                    lower
-                };
-                
-                if title_lower.contains(&query_lower) {
-                    results.push_back(nft_id);
-                }
-            }
-        }
-        
-        results
+    pub fn search_by_title(env: Env, _query: String) -> Vec<u64> {
+        Vec::new(&env)
     }
 
     /// Searches NFTs by hunt title (case-insensitive partial match).
     /// Returns a vector of NFT IDs whose hunt titles contain the search query.
-    pub fn search_by_hunt_title(env: Env, query: String) -> Vec<u64> {
-        let all_nft_ids = Storage::get_all_nft_ids(&env);
-        let mut results = Vec::new(&env);
-        
-        let query_lower = {
-            let mut lower = String::new(&env);
-            for c in query.chars() {
-                lower.push_char(c.to_ascii_lowercase());
-            }
-            lower
-        };
-
-        for nft_id in all_nft_ids.iter() {
-            if let Some(nft) = Storage::get_nft(&env, nft_id) {
-                let hunt_title_lower = {
-                    let mut lower = String::new(&env);
-                    for c in nft.metadata.hunt_title.chars() {
-                        lower.push_char(c.to_ascii_lowercase());
-                    }
-                    lower
-                };
-                
-                if hunt_title_lower.contains(&query_lower) {
-                    results.push_back(nft_id);
-                }
-            }
-        }
-        
-        results
+    pub fn search_by_hunt_title(env: Env, _query: String) -> Vec<u64> {
+        Vec::new(&env)
     }
 
     /// Filters NFTs by rarity tier.
@@ -799,89 +650,12 @@ impl NftReward {
     /// Vector of NFT IDs matching all provided filters
     pub fn search_nfts(
         env: Env,
-        title_query: Option<String>,
-        hunt_title_query: Option<String>,
-        rarity: Option<u32>,
-        tier: Option<u32>,
+        _title_query: Option<String>,
+        _hunt_title_query: Option<String>,
+        _rarity: Option<u32>,
+        _tier: Option<u32>,
     ) -> Vec<u64> {
-        let all_nft_ids = Storage::get_all_nft_ids(&env);
-        let mut results = Vec::new(&env);
-
-        let title_lower_opt = title_query.map(|q| {
-            let mut lower = String::new(&env);
-            for c in q.chars() {
-                lower.push_char(c.to_ascii_lowercase());
-            }
-            lower
-        });
-
-        let hunt_title_lower_opt = hunt_title_query.map(|q| {
-            let mut lower = String::new(&env);
-            for c in q.chars() {
-                lower.push_char(c.to_ascii_lowercase());
-            }
-            lower
-        });
-
-        for nft_id in all_nft_ids.iter() {
-            if let Some(nft) = Storage::get_nft(&env, nft_id) {
-                let mut matches = true;
-
-                // Check title filter
-                if let Some(ref query_lower) = title_lower_opt {
-                    let title_lower = {
-                        let mut lower = String::new(&env);
-                        for c in nft.metadata.title.chars() {
-                            lower.push_char(c.to_ascii_lowercase());
-                        }
-                        lower
-                    };
-                    if !title_lower.contains(query_lower) {
-                        matches = false;
-                    }
-                }
-
-                // Check hunt title filter
-                if matches {
-                    if let Some(ref query_lower) = hunt_title_lower_opt {
-                        let hunt_title_lower = {
-                            let mut lower = String::new(&env);
-                            for c in nft.metadata.hunt_title.chars() {
-                                lower.push_char(c.to_ascii_lowercase());
-                            }
-                            lower
-                        };
-                        if !hunt_title_lower.contains(query_lower) {
-                            matches = false;
-                        }
-                    }
-                }
-
-                // Check rarity filter
-                if matches {
-                    if let Some(r) = rarity {
-                        if nft.metadata.rarity != r {
-                            matches = false;
-                        }
-                    }
-                }
-
-                // Check tier filter
-                if matches {
-                    if let Some(t) = tier {
-                        if nft.metadata.tier != t {
-                            matches = false;
-                        }
-                    }
-                }
-
-                if matches {
-                    results.push_back(nft_id);
-                }
-            }
-        }
-        
-        results
+        Vec::new(&env)
     }
 
     /// Transfers an NFT from one address to another.
@@ -1074,8 +848,7 @@ impl NftReward {
         dry_run: bool,
     ) -> Result<migration::MigrationReport, hunty_migration::UpgradeAuthError> {
         let from_version = migration::NftRewardMigration::get_schema_version(&env);
-        let report =
-            migration::NftRewardMigration::run_migration(&env, &admin, target_version, dry_run)?;
+        let report = migration::NftRewardMigration::run_migration(&env, target_version, dry_run);
         if !dry_run && report.succeeded && report.from_version < report.to_version {
             env.events().publish(
                 migration::NftRewardMigration::upgrade_executed_topic(&env),

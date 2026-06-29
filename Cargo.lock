@@ -657,13 +657,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "hunty-common"
-version = "0.0.0"
-dependencies = [
- "soroban-sdk",
-]
-
-[[package]]
 name = "hunty-core"
 version = "0.0.0"
 dependencies = [
