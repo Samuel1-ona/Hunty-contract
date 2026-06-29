@@ -330,6 +330,73 @@ cd ../reward-manager && make build
 cd ../nft-reward && make build
 ```
 
+### Environment Configuration
+
+The API is configured with explicit environment files so development/testnet, QA/staging, and mainnet deployments do not share contract addresses or RPC settings.
+
+Available templates:
+
+- `.env.testnet` for development and testnet integration work
+- `.env.staging` for QA/pre-production validation on dedicated staging contracts
+- `.env.mainnet` for production mainnet deployment
+- `.env.example` as the shared reference template
+
+Required variables are validated when the API starts. Startup fails fast with a clear error if a value is missing, invalid, or still contains a `replace-with-...` placeholder.
+
+```bash
+# Development/testnet
+pnpm dev:testnet
+
+# QA/staging
+pnpm dev:staging
+
+# Environment-specific builds
+pnpm build:testnet
+pnpm build:staging
+pnpm build:mainnet
+
+# Start compiled output with an environment file
+pnpm start:staging
+```
+
+Contract addresses are tracked per environment in:
+
+- `config/contracts.testnet.json`
+- `config/contracts.staging.json`
+- `config/contracts.mainnet.json`
+
+Keep these files in sync with the matching `.env.<environment>` file after each deployment.
+
+Browser-facing environment visibility:
+
+- `GET /health` returns the active environment, Stellar network, RPC URL, and contract IDs.
+- `GET /environment` renders a visible environment badge for `testnet` and `staging` only; mainnet returns `204 No Content` so no production badge is shown.
+
+### Environment Deployments
+
+Build contract WASMs first, then deploy to the target environment:
+
+```bash
+stellar contract build
+
+# Testnet development deployment
+scripts/deploy_contracts.sh testnet myaccount
+
+# Dedicated QA/pre-production deployment
+scripts/deploy_contracts.sh staging staging-deployer
+
+# Mainnet deployment; requires MAINNET_RPC_URL
+MAINNET_RPC_URL=https://... scripts/deploy_contracts.sh mainnet mainnet-deployer
+```
+
+The deploy script writes the deployed contract IDs to `config/contracts.<environment>.json`. Copy the resulting IDs into the corresponding `.env.<environment>` values:
+
+```bash
+HUNTY_CORE_ID=...
+REWARD_MANAGER_ID=...
+NFT_REWARD_ID=...
+```
+
 ### Running Tests
 
 ```bash

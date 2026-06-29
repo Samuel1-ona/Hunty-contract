@@ -1,0 +1,11 @@
+{
+  "environment": "mainnet",
+  "network": "mainnet",
+  "rpcUrl": "replace-with-mainnet-rpc-url",
+  "networkPassphrase": "Public Global Stellar Network ; September 2015",
+  "contracts": {
+    "huntyCore": "replace-with-mainnet-hunty-core-contract-id",
+    "rewardManager": "replace-with-mainnet-reward-manager-contract-id",
+    "nftReward": "replace-with-mainnet-nft-reward-contract-id"
+  }
+}
