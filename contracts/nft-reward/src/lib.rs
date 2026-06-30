@@ -114,10 +114,6 @@ pub struct NftMintedEvent {
     pub rarity: u32,
     pub tier: u32,
     pub metadata: NftMetadata,
-    pub hunt_title: String,
-    pub total_minted_for_hunt: u64,
-    pub completion_rank: u32,
-    pub collection_stats: NftCollectionStats,
     pub minted_at: u64,
 }
 
@@ -488,8 +484,6 @@ impl NftReward {
             schema_version: version,
         })
     }
-
-
 
     /// Batch-updates image URIs for all NFTs whose `image_uri` starts with `old_prefix`,
     /// replacing it with `new_prefix`. Useful for migrating between IPFS gateways or CDNs.

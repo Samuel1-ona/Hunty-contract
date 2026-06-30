@@ -1147,31 +1147,165 @@ use soroban_sdk::{symbol_short, token, Address, Env, IntoVal, Symbol, TryFromVal
     }
 
     #[test]
-    fn test_distribute_rewards_propagates_nft_mint_failure() {
-        let env = Env::default();
-        env.mock_all_auths_allowing_non_root_auth();
-        let (contract_id, token_address, _) = setup(&env);
-        let player = Address::generate(&env);
-        let missing_nft_contract = Address::generate(&env);
+fn test_nft_mint_failure_does_not_block_distribution() {
+    let env = Env::default();
+    env.mock_all_auths_allowing_non_root_auth();
+    let (contract_id, token_address, token_admin) = setup(&env);
+    let creator = Address::generate(&env);
+    let player = Address::generate(&env);
+    let missing_nft_contract = Address::generate(&env);
 
-        env.as_contract(&contract_id, || {
-            initialize_contract(&env, &token_address);
+    mint_tokens(&env, &token_address, &token_admin, &creator, 100_000_000);
 
-            let config = RewardConfig {
-                xlm_amount: None,
-                nft_contract: Some(missing_nft_contract),
-                nft_title: soroban_sdk::String::from_str(&env, "NFT"),
-                nft_description: soroban_sdk::String::from_str(&env, "desc"),
-                nft_image_uri: soroban_sdk::String::from_str(&env, "uri"),
-                nft_hunt_title: soroban_sdk::String::from_str(&env, "hunt"),
-                nft_rarity: 0,
-                nft_tier: 0,
-            };
+    env.as_contract(&contract_id, || {
+        initialize_contract(&env, &token_address);
+        RewardManager::create_reward_pool(env.clone(), creator.clone(), 1, 0).unwrap();
+        RewardManager::fund_reward_pool(env.clone(), creator.clone(), 1, 50_000_000).unwrap();
 
-            let result = RewardManager::distribute_rewards(env.clone(), 1, player.clone(), config);
-            assert_eq!(result, Err(RewardErrorCode::NftMintFailed));
-        });
-    }
+        let config = RewardConfig {
+            xlm_amount: Some(20_000_000),
+            nft_contract: Some(missing_nft_contract),
+            nft_title: soroban_sdk::String::from_str(&env, "NFT"),
+            nft_description: soroban_sdk::String::from_str(&env, "desc"),
+            nft_image_uri: soroban_sdk::String::from_str(&env, "uri"),
+            nft_hunt_title: soroban_sdk::String::from_str(&env, "hunt"),
+            nft_rarity: 0,
+            nft_tier: 0,
+        };
+
+        // Distribution should succeed even though NFT mint fails
+        let result = RewardManager::distribute_rewards(env.clone(), 1, player.clone(), config);
+        assert!(result.is_ok());
+    });
+
+    // Verify XLM was distributed despite NFT failure
+    assert_eq!(get_balance(&env, &token_address, &player), 20_000_000);
+
+    // Verify distribution status shows NFT mint failure
+    env.as_contract(&contract_id, || {
+        let status = RewardManager::get_distribution_status(env.clone(), 1, player.clone());
+        assert!(status.distributed);
+        assert_eq!(status.xlm_amount, 20_000_000);
+        assert_eq!(status.nft_id, None);
+        assert!(status.nft_mint_failed);
+    });
+}
+
+#[test]
+fn test_nft_only_mint_failure_logs_and_allows_retry() {
+    let env = Env::default();
+    env.mock_all_auths_allowing_non_root_auth();
+    let (contract_id, token_address, _) = setup(&env);
+    let admin = Address::generate(&env);
+    let player = Address::generate(&env);
+    let missing_nft_contract = Address::generate(&env);
+
+    env.as_contract(&contract_id, || {
+        RewardManager::initialize(env.clone(), admin.clone(), token_address.clone()).unwrap();
+
+        let config = RewardConfig {
+            xlm_amount: None,
+            nft_contract: Some(missing_nft_contract),
+            nft_title: soroban_sdk::String::from_str(&env, "NFT"),
+            nft_description: soroban_sdk::String::from_str(&env, "desc"),
+            nft_image_uri: soroban_sdk::String::from_str(&env, "uri"),
+            nft_hunt_title: soroban_sdk::String::from_str(&env, "hunt"),
+            nft_rarity: 0,
+            nft_tier: 0,
+        };
+
+        // Distribution should succeed (no XLM to block on NFT failure)
+        let result = RewardManager::distribute_rewards(env.clone(), 1, player.clone(), config);
+        assert!(result.is_ok());
+    });
+
+    // Verify the NFT mint failed was logged
+    env.as_contract(&contract_id, || {
+        let status = RewardManager::get_distribution_status(env.clone(), 1, player.clone());
+        assert!(status.distributed);
+        assert_eq!(status.xlm_amount, 0);
+        assert_eq!(status.nft_id, None);
+        assert!(status.nft_mint_failed);
+    });
+}
+
+#[test]
+fn test_retry_failed_nft_mint_returns_not_found_when_no_pending() {
+    let env = Env::default();
+    env.mock_all_auths_allowing_non_root_auth();
+    let (contract_id, token_address, _) = setup(&env);
+    let admin = Address::generate(&env);
+    let player = Address::generate(&env);
+
+    env.as_contract(&contract_id, || {
+        RewardManager::initialize(env.clone(), admin.clone(), token_address.clone()).unwrap();
+
+        let result = RewardManager::retry_failed_nft_mint(
+            env.clone(),
+            admin.clone(),
+            1,
+            player.clone(),
+        );
+        assert_eq!(result, Err(RewardErrorCode::NftMintPendingNotFound));
+    });
+}
+
+#[test]
+fn test_retry_failed_nft_mint_rejects_unauthorized_caller() {
+    let env = Env::default();
+    env.mock_all_auths_allowing_non_root_auth();
+    let (contract_id, token_address, _) = setup(&env);
+    let admin = Address::generate(&env);
+    let attacker = Address::generate(&env);
+    let player = Address::generate(&env);
+
+    env.as_contract(&contract_id, || {
+        RewardManager::initialize(env.clone(), admin.clone(), token_address.clone()).unwrap();
+
+        let result = RewardManager::retry_failed_nft_mint(
+            env.clone(),
+            attacker,
+            1,
+            player.clone(),
+        );
+        assert_eq!(result, Err(RewardErrorCode::Unauthorized));
+    });
+}
+
+#[test]
+fn test_distribute_rewards_failed_nft_creates_pending_entry() {
+    let env = Env::default();
+    env.mock_all_auths_allowing_non_root_auth();
+    let (contract_id, token_address, _) = setup(&env);
+    let admin = Address::generate(&env);
+    let player = Address::generate(&env);
+    let missing_nft = Address::generate(&env);
+
+    env.as_contract(&contract_id, || {
+        RewardManager::initialize(env.clone(), admin.clone(), token_address.clone()).unwrap();
+
+        let config = RewardConfig {
+            xlm_amount: None,
+            nft_contract: Some(missing_nft),
+            nft_title: soroban_sdk::String::from_str(&env, "NFT"),
+            nft_description: soroban_sdk::String::from_str(&env, "desc"),
+            nft_image_uri: soroban_sdk::String::from_str(&env, "uri"),
+            nft_hunt_title: soroban_sdk::String::from_str(&env, "hunt"),
+            nft_rarity: 0,
+            nft_tier: 0,
+        };
+
+        // Distribution succeeds despite NFT failure
+        let result = RewardManager::distribute_rewards(env.clone(), 1, player.clone(), config);
+        assert!(result.is_ok());
+
+        // Verify pending NFT mint entry was created
+        let pending = Storage::get_pending_nft_mint(&env, 1, &player);
+        assert!(pending.is_some());
+        assert_eq!(pending.as_ref().unwrap().hunt_id, 1);
+        assert_eq!(pending.as_ref().unwrap().player, player);
+    });
+}
 
     #[test]
     fn test_distribute_rewards_not_initialized() {

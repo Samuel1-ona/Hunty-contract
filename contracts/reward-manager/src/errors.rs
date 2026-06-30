@@ -40,6 +40,24 @@ pub enum RewardErrorCode {
     /// Replay attack detected: distribution nonce state inconsistency.
     ReplayDetected = 16,
 
-    /// No distribution record exists for this hunt/player pair.
-    DistributionNotFound = 17,
+    /// Pool balance would exceed maximum allowed limit.
+    PoolBalanceOverflow = 17,
+
+    /// Funding amount is below the minimum threshold (dust attack prevention).
+    BelowMinimumFunding = 18,
+
+    /// Single funding amount exceeds the maximum allowed.
+    ExceedsMaximumFunding = 19,
+
+    /// Daily distribution cap for a specific pool has been exceeded.
+    DailyCapExceeded = 20,
+
+    /// Global daily distribution cap across all pools has been exceeded.
+    GlobalDailyCapExceeded = 21,
+
+    /// Contract is paused and cannot perform this operation.
+    ContractPaused = 22,
+
+    /// No pending failed NFT mint found for retry.
+    NftMintPendingNotFound = 23,
 }

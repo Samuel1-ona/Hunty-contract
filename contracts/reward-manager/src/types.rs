@@ -2,12 +2,22 @@ use soroban_sdk::{contracttype, Address};
 
 pub use reward_interface::RewardConfig;
 
-/// Outcome of a manually resolved distribution.
+/// Semantic versioning struct.
 #[contracttype]
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub enum ResolutionStatus {
-    Completed,
-    Refunded,
+pub struct SemVer {
+    pub major: u32,
+    pub minor: u32,
+    pub patch: u32,
+}
+
+impl SemVer {
+    /// Returns true if the other version is compatible (same major, minor >= required).
+    pub fn is_compatible_with(&self, required: &Self) -> bool {
+        self.major == required.major
+            && (self.minor > required.minor
+                || (self.minor == required.minor && self.patch >= required.patch))
+    }
 }
 
 /// Status of a reward distribution for a specific hunt and player.
@@ -20,6 +30,8 @@ pub struct DistributionStatus {
     pub xlm_amount: i128,
     /// NFT ID if an NFT was minted.
     pub nft_id: Option<u64>,
+    /// Whether NFT minting failed during distribution (retry available).
+    pub nft_mint_failed: bool,
 }
 
 /// Internal record stored for each distribution.
@@ -55,6 +67,21 @@ pub struct RewardPoolStatus {
     pub creator: Address,
     /// Minimum XLM per distribution (0 = no minimum).
     pub min_distribution_amount: i128,
+}
+
+/// Pending NFT mint that failed and can be retried by the admin.
+#[contracttype]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PendingNftMint {
+    pub hunt_id: u64,
+    pub player: Address,
+    pub nft_contract: Address,
+    pub nft_title: soroban_sdk::String,
+    pub nft_description: soroban_sdk::String,
+    pub nft_image_uri: soroban_sdk::String,
+    pub nft_hunt_title: soroban_sdk::String,
+    pub nft_rarity: u32,
+    pub nft_tier: u32,
 }
 
 /// Result of a pool validation check, returned by validate_pool().
