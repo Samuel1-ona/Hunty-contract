@@ -1,7 +1,10 @@
 #![cfg(test)]
 extern crate std;
 
-use crate::{MintParams, NftMetadata, NftMintedEvent, NftReward, NftRewardClient, METADATA_SCHEMA_VERSION};
+use crate::{
+    MintParams, NftMetadata, NftMintedEvent, NftReward, NftRewardClient, TransferRecord,
+    METADATA_SCHEMA_VERSION,
+};
 use soroban_sdk::{
     testutils::{Address as _, Events as _, Ledger as _},
     Address, Env, IntoVal, Map, String, Symbol, Val, TryFromVal, TryIntoVal,
@@ -1885,6 +1888,137 @@ fn test_transfer_emits_nft_transferred_event_with_correct_fields() {
     assert_eq!(event.nft_id, nft_id);
     assert_eq!(event.from, from);
     assert_eq!(event.to, to);
+}
+
+// ---------------------------------------------------------------------------
+// Transfer history tests
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_mint_records_first_transfer_record() {
+    let env = setup_env();
+    let (client, minter) = setup_nft_reward(&env, None);
+
+    let player = Address::generate(&env);
+    let metadata = create_metadata(&env, "First", "desc", "ipfs://first");
+
+    let nft_id = client.mint_reward_nft(&minter, &1, &player, &metadata);
+
+    let history = client.get_nft_transfer_history(&nft_id);
+    assert_eq!(history.len(), 1);
+
+    let record: TransferRecord = history.get(0).unwrap();
+    assert_eq!(record.from, None);
+    assert_eq!(record.to, player);
+    assert_eq!(record.timestamp, 1000);
+}
+
+#[test]
+fn test_transfer_adds_transfer_record() {
+    let env = setup_env();
+    let (client, _) = setup_nft_reward(&env, None);
+    let admin = client.get_admin().unwrap();
+    let reward_manager = Address::generate(&env);
+    client.set_reward_manager(&admin, &reward_manager);
+
+    let from = Address::generate(&env);
+    let to = Address::generate(&env);
+    let metadata = create_metadata(&env, "Transfer Me", "desc", "ipfs://tfr");
+    let nft_id = mint_transferable(&env, &client, 1, &from, &metadata);
+
+    env.ledger().set_timestamp(2000);
+    client.transfer_nft(&nft_id, &from, &to, &from);
+
+    let history = client.get_nft_transfer_history(&nft_id);
+    assert_eq!(history.len(), 2);
+
+    // Record 0: mint
+    let mint_record: TransferRecord = history.get(0).unwrap();
+    assert_eq!(mint_record.from, None);
+    assert_eq!(mint_record.to, from);
+    assert_eq!(mint_record.timestamp, 1000);
+
+    // Record 1: transfer
+    let transfer_record: TransferRecord = history.get(1).unwrap();
+    assert_eq!(transfer_record.from, Some(from.clone()));
+    assert_eq!(transfer_record.to, to);
+    assert_eq!(transfer_record.timestamp, 2000);
+}
+
+#[test]
+fn test_chained_transfers_accumulate_history() {
+    let env = setup_env();
+    let (client, _) = setup_nft_reward(&env, None);
+    let admin = client.get_admin().unwrap();
+    let reward_manager = Address::generate(&env);
+    client.set_reward_manager(&admin, &reward_manager);
+
+    let alice = Address::generate(&env);
+    let bob = Address::generate(&env);
+    let carol = Address::generate(&env);
+    let metadata = create_metadata(&env, "Chain", "desc", "ipfs://chain");
+    let nft_id = mint_transferable(&env, &client, 1, &alice, &metadata);
+
+    env.ledger().set_timestamp(2000);
+    client.transfer_nft(&nft_id, &alice, &bob, &alice);
+
+    env.ledger().set_timestamp(3000);
+    client.transfer_nft(&nft_id, &bob, &carol, &bob);
+
+    let history = client.get_nft_transfer_history(&nft_id);
+    assert_eq!(history.len(), 3);
+
+    assert_eq!(history.get(0).unwrap().from, None);
+    assert_eq!(history.get(0).unwrap().to, alice);
+    assert_eq!(history.get(0).unwrap().timestamp, 1000);
+
+    assert_eq!(history.get(1).unwrap().from, Some(alice));
+    assert_eq!(history.get(1).unwrap().to, bob);
+    assert_eq!(history.get(1).unwrap().timestamp, 2000);
+
+    assert_eq!(history.get(2).unwrap().from, Some(bob));
+    assert_eq!(history.get(2).unwrap().to, carol);
+    assert_eq!(history.get(2).unwrap().timestamp, 3000);
+}
+
+#[test]
+fn test_transfer_history_bounded_storage() {
+    let env = setup_env();
+    let (client, _) = setup_nft_reward(&env, None);
+    let admin = client.get_admin().unwrap();
+    let reward_manager = Address::generate(&env);
+    client.set_reward_manager(&admin, &reward_manager);
+
+    let owner = Address::generate(&env);
+    let metadata = create_metadata(&env, "Bounded", "desc", "ipfs://bounded");
+    let nft_id = mint_transferable(&env, &client, 1, &owner, &metadata);
+
+    // Mint is record 0. Perform many transfers to exceed MAX_TRANSFER_HISTORY.
+    for i in 0..25 {
+        let recipient = Address::generate(&env);
+        env.ledger().set_timestamp(2000 + i as u64);
+        client.transfer_nft(&nft_id, &owner, &recipient, &owner);
+        // Transfer back to owner for next iteration
+        env.ledger().set_timestamp(3000 + i as u64);
+        client.transfer_nft(&nft_id, &recipient, &owner, &recipient);
+    }
+
+    let history = client.get_nft_transfer_history(&nft_id);
+    // Should be bounded at MAX_TRANSFER_HISTORY (20) — 1 mint + 19 most recent transfers
+    assert_eq!(history.len(), 20);
+
+    // First record should no longer be the mint
+    let first_record = history.get(0).unwrap();
+    assert!(first_record.from.is_some());
+}
+
+#[test]
+fn test_transfer_history_empty_for_nonexistent_nft() {
+    let env = setup_env();
+    let client = NftRewardClient::new(&env, &env.register(NftReward, ()));
+
+    let history = client.get_nft_transfer_history(&999);
+    assert_eq!(history.len(), 0);
 }
 
 // ---------------------------------------------------------------------------
