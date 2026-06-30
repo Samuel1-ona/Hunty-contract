@@ -3,7 +3,7 @@ BINDINGS_DIR := bindings
 PYTHON ?= python3
 DOCS_OUTPUT := docs/contract-api.md
 
-.PHONY: build bindings all clean generate-api-docs
+.PHONY: build bindings all clean generate-api-docs check setup-githooks
 
 all: build bindings
 
@@ -26,6 +26,13 @@ bindings: build
 		--wasm $(WASM_DIR)/nft_reward.wasm \
 		--output-dir $(BINDINGS_DIR)/nft-reward \
 		--overwrite
+
+check:
+	cargo fmt --all -- --check
+	cargo clippy --workspace -- -D warnings
+
+setup-githooks:
+	git config core.hooksPath .githooks
 
 clean:
 	cargo clean

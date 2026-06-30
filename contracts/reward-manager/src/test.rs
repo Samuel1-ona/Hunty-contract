@@ -2088,4 +2088,36 @@ use soroban_sdk::{symbol_short, token, Address, Env, IntoVal, Symbol, TryFromVal
         assert_eq!(get_balance(&env, &token_address, &recipient), 5_000_000);
         assert_eq!(get_balance(&env, &token_address, &player2), 0);
     }
+
+    #[test]
+    fn test_all_reward_error_codes_are_unique() {
+        let mut seen = std::collections::BTreeSet::new();
+        let variants: &[(RewardErrorCode, &str)] = &[
+            (RewardErrorCode::NotInitialized, "NotInitialized"),
+            (RewardErrorCode::InsufficientPool, "InsufficientPool"),
+            (RewardErrorCode::AlreadyDistributed, "AlreadyDistributed"),
+            (RewardErrorCode::TransferFailed, "TransferFailed"),
+            (RewardErrorCode::InvalidAmount, "InvalidAmount"),
+            (RewardErrorCode::InvalidConfig, "InvalidConfig"),
+            (RewardErrorCode::NftMintFailed, "NftMintFailed"),
+            (RewardErrorCode::PoolAlreadyExists, "PoolAlreadyExists"),
+            (RewardErrorCode::PoolNotFound, "PoolNotFound"),
+            (RewardErrorCode::Unauthorized, "Unauthorized"),
+            (RewardErrorCode::BelowMinimumAmount, "BelowMinimumAmount"),
+            (RewardErrorCode::AlreadyInitialized, "AlreadyInitialized"),
+            (RewardErrorCode::HuntNotFound, "HuntNotFound"),
+            (RewardErrorCode::ReentrancyDetected, "ReentrancyDetected"),
+            (RewardErrorCode::PoolBalanceDivergence, "PoolBalanceDivergence"),
+            (RewardErrorCode::ReplayDetected, "ReplayDetected"),
+        ];
+        for (variant, name) in variants {
+            let code = *variant as u32;
+            assert!(
+                seen.insert(code),
+                "Duplicate RewardErrorCode value {} for variant '{}'",
+                code,
+                name
+            );
+        }
+    }
 }

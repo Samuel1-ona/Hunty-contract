@@ -106,6 +106,12 @@ impl HuntyCoreMigration {
                     }
                     current = 2;
                 }
+                2 => {
+                    if !dry_run {
+                        Self::migrate_v2_to_v3(env);
+                    }
+                    current = 3;
+                }
                 _ => {
                     return Ok(MigrationFramework::build_report(
                         env,
@@ -200,4 +206,34 @@ impl HuntyCoreMigration {
 
     /// v1 -> v2: placeholder for future layout changes (no-op for now).
     fn migrate_v1_to_v2(_env: &Env) {}
+
+    /// v2 -> v3: populate required clue IDs list for on-demand clue loading.
+    /// Iterates all hunts and saves the list of required clue IDs in separate storage,
+    /// so that `check_all_required_clues_completed` can verify completion without
+    /// loading full clue data.
+    fn migrate_v2_to_v3(env: &Env) {
+        use soroban_sdk::Vec;
+        let hunt_count = Storage::get_hunt_counter(env);
+        for hunt_id in 1..=hunt_count {
+            if Storage::get_hunt(env, hunt_id).is_none() {
+                continue;
+            }
+            let clue_count = Storage::get_clue_counter(env, hunt_id);
+            if clue_count == 0 {
+                continue;
+            }
+            let all_clues = Storage::list_clues_for_hunt(env, hunt_id, 0, clue_count);
+            let mut required_ids: Vec<u32> = Vec::new(env);
+            for i in 0..all_clues.len() {
+                let clue = all_clues.get(i).unwrap();
+                if clue.is_required {
+                    required_ids.push_back(clue.clue_id);
+                }
+            }
+            // Only save if there are required clues to avoid unnecessary storage writes
+            if required_ids.len() > 0 {
+                Storage::set_required_clues(env, hunt_id, &required_ids);
+            }
+        }
+    }
 }

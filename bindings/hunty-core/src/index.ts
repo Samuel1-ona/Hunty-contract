@@ -70,7 +70,7 @@ export interface Hunt {
   end_time: u64;
   hunt_id: u64;
   required_clues: u32;
-  reward_config: RewardConfig;
+  reward_config: HuntRewardConfig;
   status: HuntStatus;
   title: string;
   total_clues: u32;
@@ -97,7 +97,10 @@ export interface Location {
 export type HuntStatus = {tag: "Draft", values: void} | {tag: "Active", values: void} | {tag: "Completed", values: void} | {tag: "Cancelled", values: void};
 
 
-export interface RewardConfig {
+/**
+ * On-chain reward configuration stored within a Hunt (tracks pool state).
+ */
+export interface HuntRewardConfig {
   claimed_count: u32;
   max_winners: u32;
   nft_contract: Option<string>;

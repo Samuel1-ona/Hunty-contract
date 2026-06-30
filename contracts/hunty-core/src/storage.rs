@@ -61,6 +61,7 @@ impl Storage {
     const CLUES_LIST_KEY: soroban_sdk::Symbol = symbol_short!("CLS");
     const HUNT_COUNTER_KEY: soroban_sdk::Symbol = symbol_short!("CN");
     const CLUE_COUNTER_KEY: soroban_sdk::Symbol = symbol_short!("CC");
+    const REQUIRED_CLUES_KEY: soroban_sdk::Symbol = symbol_short!("REQ");
     const REWARD_MGR_KEY: soroban_sdk::Symbol = symbol_short!("R");
     const BAN_KEY: soroban_sdk::Symbol = symbol_short!("BA");
     const SUBMISSION_KEY: soroban_sdk::Symbol = symbol_short!("S");
@@ -392,6 +393,10 @@ impl Storage {
         (Self::CLUE_COUNTER_KEY, hunt_id)
     }
 
+    fn required_clues_key(hunt_id: u64) -> (soroban_sdk::Symbol, u64) {
+        (Self::REQUIRED_CLUES_KEY, hunt_id)
+    }
+
     fn player_entry_key(hunt_id: u64, index: u32) -> (soroban_sdk::Symbol, u64, u32) {
         (Self::PLAYER_ENTRY_KEY, hunt_id, index)
     }
@@ -598,6 +603,28 @@ impl Storage {
             extend_ttl(env, &key, TtlPolicy::Active);
         }
         result.unwrap_or(0)
+    }
+
+    // ========== Required Clues Storage (on-demand loading) ==========
+
+    /// Saves the list of required clue IDs for a hunt.
+    /// This allows `check_all_required_clues_completed` to verify completion
+    /// without loading full clue data, significantly reducing gas.
+    pub fn set_required_clues(env: &Env, hunt_id: u64, clue_ids: &soroban_sdk::Vec<u32>) {
+        let key = Self::required_clues_key(hunt_id);
+        env.storage().persistent().set(&key, clue_ids);
+        extend_ttl(env, &key, TtlPolicy::Active);
+    }
+
+    /// Returns the list of required clue IDs for a hunt.
+    /// Falls back to an empty vec if no list has been stored (e.g. pre-migration hunts).
+    pub fn get_required_clues(env: &Env, hunt_id: u64) -> soroban_sdk::Vec<u32> {
+        let key = Self::required_clues_key(hunt_id);
+        let result: Option<soroban_sdk::Vec<u32>> = env.storage().persistent().get(&key);
+        if result.is_some() {
+            extend_ttl(env, &key, TtlPolicy::Active);
+        }
+        result.unwrap_or_else(|| soroban_sdk::Vec::new(env))
     }
 
     // ========== Reward Manager Storage Functions ==========

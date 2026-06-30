@@ -8,6 +8,7 @@ const MAX_URI_LEN: usize = 512;
 const MAX_NFT_TITLE_BYTES: u32 = 128;
 const MAX_NFT_DESCRIPTION_BYTES: u32 = 1024;
 const MAX_NFT_URI_BYTES: u32 = 512;
+const MAX_SCAN_LIMIT: u32 = 1000;
 
 /// Core display metadata for an NFT (title, description, image URI).
 /// Supports off-chain storage references to keep gas costs low.
@@ -31,18 +32,12 @@ pub struct NftMetadata {
     pub royalty_bps: Option<u32>,
 }
 
-fn image_uri_is_valid(uri: &String) -> bool {
-    let len = uri.len();
-    if len == 0 || len > 200 {
-        return false;
-    }
-    let mut buf = [0u8; 200];
-    uri.copy_into_slice(&mut buf[..len as usize]);
-    if let Ok(text) = core::str::from_utf8(&buf[..len as usize]) {
-        text.starts_with("https://") || text.starts_with("ipfs://")
-    } else {
-        false
-    }
+fn is_valid_image_uri_format(uri: &String) -> bool {
+    let len = uri.len() as usize;
+    let mut buf = [0u8; 512];
+    uri.copy_into_slice(&mut buf[..len]);
+    let text = unsafe { core::str::from_utf8_unchecked(&buf[..len]) };
+    text.starts_with("https://") || text.starts_with("ipfs://")
 }
 
 /// Complete metadata returned by get_nft_metadata (includes NftData-derived fields).
@@ -133,6 +128,18 @@ pub struct AdminImageUrisUpdatedEvent {
     pub old_prefix: String,
     pub new_prefix: String,
     pub updated_count: u32,
+}
+
+/// Event emitted when royalty is paid on NFT transfer with payment.
+#[contracttype]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RoyaltyPaidEvent {
+    pub nft_id: u64,
+    pub from: Address,
+    pub to: Address,
+    pub creator: Address,
+    pub royalty_amount: i128,
+    pub royalty_bps: u32,
 }
 
 mod errors;
@@ -304,10 +311,6 @@ impl NftReward {
             .and_then(|v| String::try_from_val(&env, &v).ok())
             .unwrap_or_else(|| String::from_str(&env, ""));
 
-        if !image_uri_is_valid(&image_uri) {
-            panic!("Invalid NFT image_uri: must be non-empty");
-        }
-
         let hunt_title = metadata
             .get(Symbol::new(&env, "hunt_title"))
             .and_then(|v| String::try_from_val(&env, &v).ok())
@@ -354,16 +357,31 @@ impl NftReward {
         Self::mint_reward_nft_impl(env, hunt_id, player_address, meta, transferable)
     }
 
-    fn sanitize_metadata_field(
+    fn validate_metadata_field(
         env: &Env,
         value: &String,
         max_bytes: u32,
         allow_empty: bool,
+        error_code: crate::errors::NftErrorCode,
     ) -> String {
         match sanitization::StringSanitizer::sanitize(env, value, max_bytes, allow_empty) {
             Ok(s) => s,
-            Err(_) => panic_with_error!(env, crate::errors::NftErrorCode::InvalidMetadata),
+            Err(_) => panic_with_error!(env, error_code),
         }
+    }
+
+    fn validate_image_uri(env: &Env, value: &String) -> String {
+        let s = Self::validate_metadata_field(
+            env,
+            value,
+            MAX_NFT_URI_BYTES,
+            false,
+            crate::errors::NftErrorCode::InvalidImageUri,
+        );
+        if !is_valid_image_uri_format(&s) {
+            panic_with_error!(env, crate::errors::NftErrorCode::InvalidImageUri);
+        }
+        s
     }
 
     fn mint_reward_nft_impl(
@@ -378,18 +396,28 @@ impl NftReward {
         }
 
         let mut metadata = metadata;
-        metadata.title =
-            Self::sanitize_metadata_field(&env, &metadata.title, MAX_NFT_TITLE_BYTES, false);
-        metadata.description = Self::sanitize_metadata_field(
+        metadata.title = Self::validate_metadata_field(
+            &env,
+            &metadata.title,
+            MAX_NFT_TITLE_BYTES,
+            false,
+            crate::errors::NftErrorCode::InvalidTitle,
+        );
+        metadata.description = Self::validate_metadata_field(
             &env,
             &metadata.description,
             MAX_NFT_DESCRIPTION_BYTES,
-            true,
+            false,
+            crate::errors::NftErrorCode::InvalidDescription,
         );
-        metadata.image_uri =
-            Self::sanitize_metadata_field(&env, &metadata.image_uri, MAX_NFT_URI_BYTES, true);
-        metadata.hunt_title =
-            Self::sanitize_metadata_field(&env, &metadata.hunt_title, MAX_NFT_TITLE_BYTES, true);
+        metadata.image_uri = Self::validate_image_uri(&env, &metadata.image_uri);
+        metadata.hunt_title = Self::validate_metadata_field(
+            &env,
+            &metadata.hunt_title,
+            MAX_NFT_TITLE_BYTES,
+            true,
+            crate::errors::NftErrorCode::InvalidHuntTitle,
+        );
 
         if let Some(max_supply) = Storage::get_max_supply(&env) {
             let current_supply = Storage::get_nft_counter(&env);
@@ -544,14 +572,14 @@ impl NftReward {
             return Err(crate::errors::NftErrorCode::NotOwner);
         }
 
-        let new_description = Self::sanitize_metadata_field(
+        let new_description = Self::validate_metadata_field(
             &env,
             &new_description,
             MAX_NFT_DESCRIPTION_BYTES,
-            true,
+            false,
+            crate::errors::NftErrorCode::InvalidDescription,
         );
-        let new_image_uri =
-            Self::sanitize_metadata_field(&env, &new_image_uri, MAX_NFT_URI_BYTES, true);
+        let new_image_uri = Self::validate_image_uri(&env, &new_image_uri);
 
         nft.metadata.description = new_description;
         nft.metadata.image_uri = new_image_uri;
@@ -568,6 +596,48 @@ impl NftReward {
     /// Returns the total number of NFTs minted so far.
     pub fn total_supply(env: Env) -> u64 {
         Storage::get_nft_counter(&env)
+    }
+
+    /// Returns the total count of NFTs currently in the contract.
+    /// Equivalent to total_supply() but with a dedicated function name for clarity.
+    pub fn get_total_nft_count(env: Env) -> u64 {
+        Storage::get_nft_counter(&env)
+    }
+
+    /// Lists all NFTs minted by the contract with pagination support.
+    ///
+    /// Returns a vector of NftData structs, paginated by offset and limit.
+    /// The limit is bounded to MAX_SCAN_LIMIT (1000) to prevent excessive gas consumption.
+    ///
+    /// # Arguments
+    /// * `env` - The Soroban environment
+    /// * `offset` - The starting index for pagination (0-based)
+    /// * `limit` - The maximum number of NFTs to return (capped at MAX_SCAN_LIMIT)
+    ///
+    /// # Returns
+    /// Vec<NftData> - A vector of NFT data structures, bounded by limit or remaining NFTs
+    pub fn list_all_nfts(env: Env, offset: u32, limit: u32) -> Vec<NftData> {
+        let all_nft_ids = Storage::get_all_nft_ids(&env);
+        let total_count = all_nft_ids.len();
+
+        if offset >= total_count {
+            return Vec::new(&env);
+        }
+
+        // Apply bounded scan limit to prevent excessive gas consumption
+        let bounded_limit = limit.min(MAX_SCAN_LIMIT);
+        let end = offset.saturating_add(bounded_limit).min(total_count);
+
+        let mut result = Vec::new(&env);
+        for i in offset..end {
+            if let Some(nft_id) = all_nft_ids.get(i) {
+                if let Some(nft_data) = Storage::get_nft(&env, nft_id) {
+                    result.push_back(nft_data);
+                }
+            }
+        }
+
+        result
     }
 
     /// Returns the owner of an NFT.
@@ -890,11 +960,13 @@ impl NftReward {
     /// * `nft_id` - The NFT to transfer
     /// * `from_address` - Current owner of the NFT
     /// * `to_address` - New owner
-    /// * `caller` - Address authorizing the transfer (must be owner or approved operator)
+    /// * `caller` - Address authorizing the transfer (must be owner, approved address, or approved operator)
     ///
     /// # Authorization
-    /// `caller` must authorize this call. `caller` must be either the current owner
-    /// or an operator approved by the owner via `set_operator`.
+    /// `caller` must authorize this call. `caller` must be either:
+    /// - The current owner
+    /// - An operator approved by the owner via `set_operator`
+    /// - An address approved for this specific NFT via `approve`
     pub fn transfer_nft(
         env: Env,
         nft_id: u64,
@@ -911,8 +983,13 @@ impl NftReward {
             return Err(crate::errors::NftErrorCode::NotOwner);
         }
 
-        // caller must be the owner or an approved operator
-        if caller != nft.owner && !Storage::is_operator(&env, &nft.owner, &caller) {
+        // Check if caller is authorized: owner, operator, or approved address
+        let is_owner = caller == nft.owner;
+        let is_operator = Storage::is_operator(&env, &nft.owner, &caller);
+        let approved = Storage::get_approval(&env, nft_id);
+        let is_approved = approved.as_ref().map(|a| a == &caller).unwrap_or(false);
+
+        if !is_owner && !is_operator && !is_approved {
             return Err(crate::errors::NftErrorCode::NotOperator);
         }
 
@@ -964,6 +1041,9 @@ impl NftReward {
         Storage::save_nft(&env, &nft);
         Storage::add_nft_to_owner(&env, &to_address, nft_id);
 
+        // Clear approval after successful transfer
+        Storage::clear_approval(&env, nft_id);
+
         env.events().publish(
             (Symbol::new(&env, "NftTransferred"), nft_id),
             NftTransferredEvent {
@@ -974,6 +1054,66 @@ impl NftReward {
         );
 
         Ok(())
+    }
+
+    /// Transfers an NFT from one address to another with royalty enforcement.
+    ///
+    /// When a payment is made during transfer, royalty is calculated and transferred
+    /// to the original creator if royalty_bps is set.
+    ///
+    /// # Arguments
+    /// * `nft_id` - The NFT to transfer
+    /// * `from_address` - Current owner of the NFT
+    /// * `to_address` - Recipient of the NFT
+    /// * `caller` - Address authorizing the transfer (must be owner or approved operator)
+    /// * `payment_token` - Address of the payment token contract
+    /// * `payment_amount` - Amount of payment in smallest token units
+    ///
+    /// # Authorization
+    /// `caller` must authorize this call.
+    ///
+    /// # Errors
+    /// Returns standard NFT transfer errors (NftNotFound, NotOwner, etc.) plus:
+    /// - If royalty_bps is set but creator is not set, no royalty is transferred
+    pub fn transfer_with_payment(
+        env: Env,
+        nft_id: u64,
+        from_address: Address,
+        to_address: Address,
+        caller: Address,
+        payment_token: Address,
+        payment_amount: i128,
+    ) -> Result<(), crate::errors::NftErrorCode> {
+        caller.require_auth();
+
+        let nft =
+            Storage::get_nft(&env, nft_id).ok_or(crate::errors::NftErrorCode::NftNotFound)?;
+
+        // Calculate and transfer royalty if applicable
+        if let (Some(creator), Some(royalty_bps)) = (nft.metadata.creator.clone(), nft.metadata.royalty_bps) {
+            if royalty_bps > 0 && payment_amount > 0 {
+                let royalty_amount = (payment_amount as i128 * royalty_bps as i128) / 10000i128;
+                if royalty_amount > 0 {
+                    let client = soroban_sdk::token::Client::new(&env, &payment_token);
+                    client.transfer(&from_address, &creator, &royalty_amount);
+
+                    env.events().publish(
+                        (Symbol::new(&env, "RoyaltyPaid"), nft_id),
+                        RoyaltyPaidEvent {
+                            nft_id,
+                            from: from_address.clone(),
+                            to: to_address.clone(),
+                            creator: creator.clone(),
+                            royalty_amount,
+                            royalty_bps,
+                        },
+                    );
+                }
+            }
+        }
+
+        // Perform standard NFT transfer
+        Self::transfer_nft(env, nft_id, from_address, to_address, caller)
     }
 
     /// Returns the on-chain version stored during initialize, or the compiled constant.
@@ -1018,6 +1158,83 @@ impl NftReward {
     /// Returns true if `operator` is approved to manage all NFTs of `owner`.
     pub fn is_operator(env: Env, owner: Address, operator: Address) -> bool {
         Storage::is_operator(&env, &owner, &operator)
+    }
+
+    /// Approves an address to transfer a specific NFT on behalf of the owner.
+    ///
+    /// # Arguments
+    /// * `caller` - The NFT owner authorizing the approval
+    /// * `nft_id` - The NFT to approve for
+    /// * `approved` - The address being approved to transfer this NFT
+    ///
+    /// # Authorization
+    /// `caller` must authorize this call and must be the current owner of the NFT.
+    pub fn approve(
+        env: Env,
+        caller: Address,
+        nft_id: u64,
+        approved: Address,
+    ) -> Result<(), crate::errors::NftErrorCode> {
+        caller.require_auth();
+
+        let nft = Storage::get_nft(&env, nft_id)
+            .ok_or(crate::errors::NftErrorCode::NftNotFound)?;
+
+        if nft.owner != caller {
+            return Err(crate::errors::NftErrorCode::NotOwner);
+        }
+
+        Storage::set_approval(&env, nft_id, &approved);
+
+        env.events().publish(
+            (Symbol::new(&env, "Approved"), nft_id),
+            (caller, approved, nft_id),
+        );
+
+        Ok(())
+    }
+
+    /// Returns the approved address for a specific NFT, if any.
+    ///
+    /// # Arguments
+    /// * `nft_id` - The NFT to query
+    ///
+    /// # Returns
+    /// The approved address, or `None` if no approval is set.
+    pub fn get_approved(env: Env, nft_id: u64) -> Option<Address> {
+        Storage::get_approval(&env, nft_id)
+    }
+
+    /// Revokes approval for a specific NFT.
+    ///
+    /// # Arguments
+    /// * `caller` - The NFT owner revoking the approval
+    /// * `nft_id` - The NFT whose approval should be revoked
+    ///
+    /// # Authorization
+    /// `caller` must authorize this call and must be the current owner of the NFT.
+    pub fn revoke_approval(
+        env: Env,
+        caller: Address,
+        nft_id: u64,
+    ) -> Result<(), crate::errors::NftErrorCode> {
+        caller.require_auth();
+
+        let nft = Storage::get_nft(&env, nft_id)
+            .ok_or(crate::errors::NftErrorCode::NftNotFound)?;
+
+        if nft.owner != caller {
+            return Err(crate::errors::NftErrorCode::NotOwner);
+        }
+
+        Storage::clear_approval(&env, nft_id);
+
+        env.events().publish(
+            (Symbol::new(&env, "ApprovalRevoked"), nft_id),
+            (caller, nft_id),
+        );
+
+        Ok(())
     }
 
     pub fn get_schema_version(env: Env) -> u32 {
