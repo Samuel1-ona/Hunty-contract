@@ -129,6 +129,18 @@ pub struct AdminImageUrisUpdatedEvent {
     pub updated_count: u32,
 }
 
+/// Event emitted when royalty is paid on NFT transfer with payment.
+#[contracttype]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RoyaltyPaidEvent {
+    pub nft_id: u64,
+    pub from: Address,
+    pub to: Address,
+    pub creator: Address,
+    pub royalty_amount: i128,
+    pub royalty_bps: u32,
+}
+
 mod errors;
 pub use errors::NftErrorCode;
 mod migration;
@@ -999,6 +1011,66 @@ impl NftReward {
         );
 
         Ok(())
+    }
+
+    /// Transfers an NFT from one address to another with royalty enforcement.
+    ///
+    /// When a payment is made during transfer, royalty is calculated and transferred
+    /// to the original creator if royalty_bps is set.
+    ///
+    /// # Arguments
+    /// * `nft_id` - The NFT to transfer
+    /// * `from_address` - Current owner of the NFT
+    /// * `to_address` - Recipient of the NFT
+    /// * `caller` - Address authorizing the transfer (must be owner or approved operator)
+    /// * `payment_token` - Address of the payment token contract
+    /// * `payment_amount` - Amount of payment in smallest token units
+    ///
+    /// # Authorization
+    /// `caller` must authorize this call.
+    ///
+    /// # Errors
+    /// Returns standard NFT transfer errors (NftNotFound, NotOwner, etc.) plus:
+    /// - If royalty_bps is set but creator is not set, no royalty is transferred
+    pub fn transfer_with_payment(
+        env: Env,
+        nft_id: u64,
+        from_address: Address,
+        to_address: Address,
+        caller: Address,
+        payment_token: Address,
+        payment_amount: i128,
+    ) -> Result<(), crate::errors::NftErrorCode> {
+        caller.require_auth();
+
+        let nft =
+            Storage::get_nft(&env, nft_id).ok_or(crate::errors::NftErrorCode::NftNotFound)?;
+
+        // Calculate and transfer royalty if applicable
+        if let (Some(creator), Some(royalty_bps)) = (nft.metadata.creator.clone(), nft.metadata.royalty_bps) {
+            if royalty_bps > 0 && payment_amount > 0 {
+                let royalty_amount = (payment_amount as i128 * royalty_bps as i128) / 10000i128;
+                if royalty_amount > 0 {
+                    let client = soroban_sdk::token::Client::new(&env, &payment_token);
+                    client.transfer(&from_address, &creator, &royalty_amount);
+
+                    env.events().publish(
+                        (Symbol::new(&env, "RoyaltyPaid"), nft_id),
+                        RoyaltyPaidEvent {
+                            nft_id,
+                            from: from_address.clone(),
+                            to: to_address.clone(),
+                            creator: creator.clone(),
+                            royalty_amount,
+                            royalty_bps,
+                        },
+                    );
+                }
+            }
+        }
+
+        // Perform standard NFT transfer
+        Self::transfer_nft(env, nft_id, from_address, to_address, caller)
     }
 
     /// Returns the on-chain version stored during initialize, or the compiled constant.
