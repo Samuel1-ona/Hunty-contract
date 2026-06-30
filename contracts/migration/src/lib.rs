@@ -2,7 +2,7 @@
 use soroban_sdk::{contracterror, contracttype, symbol_short, Address, Env, Symbol, Vec};
 
 /// Current schema version for Hunty contract storage layouts.
-pub const CURRENT_SCHEMA_VERSION: u32 = 2;
+pub const CURRENT_SCHEMA_VERSION: u32 = 3;
 
 pub const VERSION_KEY: Symbol = symbol_short!("SCHEMA");
 pub const ROLLBACK_KEY: Symbol = symbol_short!("RBKVER");

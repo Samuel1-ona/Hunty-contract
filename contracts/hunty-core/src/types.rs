@@ -1,4 +1,4 @@
-use soroban_sdk::{contracttype, Address, BytesN, Env, String, Vec};
+use soroban_sdk::{contracttype, Address, BytesN, Env, Map, String, Vec};
 
 /// Semantic version (major.minor.patch). Compatible if major matches and self >= required.
 #[contracttype]
@@ -61,6 +61,82 @@ pub struct Hunt {
     pub completed_count: u32,
     pub max_submissions_per_minute: u32,
     pub start_multiplier_bps: u32,
+    /// 0 means unlimited
+    pub max_attempts_per_clue: u32,
+}
+
+/// Compact cache of frequently-accessed hunt fields stored in instance storage.
+/// Does not include large/cold fields (title, description, time_bonus config, NFT config).
+/// Instance reads are cheaper than persistent reads, so this reduces gas costs
+/// for operations that only need status/creator/end_time/counters.
+#[contracttype]
+#[derive(Clone, Debug)]
+pub struct HuntCache {
+    pub hunt_id: u64,
+    pub creator: Address,
+    pub status: HuntStatus,
+    pub created_at: u64,
+    pub activated_at: u64,
+    pub end_time: u64,
+    pub total_clues: u32,
+    pub required_clues: u32,
+    pub completed_count: u32,
+    pub max_submissions_per_minute: u32,
+    pub start_multiplier_bps: u32,
+    pub max_winners: u32,
+    pub claimed_count: u32,
+}
+
+/// Aggregate cache-monitoring readouts returned by `get_cache_stats`.
+/// Used to measure read gas savings: a higher hit rate means fewer
+/// persistent-storage reads on hot paths.
+#[contracttype]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CacheStats {
+    pub hits: u64,
+    pub misses: u64,
+    /// Hit rate in basis points (0-10000). 10000 == 100%.
+    pub hit_rate_bps: u32,
+}
+
+impl HuntCache {
+    pub fn from_hunt(hunt: &Hunt) -> Self {
+        Self {
+            hunt_id: hunt.hunt_id,
+            creator: hunt.creator.clone(),
+            status: hunt.status.clone(),
+            created_at: hunt.created_at,
+            activated_at: hunt.activated_at,
+            end_time: hunt.end_time,
+            total_clues: hunt.total_clues,
+            required_clues: hunt.required_clues,
+            completed_count: hunt.completed_count,
+            max_submissions_per_minute: hunt.max_submissions_per_minute,
+            start_multiplier_bps: hunt.start_multiplier_bps,
+            max_winners: hunt.reward_config.max_winners,
+            claimed_count: hunt.reward_config.claimed_count,
+        }
+    }
+
+    pub fn is_active(&self, current_time: u64) -> bool {
+        self.status == HuntStatus::Active && (self.end_time == 0 || current_time < self.end_time)
+    }
+
+    pub fn is_draft(&self) -> bool {
+        self.status == HuntStatus::Draft
+    }
+
+    pub fn is_paused(&self) -> bool {
+        self.status == HuntStatus::Paused
+    }
+
+    pub fn is_completed(&self) -> bool {
+        self.status == HuntStatus::Completed
+    }
+
+    pub fn is_cancelled(&self) -> bool {
+        self.status == HuntStatus::Cancelled
+    }
 }
 
 /// Stored clue with SHA256 answer hash. The hash is never exposed via get_clue/list_clues or events.
@@ -126,6 +202,8 @@ pub struct StoredPlayerProgress {
     /// Packed boolean flags: bit 0 = is_completed, bit 1 = reward_claimed
     pub flags: u8,
     pub recent_submissions: Vec<u64>,
+    /// Maps clue_id → number of failed attempts
+    pub failed_attempts: Map<u32, u32>,
 }
 
 /// Public view of player progress, with `player` and `hunt_id` reconstructed from the key.
@@ -141,6 +219,8 @@ pub struct PlayerProgress {
     pub is_completed: bool,
     pub reward_claimed: bool,
     pub recent_submissions: Vec<u64>,
+    /// Maps clue_id → number of failed attempts
+    pub failed_attempts: Map<u32, u32>,
 }
 
 impl PlayerProgress {
@@ -155,6 +235,7 @@ impl PlayerProgress {
             is_completed: false,
             reward_claimed: false,
             recent_submissions: Vec::new(env),
+            failed_attempts: Map::new(env),
         }
     }
 
@@ -189,6 +270,7 @@ impl PlayerProgress {
             completed_at: self.completed_at,
             flags: Self::bools_to_flags(self.is_completed, self.reward_claimed),
             recent_submissions: self.recent_submissions.clone(),
+            failed_attempts: self.failed_attempts.clone(),
         }
     }
 
@@ -204,6 +286,7 @@ impl PlayerProgress {
             is_completed: Self::flags_to_is_completed(stored.flags),
             reward_claimed: Self::flags_to_reward_claimed(stored.flags),
             recent_submissions: stored.recent_submissions,
+            failed_attempts: stored.failed_attempts,
         }
     }
 

@@ -1,4 +1,4 @@
-use crate::NftData;
+use crate::{NftData, TransferRecord};
 use soroban_sdk::{symbol_short, Address, Env, Vec};
 
 /// Storage layer for NFTs.
@@ -20,6 +20,7 @@ impl Storage {
     const TOTAL_OWNERS_KEY: soroban_sdk::Symbol = symbol_short!("TO");
     const ALL_NFTS_KEY: soroban_sdk::Symbol = symbol_short!("AN");
     const CONTRACT_VERSION_KEY: soroban_sdk::Symbol = symbol_short!("CV");
+    const TRANSFER_HISTORY_KEY: soroban_sdk::Symbol = symbol_short!("THST");
 
     fn nft_key(nft_id: u64) -> (soroban_sdk::Symbol, u64) {
         (Self::NFT_KEY, nft_id)
@@ -62,6 +63,10 @@ impl Storage {
         operator: &Address,
     ) -> (soroban_sdk::Symbol, Address, Address) {
         (symbol_short!("OPKEY"), owner.clone(), operator.clone())
+    }
+
+    fn approval_key(nft_id: u64) -> (soroban_sdk::Symbol, u64) {
+        (symbol_short!("APR"), nft_id)
     }
 
     fn locker_key(locker: &Address) -> (soroban_sdk::Symbol, Address) {
@@ -392,6 +397,26 @@ impl Storage {
         env.storage().persistent().get(&key).unwrap_or(false)
     }
 
+    // --- Approval management (per-token delegation) ---
+
+    /// Sets the approved address for a specific NFT.
+    pub fn set_approval(env: &Env, nft_id: u64, approved: &Address) {
+        let key = Self::approval_key(nft_id);
+        env.storage().persistent().set(&key, approved);
+    }
+
+    /// Removes approval for a specific NFT.
+    pub fn clear_approval(env: &Env, nft_id: u64) {
+        let key = Self::approval_key(nft_id);
+        env.storage().persistent().remove(&key);
+    }
+
+    /// Gets the approved address for a specific NFT, if any.
+    pub fn get_approval(env: &Env, nft_id: u64) -> Option<Address> {
+        let key = Self::approval_key(nft_id);
+        env.storage().persistent().get(&key)
+    }
+
     // --- Contract version ---
 
     pub fn set_contract_version(env: &Env, version: u32) {
@@ -402,5 +427,39 @@ impl Storage {
 
     pub fn get_contract_version(env: &Env) -> Option<u32> {
         env.storage().instance().get(&Self::CONTRACT_VERSION_KEY)
+    }
+
+    fn transfer_history_key(nft_id: u64) -> (soroban_sdk::Symbol, u64) {
+        (Self::TRANSFER_HISTORY_KEY, nft_id)
+    }
+
+    pub fn save_transfer_record(env: &Env, nft_id: u64, record: &TransferRecord) {
+        let key = Self::transfer_history_key(nft_id);
+        let mut history: Vec<TransferRecord> = env
+            .storage()
+            .persistent()
+            .get(&key)
+            .unwrap_or_else(|| Vec::new(env));
+
+        if history.len() >= crate::MAX_TRANSFER_HISTORY {
+            let mut trimmed: Vec<TransferRecord> = Vec::new(env);
+            let len = history.len();
+            for i in 1..len {
+                if let Some(r) = history.get(i) {
+                    trimmed.push_back(r);
+                }
+            }
+            history = trimmed;
+        }
+        history.push_back(record.clone());
+        env.storage().persistent().set(&key, &history);
+    }
+
+    pub fn get_transfer_history(env: &Env, nft_id: u64) -> Vec<TransferRecord> {
+        let key = Self::transfer_history_key(nft_id);
+        env.storage()
+            .persistent()
+            .get(&key)
+            .unwrap_or_else(|| Vec::new(env))
     }
 }

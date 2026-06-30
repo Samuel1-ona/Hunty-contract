@@ -2,6 +2,14 @@ use soroban_sdk::{contracttype, Address};
 
 pub use reward_interface::RewardConfig;
 
+/// Outcome of a manually resolved distribution.
+#[contracttype]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ResolutionStatus {
+    Completed,
+    Refunded,
+}
+
 /// Status of a reward distribution for a specific hunt and player.
 #[contracttype]
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -60,4 +68,28 @@ pub struct ValidationResult {
     pub balance: i128,
     /// Required amount that was checked against.
     pub required: i128,
+}
+
+/// Operation type for the pool audit log.
+#[contracttype]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum PoolOperation {
+    Create,
+    Fund,
+    Distribute,
+    Withdraw,
+}
+
+/// A single entry in the pool audit log.
+#[contracttype]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PoolAuditEntry {
+    /// Who triggered the operation.
+    pub actor: Address,
+    /// Operation performed.
+    pub operation: PoolOperation,
+    /// Timestamp (ledger time).
+    pub timestamp: u64,
+    /// The XLM amount involved, if applicable.
+    pub amount: Option<i128>,
 }

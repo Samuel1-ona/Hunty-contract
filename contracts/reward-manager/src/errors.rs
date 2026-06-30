@@ -39,4 +39,7 @@ pub enum RewardErrorCode {
 
     /// Replay attack detected: distribution nonce state inconsistency.
     ReplayDetected = 16,
+
+    /// No distribution record exists for this hunt/player pair.
+    DistributionNotFound = 17,
 }

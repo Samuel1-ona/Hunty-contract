@@ -1,0 +1,52 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+NC='\033[0m'
+
+STAGED_FILES=$(git diff --cached --name-only --diff-filter=ACMR)
+
+# 1. Check formatting on staged Rust files
+RS_FILES=$(echo "$STAGED_FILES" | grep '\.rs$' || true)
+if [ -n "$RS_FILES" ]; then
+  if ! cargo fmt --all -- --check > /dev/null 2>&1; then
+    echo -e "${RED}✖ cargo fmt --check failed. Run 'cargo fmt' to fix.${NC}"
+    cargo fmt --all -- --check 2>&1
+    exit 1
+  fi
+  echo -e "${GREEN}✔ cargo fmt passed${NC}"
+fi
+
+# 2. Run clippy on workspace
+if [ -n "$RS_FILES" ]; then
+  if ! cargo clippy --workspace -- -D warnings 2>&1; then
+    echo -e "${RED}✖ clippy found issues${NC}"
+    exit 1
+  fi
+  echo -e "${GREEN}✔ cargo clippy passed${NC}"
+fi
+
+# 3. Check for TODO/FIXME in staged diff
+if [ -n "$STAGED_FILES" ]; then
+  MATCHES=$(grep -n 'TODO\|FIXME\|todo!' <<< "$(git diff --cached -U0)" 2>/dev/null || true)
+  if [ -n "$MATCHES" ]; then
+    echo -e "${RED}✖ TODO/FIXME found in staged changes:${NC}"
+    echo "$MATCHES"
+    exit 1
+  fi
+  echo -e "${GREEN}✔ No TODO/FIXME markers${NC}"
+fi
+
+# 4. Verify Cargo.lock is up to date
+if [ -f Cargo.lock ]; then
+  if echo "$STAGED_FILES" | grep -q 'Cargo.toml' && ! echo "$STAGED_FILES" | grep -q 'Cargo.lock'; then
+    if ! cargo metadata --format-version 1 --no-deps > /dev/null 2>&1; then
+      echo -e "${RED}✖ Cargo.lock is out of sync. Run 'cargo generate-lockfile' to update.${NC}"
+      exit 1
+    fi
+  fi
+  echo -e "${GREEN}✔ Cargo.lock up to date${NC}"
+fi
+
+echo -e "${GREEN}✔ All pre-commit checks passed${NC}"

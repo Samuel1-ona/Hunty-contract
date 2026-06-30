@@ -1,7 +1,10 @@
 #![cfg(test)]
 extern crate std;
 
-use crate::{NftMetadata, NftMintedEvent, NftReward, NftRewardClient, METADATA_SCHEMA_VERSION};
+use crate::{
+    MintParams, NftMetadata, NftMintedEvent, NftReward, NftRewardClient, TransferRecord,
+    METADATA_SCHEMA_VERSION,
+};
 use soroban_sdk::{
     testutils::{Address as _, Events as _, Ledger as _},
     Address, Env, IntoVal, Map, String, Symbol, Val, TryFromVal, TryIntoVal,
@@ -590,10 +593,183 @@ fn test_transfer_nft_emits_event() {
     let metadata = create_metadata(&env, "Event NFT", "Desc", "ipfs://event");
 
     let nft_id = client.mint_reward_nft_from_map(&reward_manager, &1, &from, &metadata);
-    client.transfer_nft(&nft_id, &from, &to);
+    client.transfer_nft(&nft_id, &from, &to, &from);
 
     // Transfer succeeded; NftTransferred event is emitted by transfer_nft
     assert_eq!(client.owner_of(&nft_id), Some(to));
+}
+
+// =========================================================================
+// NFT APPROVAL TESTS - Per-token delegation system
+// =========================================================================
+
+#[test]
+fn test_approve_and_get_approved() {
+    let env = setup_env();
+    let (client, _) = setup_nft_reward(&env, None);
+    let admin = client.get_admin().unwrap();
+    let reward_manager = Address::generate(&env);
+    client.set_reward_manager(&admin, &reward_manager);
+
+    let owner = Address::generate(&env);
+    let spender = Address::generate(&env);
+    let metadata = create_metadata(&env, "Approval Test", "Test approve", "ipfs://approve");
+
+    let nft_id = client.mint_reward_nft_from_map(&reward_manager, &1, &owner, &metadata);
+
+    // Initially no approval
+    assert_eq!(client.get_approved(&nft_id), None);
+
+    // Owner approves spender
+    client.approve(&owner, &nft_id, &spender).unwrap();
+
+    // Verify approval is set
+    assert_eq!(client.get_approved(&nft_id), Some(spender));
+}
+
+#[test]
+fn test_approved_address_can_transfer() {
+    let env = setup_env();
+    let (client, _) = setup_nft_reward(&env, None);
+    let admin = client.get_admin().unwrap();
+    let reward_manager = Address::generate(&env);
+    client.set_reward_manager(&admin, &reward_manager);
+
+    let owner = Address::generate(&env);
+    let spender = Address::generate(&env);
+    let recipient = Address::generate(&env);
+    let metadata = create_metadata(&env, "Spender NFT", "Desc", "ipfs://spender");
+
+    let nft_id = client.mint_reward_nft_from_map(&reward_manager, &1, &owner, &metadata);
+
+    // Owner approves spender
+    client.approve(&owner, &nft_id, &spender).unwrap();
+
+    // Spender transfers to recipient (using spender as caller)
+    client.transfer_nft(&nft_id, &owner, &recipient, &spender).unwrap();
+
+    // Verify new owner
+    assert_eq!(client.owner_of(&nft_id), Some(recipient.clone()));
+
+    // Verify approval was cleared after transfer
+    assert_eq!(client.get_approved(&nft_id), None);
+}
+
+#[test]
+fn test_approval_cleared_after_transfer() {
+    let env = setup_env();
+    let (client, _) = setup_nft_reward(&env, None);
+    let admin = client.get_admin().unwrap();
+    let reward_manager = Address::generate(&env);
+    client.set_reward_manager(&admin, &reward_manager);
+
+    let owner = Address::generate(&env);
+    let spender = Address::generate(&env);
+    let recipient = Address::generate(&env);
+    let metadata = create_metadata(&env, "Clear Approval NFT", "Desc", "ipfs://clear");
+
+    let nft_id = client.mint_reward_nft_from_map(&reward_manager, &1, &owner, &metadata);
+
+    // Owner approves spender
+    client.approve(&owner, &nft_id, &spender).unwrap();
+    assert_eq!(client.get_approved(&nft_id), Some(spender.clone()));
+
+    // Owner transfers (owner is still authorized)
+    client.transfer_nft(&nft_id, &owner, &recipient, &owner).unwrap();
+
+    // Verify approval was cleared
+    assert_eq!(client.get_approved(&nft_id), None);
+}
+
+#[test]
+#[should_panic]
+fn test_only_owner_can_approve() {
+    let env = setup_env();
+    let (client, _) = setup_nft_reward(&env, None);
+    let admin = client.get_admin().unwrap();
+    let reward_manager = Address::generate(&env);
+    client.set_reward_manager(&admin, &reward_manager);
+
+    let owner = Address::generate(&env);
+    let non_owner = Address::generate(&env);
+    let spender = Address::generate(&env);
+    let metadata = create_metadata(&env, "Owner Only NFT", "Desc", "ipfs://owner_only");
+
+    let nft_id = client.mint_reward_nft_from_map(&reward_manager, &1, &owner, &metadata);
+
+    // Non-owner tries to approve - should panic
+    client.approve(&non_owner, &nft_id, &spender).unwrap();
+}
+
+#[test]
+fn test_revoke_approval() {
+    let env = setup_env();
+    let (client, _) = setup_nft_reward(&env, None);
+    let admin = client.get_admin().unwrap();
+    let reward_manager = Address::generate(&env);
+    client.set_reward_manager(&admin, &reward_manager);
+
+    let owner = Address::generate(&env);
+    let spender = Address::generate(&env);
+    let metadata = create_metadata(&env, "Revoke Test NFT", "Desc", "ipfs://revoke");
+
+    let nft_id = client.mint_reward_nft_from_map(&reward_manager, &1, &owner, &metadata);
+
+    // Owner approves spender
+    client.approve(&owner, &nft_id, &spender).unwrap();
+    assert_eq!(client.get_approved(&nft_id), Some(spender));
+
+    // Owner revokes approval
+    client.revoke_approval(&owner, &nft_id).unwrap();
+
+    // Verify approval is removed
+    assert_eq!(client.get_approved(&nft_id), None);
+}
+
+#[test]
+#[should_panic]
+fn test_revoked_address_cannot_transfer() {
+    let env = setup_env();
+    let (client, _) = setup_nft_reward(&env, None);
+    let admin = client.get_admin().unwrap();
+    let reward_manager = Address::generate(&env);
+    client.set_reward_manager(&admin, &reward_manager);
+
+    let owner = Address::generate(&env);
+    let spender = Address::generate(&env);
+    let recipient = Address::generate(&env);
+    let metadata = create_metadata(&env, "Cannot Transfer NFT", "Desc", "ipfs://notr");
+
+    let nft_id = client.mint_reward_nft_from_map(&reward_manager, &1, &owner, &metadata);
+
+    // Owner approves spender
+    client.approve(&owner, &nft_id, &spender).unwrap();
+
+    // Owner revokes approval
+    client.revoke_approval(&owner, &nft_id).unwrap();
+
+    // Spender tries to transfer - should panic
+    client.transfer_nft(&nft_id, &owner, &recipient, &spender).unwrap();
+}
+
+#[test]
+#[should_panic]
+fn test_non_approved_cannot_transfer() {
+    let env = setup_env();
+    let (client, _) = setup_nft_reward(&env, None);
+    let admin = client.get_admin().unwrap();
+    let reward_manager = Address::generate(&env);
+    client.set_reward_manager(&admin, &reward_manager);
+
+    let owner = Address::generate(&env);
+    let random_address = Address::generate(&env);
+    let recipient = Address::generate(&env);
+    let metadata = create_metadata(&env, "Unapproved NFT", "Desc", "ipfs://unappr");
+
+    let nft_id = client.mint_reward_nft_from_map(&reward_manager, &1, &owner, &metadata);
+
+    // Random address (not owner, not approved) tries to transfer - should panic
+    client.transfer_nft(&nft_id, &owner, &recipient, &random_address).unwrap();
 }
 
 #[test]
@@ -764,24 +940,195 @@ fn test_search_nfts_multiple_filters() {
         None,
     );
     assert_eq!(results.len(), 2);
+}
 
-    let nft_id = client.mint_reward_nft(&Address::generate(&env), &1, &player, &metadata);
+// ---------------------------------------------------------------------------
+// Batch minting tests
+// ---------------------------------------------------------------------------
 
-    // Update metadata
-    client.update_nft_metadata(
-        &nft_id,
-        &player,
-        &String::from_str(&env, "Updated Desc"),
-        &String::from_str(&env, "ipfs://updated"),
-    ).unwrap();
+#[test]
+fn test_mint_batch_creates_multiple_nfts() {
+    let env = setup_env();
+    let (client, minter) = setup_nft_reward(&env, None);
 
-    // Search should still return only 1 NFT (not duplicated)
-    let results = client.search_by_title(&String::from_str(&env, "original"));
-    assert_eq!(results.len(), 1);
-    
-    // Search with no filters should return only 1 NFT
-    let all_results = client.search_nfts(None, None, None, None);
-    assert_eq!(all_results.len(), 1);
+    let player = Address::generate(&env);
+
+    let params = crate::vec![
+        &env,
+        MintParams {
+            hunt_id: 1,
+            player_address: player.clone(),
+            metadata: create_metadata(&env, "Batch 1", "First batch NFT", "ipfs://batch1"),
+        },
+        MintParams {
+            hunt_id: 2,
+            player_address: player.clone(),
+            metadata: create_metadata(&env, "Batch 2", "Second batch NFT", "ipfs://batch2"),
+        },
+        MintParams {
+            hunt_id: 1,
+            player_address: player.clone(),
+            metadata: create_metadata(&env, "Batch 3", "Third batch NFT", "ipfs://batch3"),
+        },
+    ];
+
+    let ids = client.mint_batch(&minter, &params);
+
+    assert_eq!(ids.len(), 3);
+    assert_eq!(ids.get(0).unwrap(), 1);
+    assert_eq!(ids.get(1).unwrap(), 2);
+    assert_eq!(ids.get(2).unwrap(), 3);
+    assert_eq!(client.total_supply(), 3);
+}
+
+#[test]
+fn test_mint_batch_nfts_are_individually_queryable() {
+    let env = setup_env();
+    let (client, minter) = setup_nft_reward(&env, None);
+
+    let player = Address::generate(&env);
+
+    let params = crate::vec![
+        &env,
+        MintParams {
+            hunt_id: 10,
+            player_address: player.clone(),
+            metadata: create_metadata(&env, "Alpha", "Alpha desc", "ipfs://alpha"),
+        },
+        MintParams {
+            hunt_id: 20,
+            player_address: player.clone(),
+            metadata: create_metadata(&env, "Beta", "Beta desc", "ipfs://beta"),
+        },
+    ];
+
+    let ids = client.mint_batch(&minter, &params);
+
+    let nft1 = client.get_nft(&ids.get(0).unwrap()).unwrap();
+    assert_eq!(nft1.hunt_id, 10);
+    assert_eq!(nft1.owner, player);
+    assert_eq!(nft1.metadata.title, String::from_str(&env, "Alpha"));
+
+    let nft2 = client.get_nft(&ids.get(1).unwrap()).unwrap();
+    assert_eq!(nft2.hunt_id, 20);
+    assert_eq!(nft2.owner, player);
+    assert_eq!(nft2.metadata.title, String::from_str(&env, "Beta"));
+}
+
+#[test]
+fn test_mint_batch_atomic_failure_rolls_back() {
+    let env = setup_env();
+    let (client, minter) = setup_nft_reward(&env, None);
+
+    let player = Address::generate(&env);
+
+    let valid_meta = create_metadata(&env, "Valid", "Valid NFT", "ipfs://valid");
+    let mut invalid_meta = create_metadata(&env, "Invalid", "Bad rarity", "ipfs://bad");
+
+    // First batch: all valid
+    let params1 = crate::vec![
+        &env,
+        MintParams {
+            hunt_id: 1,
+            player_address: player.clone(),
+            metadata: valid_meta.clone(),
+        },
+    ];
+    let ids = client.mint_batch(&minter, &params1);
+    assert_eq!(ids.len(), 1);
+
+    // Second batch with invalid rarity - should panic and roll back
+    invalid_meta.rarity = 99;
+    let params2 = crate::vec![
+        &env,
+        MintParams {
+            hunt_id: 2,
+            player_address: player.clone(),
+            metadata: create_metadata(&env, "Before", "Will succeed", "ipfs://before"),
+        },
+        MintParams {
+            hunt_id: 3,
+            player_address: player.clone(),
+            metadata: invalid_meta,
+        },
+    ];
+
+    let result = client.try_mint_batch(&minter, &params2);
+    assert!(result.is_err());
+
+    // Supply should remain at 1 (first batch only)
+    assert_eq!(client.total_supply(), 1);
+}
+
+#[test]
+fn test_mint_batch_with_hunt_indexing() {
+    let env = setup_env();
+    let (client, minter) = setup_nft_reward(&env, None);
+
+    let player = Address::generate(&env);
+
+    let params = crate::vec![
+        &env,
+        MintParams {
+            hunt_id: 5,
+            player_address: player.clone(),
+            metadata: create_metadata(&env, "H5A", "Hunt 5 NFT A", "ipfs://h5a"),
+        },
+        MintParams {
+            hunt_id: 5,
+            player_address: player.clone(),
+            metadata: create_metadata(&env, "H5B", "Hunt 5 NFT B", "ipfs://h5b"),
+        },
+        MintParams {
+            hunt_id: 6,
+            player_address: player.clone(),
+            metadata: create_metadata(&env, "H6A", "Hunt 6 NFT A", "ipfs://h6a"),
+        },
+    ];
+
+    let ids = client.mint_batch(&minter, &params);
+
+    let hunt5_nfts = client.get_nfts_by_hunt(&5, &0, &100);
+    assert_eq!(hunt5_nfts.len(), 2);
+    assert!(hunt5_nfts.get(0).unwrap() == ids.get(0).unwrap()
+        || hunt5_nfts.get(0).unwrap() == ids.get(1).unwrap());
+
+    let hunt6_nfts = client.get_nfts_by_hunt(&6, &0, &100);
+    assert_eq!(hunt6_nfts.len(), 1);
+    assert_eq!(hunt6_nfts.get(0).unwrap(), ids.get(2).unwrap());
+}
+
+#[test]
+fn test_mint_batch_updates_owner_index() {
+    let env = setup_env();
+    let (client, minter) = setup_nft_reward(&env, None);
+
+    let player = Address::generate(&env);
+
+    let params = crate::vec![
+        &env,
+        MintParams {
+            hunt_id: 1,
+            player_address: player.clone(),
+            metadata: create_metadata(&env, "One", "First", "ipfs://one"),
+        },
+        MintParams {
+            hunt_id: 2,
+            player_address: player.clone(),
+            metadata: create_metadata(&env, "Two", "Second", "ipfs://two"),
+        },
+    ];
+
+    let ids = client.mint_batch(&minter, &params);
+
+    let player_nfts = client.get_player_nfts(&player, &0, &100);
+    assert_eq!(player_nfts.len(), 2);
+    assert!(player_nfts.get(0).unwrap() == ids.get(0).unwrap()
+        || player_nfts.get(0).unwrap() == ids.get(1).unwrap());
+    assert!(player_nfts.get(1).unwrap() == ids.get(0).unwrap()
+        || player_nfts.get(1).unwrap() == ids.get(1).unwrap());
+}
+
 // ---------------------------------------------------------------------------
 // Schema versioning tests
 // ---------------------------------------------------------------------------
@@ -1075,24 +1422,24 @@ fn test_mint_reward_nft_from_map_with_invalid_types_uses_defaults() {
     let player = Address::generate(&env);
     let mut metadata: Map<Symbol, Val> = Map::new(&env);
     
-    // Provide valid title
+    // Provide valid values for required fields
     metadata.set(Symbol::new(&env, "title"), String::from_str(&env, "Valid Title").into_val(&env));
+    metadata.set(Symbol::new(&env, "description"), String::from_str(&env, "Valid description").into_val(&env));
+    metadata.set(Symbol::new(&env, "image_uri"), String::from_str(&env, "ipfs://valid").into_val(&env));
     
-    // Provide invalid types for other fields (wrong type conversions will fail and use defaults)
-    metadata.set(Symbol::new(&env, "description"), 123456u32.into_val(&env)); // u32 instead of String
-    metadata.set(Symbol::new(&env, "image_uri"), true.into_val(&env)); // bool instead of String
+    // Provide invalid types for optional fields (wrong type conversions will fail and use defaults)
     metadata.set(Symbol::new(&env, "hunt_title"), 999u32.into_val(&env)); // u32 instead of String
     metadata.set(Symbol::new(&env, "rarity"), String::from_str(&env, "invalid").into_val(&env)); // String instead of u32
     metadata.set(Symbol::new(&env, "tier"), String::from_str(&env, "invalid").into_val(&env)); // String instead of u32
     metadata.set(Symbol::new(&env, "transferable"), 123u32.into_val(&env)); // u32 instead of bool
 
-    // This should not panic; invalid types should use defaults
+    // This should not panic; invalid types for optional fields should use defaults
     let nft_id = client.mint_reward_nft_from_map(&Address::generate(&env), &1, &player, &metadata);
 
     let nft = client.get_nft(&nft_id).unwrap();
     assert_eq!(nft.metadata.title, String::from_str(&env, "Valid Title"));
-    assert_eq!(nft.metadata.description, String::from_str(&env, "")); // default due to invalid type
-    assert_eq!(nft.metadata.image_uri, String::from_str(&env, "")); // default due to invalid type
+    assert_eq!(nft.metadata.description, String::from_str(&env, "Valid description"));
+    assert_eq!(nft.metadata.image_uri, String::from_str(&env, "ipfs://valid"));
     assert_eq!(nft.metadata.hunt_title, String::from_str(&env, "Valid Title")); // defaults to title
     assert_eq!(nft.metadata.rarity, 0u32); // default due to invalid type
     assert_eq!(nft.metadata.tier, 0u32); // default due to invalid type
@@ -1544,6 +1891,137 @@ fn test_transfer_emits_nft_transferred_event_with_correct_fields() {
 }
 
 // ---------------------------------------------------------------------------
+// Transfer history tests
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_mint_records_first_transfer_record() {
+    let env = setup_env();
+    let (client, minter) = setup_nft_reward(&env, None);
+
+    let player = Address::generate(&env);
+    let metadata = create_metadata(&env, "First", "desc", "ipfs://first");
+
+    let nft_id = client.mint_reward_nft(&minter, &1, &player, &metadata);
+
+    let history = client.get_nft_transfer_history(&nft_id);
+    assert_eq!(history.len(), 1);
+
+    let record: TransferRecord = history.get(0).unwrap();
+    assert_eq!(record.from, None);
+    assert_eq!(record.to, player);
+    assert_eq!(record.timestamp, 1000);
+}
+
+#[test]
+fn test_transfer_adds_transfer_record() {
+    let env = setup_env();
+    let (client, _) = setup_nft_reward(&env, None);
+    let admin = client.get_admin().unwrap();
+    let reward_manager = Address::generate(&env);
+    client.set_reward_manager(&admin, &reward_manager);
+
+    let from = Address::generate(&env);
+    let to = Address::generate(&env);
+    let metadata = create_metadata(&env, "Transfer Me", "desc", "ipfs://tfr");
+    let nft_id = mint_transferable(&env, &client, 1, &from, &metadata);
+
+    env.ledger().set_timestamp(2000);
+    client.transfer_nft(&nft_id, &from, &to, &from);
+
+    let history = client.get_nft_transfer_history(&nft_id);
+    assert_eq!(history.len(), 2);
+
+    // Record 0: mint
+    let mint_record: TransferRecord = history.get(0).unwrap();
+    assert_eq!(mint_record.from, None);
+    assert_eq!(mint_record.to, from);
+    assert_eq!(mint_record.timestamp, 1000);
+
+    // Record 1: transfer
+    let transfer_record: TransferRecord = history.get(1).unwrap();
+    assert_eq!(transfer_record.from, Some(from.clone()));
+    assert_eq!(transfer_record.to, to);
+    assert_eq!(transfer_record.timestamp, 2000);
+}
+
+#[test]
+fn test_chained_transfers_accumulate_history() {
+    let env = setup_env();
+    let (client, _) = setup_nft_reward(&env, None);
+    let admin = client.get_admin().unwrap();
+    let reward_manager = Address::generate(&env);
+    client.set_reward_manager(&admin, &reward_manager);
+
+    let alice = Address::generate(&env);
+    let bob = Address::generate(&env);
+    let carol = Address::generate(&env);
+    let metadata = create_metadata(&env, "Chain", "desc", "ipfs://chain");
+    let nft_id = mint_transferable(&env, &client, 1, &alice, &metadata);
+
+    env.ledger().set_timestamp(2000);
+    client.transfer_nft(&nft_id, &alice, &bob, &alice);
+
+    env.ledger().set_timestamp(3000);
+    client.transfer_nft(&nft_id, &bob, &carol, &bob);
+
+    let history = client.get_nft_transfer_history(&nft_id);
+    assert_eq!(history.len(), 3);
+
+    assert_eq!(history.get(0).unwrap().from, None);
+    assert_eq!(history.get(0).unwrap().to, alice);
+    assert_eq!(history.get(0).unwrap().timestamp, 1000);
+
+    assert_eq!(history.get(1).unwrap().from, Some(alice));
+    assert_eq!(history.get(1).unwrap().to, bob);
+    assert_eq!(history.get(1).unwrap().timestamp, 2000);
+
+    assert_eq!(history.get(2).unwrap().from, Some(bob));
+    assert_eq!(history.get(2).unwrap().to, carol);
+    assert_eq!(history.get(2).unwrap().timestamp, 3000);
+}
+
+#[test]
+fn test_transfer_history_bounded_storage() {
+    let env = setup_env();
+    let (client, _) = setup_nft_reward(&env, None);
+    let admin = client.get_admin().unwrap();
+    let reward_manager = Address::generate(&env);
+    client.set_reward_manager(&admin, &reward_manager);
+
+    let owner = Address::generate(&env);
+    let metadata = create_metadata(&env, "Bounded", "desc", "ipfs://bounded");
+    let nft_id = mint_transferable(&env, &client, 1, &owner, &metadata);
+
+    // Mint is record 0. Perform many transfers to exceed MAX_TRANSFER_HISTORY.
+    for i in 0..25 {
+        let recipient = Address::generate(&env);
+        env.ledger().set_timestamp(2000 + i as u64);
+        client.transfer_nft(&nft_id, &owner, &recipient, &owner);
+        // Transfer back to owner for next iteration
+        env.ledger().set_timestamp(3000 + i as u64);
+        client.transfer_nft(&nft_id, &recipient, &owner, &recipient);
+    }
+
+    let history = client.get_nft_transfer_history(&nft_id);
+    // Should be bounded at MAX_TRANSFER_HISTORY (20) — 1 mint + 19 most recent transfers
+    assert_eq!(history.len(), 20);
+
+    // First record should no longer be the mint
+    let first_record = history.get(0).unwrap();
+    assert!(first_record.from.is_some());
+}
+
+#[test]
+fn test_transfer_history_empty_for_nonexistent_nft() {
+    let env = setup_env();
+    let client = NftRewardClient::new(&env, &env.register(NftReward, ()));
+
+    let history = client.get_nft_transfer_history(&999);
+    assert_eq!(history.len(), 0);
+}
+
+// ---------------------------------------------------------------------------
 // admin_update_image_uris tests
 // ---------------------------------------------------------------------------
 
@@ -1886,4 +2364,33 @@ fn test_admin_update_image_uris_empty_prefix_replacement() {
         nft.metadata.image_uri,
         String::from_str(&env, "https://prefixed/ipfs://something")
     );
+}
+
+#[test]
+fn test_all_nft_error_codes_are_unique() {
+    let mut seen = std::collections::BTreeSet::new();
+    let variants: &[(crate::errors::NftErrorCode, &str)] = &[
+        (crate::errors::NftErrorCode::NftNotFound, "NftNotFound"),
+        (crate::errors::NftErrorCode::Unauthorized, "Unauthorized"),
+        (crate::errors::NftErrorCode::NotOwner, "NotOwner"),
+        (crate::errors::NftErrorCode::InvalidRecipient, "InvalidRecipient"),
+        (crate::errors::NftErrorCode::SoulboundNft, "SoulboundNft"),
+        (crate::errors::NftErrorCode::InvalidRarity, "InvalidRarity"),
+        (crate::errors::NftErrorCode::AlreadyInitialized, "AlreadyInitialized"),
+        (crate::errors::NftErrorCode::MaxSupplyReached, "MaxSupplyReached"),
+        (crate::errors::NftErrorCode::NotInitialized, "NotInitialized"),
+        (crate::errors::NftErrorCode::NotOperator, "NotOperator"),
+        (crate::errors::NftErrorCode::NftNotTransferable, "NftNotTransferable"),
+        (crate::errors::NftErrorCode::NftLocked, "NftLocked"),
+        (crate::errors::NftErrorCode::InvalidMetadata, "InvalidMetadata"),
+    ];
+    for (variant, name) in variants {
+        let code = *variant as u32;
+        assert!(
+            seen.insert(code),
+            "Duplicate NftErrorCode value {} for variant '{}'",
+            code,
+            name
+        );
+    }
 }

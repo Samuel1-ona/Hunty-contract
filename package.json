@@ -5,8 +5,16 @@
   "main": "dist/index.js",
   "scripts": {
     "build": "tsc",
+    "build:testnet": "node scripts/with-env.mjs testnet tsc",
+    "build:staging": "node scripts/with-env.mjs staging tsc",
+    "build:mainnet": "node scripts/with-env.mjs mainnet tsc",
     "start": "node dist/index.js",
+    "start:testnet": "node scripts/with-env.mjs testnet node dist/index.js",
+    "start:staging": "node scripts/with-env.mjs staging node dist/index.js",
+    "start:mainnet": "node scripts/with-env.mjs mainnet node dist/index.js",
     "dev": "tsx watch src/index.ts",
+    "dev:testnet": "node scripts/with-env.mjs testnet tsx watch src/index.ts",
+    "dev:staging": "node scripts/with-env.mjs staging tsx watch src/index.ts",
     "test": "vitest run",
     "test:watch": "vitest",
     "lint": "tsc --noEmit"

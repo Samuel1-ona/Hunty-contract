@@ -8,7 +8,7 @@ use crate::nft_handler::NftHandler;
 use crate::storage::Storage;
 pub use crate::types::{
     DistributionRecord, DistributionStatus, RewardConfig, RewardPoolConfig, RewardPoolStatus,
-    SemVer, ValidationResult,
+    SemVer, ValidationResult, PoolAuditEntry, PoolOperation,
 };
 use crate::xlm_handler::XlmHandler;
 
@@ -111,6 +111,16 @@ pub struct NftContractSetEvent {
     pub new_contract: Address,
 }
 
+/// Event emitted when an admin resolves a failed distribution.
+#[contracttype]
+#[derive(Clone, Debug)]
+pub struct DistributionResolvedEvent {
+    pub hunt_id: u64,
+    pub player: Address,
+    pub admin: Address,
+    pub resolution: ResolutionStatus,
+}
+
 /// Event emitted when emergency withdrawal is executed.
 #[contracttype]
 #[derive(Clone, Debug)]
@@ -130,6 +140,14 @@ pub struct EmergencyWithdrawalLogEntry {
     pub amount: i128,
     pub reason: soroban_sdk::String,
     pub timestamp: u64,
+}
+
+/// Paginated response for the audit log.
+#[contracttype]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PoolAuditLogResponse {
+    pub entries: Vec<PoolAuditEntry>,
+    pub total: u64,
 }
 
 #[contractimpl]
@@ -264,10 +282,18 @@ impl RewardManager {
             (symbol_short!("POOL_CRT"), hunt_id),
             RewardPoolCreatedEvent {
                 hunt_id,
-                creator,
+                creator: creator.clone(),
                 min_distribution_amount,
             },
         );
+
+        let audit_entry = PoolAuditEntry {
+            actor: creator.clone(),
+            operation: PoolOperation::Create,
+            timestamp: env.ledger().timestamp(),
+            amount: None,
+        };
+        Storage::append_audit_entry(&env, hunt_id, audit_entry);
 
         Ok(())
     }
@@ -402,6 +428,14 @@ impl RewardManager {
             },
         );
 
+        let audit_entry = PoolAuditEntry {
+            actor: funder.clone(),
+            operation: PoolOperation::Fund,
+            timestamp: env.ledger().timestamp(),
+            amount: Some(amount),
+        };
+        Storage::append_audit_entry(&env, hunt_id, audit_entry);
+
         Ok(())
     }
 
@@ -426,6 +460,15 @@ impl RewardManager {
         client.transfer(&contract_addr, &creator, &balance);
 
         Storage::set_pool_balance(&env, hunt_id, 0);
+
+        let audit_entry = PoolAuditEntry {
+            actor: creator.clone(),
+            operation: PoolOperation::Withdraw,
+            timestamp: env.ledger().timestamp(),
+            amount: Some(balance),
+        };
+        Storage::append_audit_entry(&env, hunt_id, audit_entry);
+
         Ok(())
     }
 
@@ -639,6 +682,14 @@ impl RewardManager {
         env.events()
             .publish((symbol_short!("RWD_DIST"), hunt_id), event);
 
+        let audit_entry = PoolAuditEntry {
+            actor: player_address.clone(),
+            operation: PoolOperation::Distribute,
+            timestamp: env.ledger().timestamp(),
+            amount: if xlm_amount > 0 { Some(xlm_amount) } else { None },
+        };
+        Storage::append_audit_entry(&env, hunt_id, audit_entry);
+
         Ok(())
     }
 
@@ -704,6 +755,55 @@ impl RewardManager {
         Storage::is_distributed(&env, hunt_id, &player)
     }
 
+    /// Manually resolves a distribution that failed mid-execution.
+    ///
+    /// Allows the contract admin to mark a distribution as either `Completed`
+    /// or `Refunded` when the automatic distribution process could not finish
+    /// (e.g., XLM was sent but NFT mint failed). This is a bookkeeping-only
+    /// operation and does not move funds.
+    ///
+    /// # Arguments
+    /// * `admin` - The contract admin address (must match the stored admin)
+    /// * `hunt_id` - The hunt whose distribution to resolve
+    /// * `player` - The player whose distribution to resolve
+    /// * `resolution` - Outcome: `ResolutionStatus::Completed` or `ResolutionStatus::Refunded`
+    ///
+    /// # Errors
+    /// * `NotInitialized` - Contract has not been initialized (no admin set)
+    /// * `Unauthorized` - Caller is not the contract admin
+    /// * `DistributionNotFound` - No distribution record exists for this hunt/player
+    pub fn admin_resolve_distribution(
+        env: Env,
+        admin: Address,
+        hunt_id: u64,
+        player: Address,
+        resolution: ResolutionStatus,
+    ) -> Result<(), RewardErrorCode> {
+        admin.require_auth();
+        let configured_admin = Storage::get_admin(&env).ok_or(RewardErrorCode::NotInitialized)?;
+        if configured_admin != admin {
+            return Err(RewardErrorCode::Unauthorized);
+        }
+
+        if !Storage::is_distributed(&env, hunt_id, &player) {
+            return Err(RewardErrorCode::DistributionNotFound);
+        }
+
+        Storage::set_distribution_resolution(&env, hunt_id, &player, &resolution);
+
+        env.events().publish(
+            (symbol_short!("RSLV_D"), hunt_id),
+            DistributionResolvedEvent {
+                hunt_id,
+                player,
+                admin,
+                resolution,
+            },
+        );
+
+        Ok(())
+    }
+
     /// Allows the admin to withdraw any unclaimed (surplus) XLM remaining in a reward pool.
     ///
     /// This is needed when a hunt concludes with fewer winners than anticipated,
@@ -762,10 +862,18 @@ impl RewardManager {
             (symbol_short!("ADM_WDR"), hunt_id),
             AdminWithdrawEvent {
                 hunt_id,
-                admin,
+                admin: admin.clone(),
                 amount: withdraw_amount,
             },
         );
+
+        let audit_entry = PoolAuditEntry {
+            actor: admin.clone(),
+            operation: PoolOperation::Withdraw,
+            timestamp: env.ledger().timestamp(),
+            amount: Some(withdraw_amount),
+        };
+        Storage::append_audit_entry(&env, hunt_id, audit_entry);
 
         Ok(())
     }
@@ -1011,6 +1119,40 @@ impl RewardManager {
 
     pub fn get_health_dashboard(env: Env) -> monitoring::ContractHealth {
         monitoring::Monitoring::health_dashboard(&env)
+    }
+
+    /// Exposes a paginated read query for the audit log of a given pool.
+    pub fn get_pool_audit_log(
+        env: Env,
+        hunt_id: u64,
+        start_after: Option<u64>,
+        limit: Option<u32>,
+    ) -> PoolAuditLogResponse {
+        let max_limit = 50;
+        let default_limit = 20;
+        let query_limit = limit.unwrap_or(default_limit).min(max_limit) as u64;
+
+        let total = Storage::get_pool_audit_count(&env, hunt_id);
+        let mut entries = Vec::new(&env);
+
+        if total == 0 {
+            return PoolAuditLogResponse { entries, total };
+        }
+
+        // Determine start index. start_after is a cursor index, so we start at start_after + 1.
+        // If None, we start at 0.
+        let mut current_idx = start_after.map(|idx| idx + 1).unwrap_or(0);
+        
+        let mut count = 0;
+        while count < query_limit && current_idx < total {
+            if let Some(entry) = Storage::get_pool_audit_entry(&env, hunt_id, current_idx) {
+                entries.push_back(entry);
+            }
+            current_idx += 1;
+            count += 1;
+        }
+
+        PoolAuditLogResponse { entries, total }
     }
 }
 

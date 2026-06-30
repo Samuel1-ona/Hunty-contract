@@ -1,0 +1,9 @@
+[tarpaulin]
+fail-under = 80.0
+out-type = ["Html", "Xml"]
+workspace = true
+exclude-files = [
+  "**/test.rs",
+  "**/test_*.rs",
+  "**/tests/**",
+]
