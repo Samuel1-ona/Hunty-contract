@@ -699,6 +699,14 @@ impl RewardManager {
         Storage::get_pool_balance(&env, hunt_id)
     }
 
+    /// Returns the minimum distribution amount configured for a hunt's reward pool.
+    /// Returns 0 if no pool has been created for the hunt.
+    pub fn get_min_distribution_amount(env: Env, hunt_id: u64) -> i128 {
+        Storage::get_pool_config(&env, hunt_id)
+            .map(|config| config.min_distribution_amount)
+            .unwrap_or(0)
+    }
+
     /// Returns whether a reward has been distributed to a player for a hunt.
     pub fn is_reward_distributed(env: Env, hunt_id: u64, player: Address) -> bool {
         Storage::is_distributed(&env, hunt_id, &player)

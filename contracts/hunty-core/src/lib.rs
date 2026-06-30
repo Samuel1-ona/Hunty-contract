@@ -607,15 +607,37 @@ impl HuntyCore {
         if let Some(reward_manager_addr) = Storage::get_reward_manager(&env) {
             let mut balance_args: Vec<Val> = Vec::new(&env);
             balance_args.push_back(hunt_id.into_val(&env));
+
+            // Query the pool balance from the reward manager
             let pool_balance = match env.try_invoke_contract::<i128, RewardErrorCode>(
                 &reward_manager_addr,
                 &Symbol::new(&env, "get_pool_balance"),
-                balance_args,
+                balance_args.clone(),
             ) {
                 Ok(Ok(balance)) => balance,
                 _ => return Err(HuntErrorCode::InsufficientRewardPool),
             };
             hunt.reward_config.xlm_pool = pool_balance;
+
+            // Query the minimum distribution amount for this pool
+            let min_distribution_amount = match env.try_invoke_contract::<i128, RewardErrorCode>(
+                &reward_manager_addr,
+                &Symbol::new(&env, "get_min_distribution_amount"),
+                balance_args,
+            ) {
+                Ok(Ok(amount)) => amount,
+                _ => 0,
+            };
+
+            // Validate pool balance >= min_distribution_amount * max_winners
+            if min_distribution_amount > 0 && hunt.reward_config.max_winners > 0 {
+                let required =
+                    min_distribution_amount.saturating_mul(hunt.reward_config.max_winners as i128);
+                if pool_balance < required {
+                    return Err(HuntErrorCode::InsufficientRewardPool);
+                }
+            }
+
             if !hunt.has_rewards_available() {
                 return Err(HuntErrorCode::InsufficientRewardPool);
             }
