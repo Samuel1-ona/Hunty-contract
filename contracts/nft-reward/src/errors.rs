@@ -13,4 +13,9 @@ pub enum NftErrorCode {
     AlreadyInitialized = 7,
     MaxSupplyReached = 8,
     NotInitialized = 9,
+    NotOperator = 10,
+    NftNotTransferable = 11,
+    NftLocked = 12,
+    InvalidMetadata = 13,
+    MetadataFrozen = 14,
 }

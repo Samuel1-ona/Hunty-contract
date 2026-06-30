@@ -2,8 +2,8 @@
 //!
 //! Validates: deploy → create hunt → register → submit answer → complete → verify balances → cancel/cleanup.
 
-use hunty_core::HuntyCore;
 use hunty_core::types::HuntStatus;
+use hunty_core::HuntyCore;
 use soroban_sdk::testutils::{Address as _, Ledger as _};
 use soroban_sdk::{Address, Env, String};
 
@@ -57,10 +57,13 @@ fn testnet_full_hunt_lifecycle_simulation() {
             1,
             player.clone(),
             String::from_str(&env, "paris"),
+            1,
+            env.ledger().timestamp(),
         )
         .unwrap();
 
-        let progress = HuntyCore::get_player_progress(env.clone(), hunt_id, player.clone()).unwrap();
+        let progress =
+            HuntyCore::get_player_progress(env.clone(), hunt_id, player.clone()).unwrap();
         assert!(progress.is_completed);
 
         HuntyCore::cancel_hunt(env.clone(), hunt_id, creator.clone()).unwrap();

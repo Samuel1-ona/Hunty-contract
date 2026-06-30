@@ -28,4 +28,4 @@ Before each applied migration, the previous version is stored. Call `rollback_mi
 |----------|---------|---------|
 | HuntyCore | Backfill `required_clues` from `total_clues` | Reserved |
 | RewardManager | Bump schema version | Reserved |
-| NftReward | Bump schema version | Reserved |
+| NftReward | Assign metadata version key (`(NVER, nft_id)`) for legacy NFTs | Reserved |

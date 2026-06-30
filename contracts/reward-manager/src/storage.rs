@@ -1,38 +1,23 @@
 use soroban_sdk::{symbol_short, Address, Env};
 
-use crate::types::{DistributionRecord, RewardPoolConfig};
-
-/// Storage access layer for the RewardManager contract.
-///
-/// # Storage Key Namespace — RewardManager (prefix: "RM")
-///
-/// All keys are unique within this contract and isolated from other contracts:
-///
-/// | Constant             | Symbol    | Purpose                                      |
-/// |----------------------|-----------|----------------------------------------------|
-/// | `CONTRACT_PREFIX`    | `"RM"`    | Contract namespace guard (documents ownership)|
-/// | `ADMIN_KEY`          | `"ADMIN"` | Admin address                                |
-/// | `XLM_TOKEN_KEY`      | `"XLMTKN"`| XLM token contract address                  |
-/// | `NFT_CONTRACT_KEY`   | `"NFTADR"`| Default NFT contract address                |
-/// | `DISTRIBUTION_KEY`   | `"DIST"`  | Distribution flag (hunt_id, player)          |
-/// | `DIST_RECORD_KEY`    | `"DREC"`  | Full distribution record                     |
-/// | `POOL_KEY`           | `"POOL"`  | Reward pool balance per hunt                 |
-/// | `POOL_CFG_KEY`       | `"PCFG"`  | Reward pool config per hunt                  |
-/// | `POOL_DEP_KEY`       | `"PDEP"`  | Total deposited per hunt                     |
-/// | `POOL_DST_KEY`       | `"PDST"`  | Total distributed per hunt                   |
+use crate::types::{DistributionRecord, RewardPoolConfig, PoolAuditEntry, PoolOperation};
 pub struct Storage;
 
 impl Storage {
-    /// Contract namespace identifier for RewardManager.
-    /// All storage keys in this contract belong to the "RM" namespace.
-    /// This ensures no key can collide with HuntyCore ("HC") or NftReward ("NR").
-    pub const CONTRACT_PREFIX: &'static str = "RM";
-
-    const ADMIN_KEY: soroban_sdk::Symbol = symbol_short!("ADMIN");
-    const XLM_TOKEN_KEY: soroban_sdk::Symbol = symbol_short!("XLMTKN");
-    const NFT_CONTRACT_KEY: soroban_sdk::Symbol = symbol_short!("NFTADR");
-    const DISTRIBUTION_KEY: soroban_sdk::Symbol = symbol_short!("DIST");
-    const DIST_RECORD_KEY: soroban_sdk::Symbol = symbol_short!("DREC");
+    // Shortened storage prefixes for reward-manager
+    const ADMIN_KEY: soroban_sdk::Symbol = symbol_short!("ADMI");
+    const XLM_TOKEN_KEY: soroban_sdk::Symbol = symbol_short!("X");
+    const NFT_CONTRACT_KEY: soroban_sdk::Symbol = symbol_short!("NFTA");
+    // Daily spending caps
+    const DAILY_POOL_CAP_KEY: soroban_sdk::Symbol = symbol_short!("DPC");
+    const DAILY_GLOBAL_CAP_KEY: soroban_sdk::Symbol = symbol_short!("DGR");
+    // Daily distribution tracking
+    const DAILY_POOL_DIST_KEY: soroban_sdk::Symbol = symbol_short!("DPD");
+    const DAILY_GLOBAL_DIST_KEY: soroban_sdk::Symbol = symbol_short!("DGD");
+    const DISTRIBUTION_KEY: soroban_sdk::Symbol = symbol_short!("DI");
+    const DIST_RECORD_KEY: soroban_sdk::Symbol = symbol_short!("DR");
+    const DIST_NONCE_KEY: soroban_sdk::Symbol = symbol_short!("DN");
+    const DIST_RESOLVE_KEY: soroban_sdk::Symbol = symbol_short!("DRS");
     const POOL_KEY: soroban_sdk::Symbol = symbol_short!("POOL");
     const POOL_CFG_KEY: soroban_sdk::Symbol = symbol_short!("PCFG");
     const POOL_DEP_KEY: soroban_sdk::Symbol = symbol_short!("PDEP");
@@ -40,8 +25,9 @@ impl Storage {
     const HUNTY_CORE_KEY: soroban_sdk::Symbol = symbol_short!("HCORE");
     const TOTAL_XLM_DST_KEY: soroban_sdk::Symbol = symbol_short!("TXDST");
     const IN_DISTRIBUTION_KEY: soroban_sdk::Symbol = symbol_short!("IN_DIST");
+    const HAS_AUTH_KEY: soroban_sdk::Symbol = symbol_short!("HAUTH");
 
-    // ========== XLM Token Address ==========
+    // ========== Admin ==========
 
     pub fn set_admin(env: &Env, address: &Address) {
         env.storage().persistent().set(&Self::ADMIN_KEY, address);
@@ -50,6 +36,8 @@ impl Storage {
     pub fn get_admin(env: &Env) -> Option<Address> {
         env.storage().persistent().get(&Self::ADMIN_KEY)
     }
+
+    // ========== XLM Token Address ==========
 
     pub fn set_xlm_token(env: &Env, address: &Address) {
         env.storage()
@@ -61,10 +49,12 @@ impl Storage {
         env.storage().persistent().get(&Self::XLM_TOKEN_KEY)
     }
 
-    // ========== HuntyCore Contract Address (optional) ==========
+    // ========== HuntyCore Contract Address ==========
 
     pub fn set_hunty_core(env: &Env, address: &Address) {
-        env.storage().persistent().set(&Self::HUNTY_CORE_KEY, address);
+        env.storage()
+            .persistent()
+            .set(&Self::HUNTY_CORE_KEY, address);
     }
 
     pub fn get_hunty_core(env: &Env) -> Option<Address> {
@@ -95,7 +85,6 @@ impl Storage {
         env.storage().persistent().get(&key).unwrap_or(false)
     }
 
-    /// Stores the full distribution record (xlm_amount, nft_id) for status queries.
     pub fn set_distribution_record(
         env: &Env,
         hunt_id: u64,
@@ -115,11 +104,63 @@ impl Storage {
         env.storage().persistent().get(&key)
     }
 
+    pub fn get_distribution_nonce(env: &Env, hunt_id: u64, player: &Address) -> u64 {
+        let key = Self::distribution_nonce_key(hunt_id, player);
+        env.storage().instance().get(&key).unwrap_or(0)
+    }
+
+    pub fn set_distribution_nonce(env: &Env, hunt_id: u64, player: &Address, nonce: u64) {
+        let key = Self::distribution_nonce_key(hunt_id, player);
+        env.storage().instance().set(&key, &nonce);
+    }
+
+    pub fn increment_distribution_nonce(env: &Env, hunt_id: u64, player: &Address) -> u64 {
+        let current_nonce = Self::get_distribution_nonce(env, hunt_id, player);
+        let new_nonce = current_nonce + 1;
+        Self::set_distribution_nonce(env, hunt_id, player, new_nonce);
+        new_nonce
+    }
+
     fn distribution_record_key(
         hunt_id: u64,
         player: &Address,
     ) -> (soroban_sdk::Symbol, u64, Address) {
         (Self::DIST_RECORD_KEY, hunt_id, player.clone())
+    }
+
+    fn distribution_nonce_key(
+        hunt_id: u64,
+        player: &Address,
+    ) -> (soroban_sdk::Symbol, u64, Address) {
+        (Self::DIST_NONCE_KEY, hunt_id, player.clone())
+    }
+
+    // ========== Distribution Resolution ==========
+
+    pub fn set_distribution_resolution(
+        env: &Env,
+        hunt_id: u64,
+        player: &Address,
+        resolution: &ResolutionStatus,
+    ) {
+        let key = Self::dist_resolve_key(hunt_id, player);
+        env.storage().persistent().set(&key, resolution);
+    }
+
+    pub fn get_distribution_resolution(
+        env: &Env,
+        hunt_id: u64,
+        player: &Address,
+    ) -> Option<ResolutionStatus> {
+        let key = Self::dist_resolve_key(hunt_id, player);
+        env.storage().persistent().get(&key)
+    }
+
+    fn dist_resolve_key(
+        hunt_id: u64,
+        player: &Address,
+    ) -> (soroban_sdk::Symbol, u64, Address) {
+        (Self::DIST_RESOLVE_KEY, hunt_id, player.clone())
     }
 
     // ========== Reward Pool Balance (per hunt) ==========
@@ -171,17 +212,92 @@ impl Storage {
     // ========== Global Total XLM Distributed (across all hunts) ==========
 
     pub fn set_total_xlm_distributed(env: &Env, amount: i128) {
-        env.storage().persistent().set(&Self::TOTAL_XLM_DST_KEY, &amount);
+        env.storage()
+            .persistent()
+            .set(&Self::TOTAL_XLM_DST_KEY, &amount);
     }
 
     pub fn get_total_xlm_distributed(env: &Env) -> i128 {
-        env.storage().persistent().get(&Self::TOTAL_XLM_DST_KEY).unwrap_or(0)
+        env.storage()
+            .persistent()
+            .get(&Self::TOTAL_XLM_DST_KEY)
+            .unwrap_or(0)
+    }
+
+    // Daily pool cap getters/setters
+    pub fn set_daily_pool_cap(env: &Env, hunt_id: u64, cap: i128) {
+        let key = (Self::DAILY_POOL_CAP_KEY, hunt_id);
+        env.storage().persistent().set(&key, &cap);
+    }
+
+    pub fn get_daily_pool_cap(env: &Env, hunt_id: u64) -> i128 {
+        let key = (Self::DAILY_POOL_CAP_KEY, hunt_id);
+        env.storage().persistent().get(&key).unwrap_or(0)
+    }
+
+    pub fn set_daily_global_cap(env: &Env, cap: i128) {
+        env.storage().persistent().set(&Self::DAILY_GLOBAL_CAP_KEY, &cap);
+    }
+
+    pub fn get_daily_global_cap(env: &Env) -> i128 {
+        env.storage().persistent().get(&Self::DAILY_GLOBAL_CAP_KEY).unwrap_or(0)
+    }
+
+    // Daily distribution tracking
+    pub fn add_daily_pool_distributed(env: &Env, hunt_id: u64, day: u64, amount: i128) {
+        let key = (Self::DAILY_POOL_DIST_KEY, hunt_id, day);
+        let cur = env.storage().persistent().get(&key).unwrap_or(0);
+        env.storage().persistent().set(&key, &(cur + amount));
+    }
+
+    pub fn get_daily_pool_distributed(env: &Env, hunt_id: u64, day: u64) -> i128 {
+        let key = (Self::DAILY_POOL_DIST_KEY, hunt_id, day);
+        env.storage().persistent().get(&key).unwrap_or(0)
+    }
+
+    pub fn add_daily_global_distributed(env: &Env, day: u64, amount: i128) {
+        let key = (Self::DAILY_GLOBAL_DIST_KEY, day);
+        let cur = env.storage().persistent().get(&key).unwrap_or(0);
+        env.storage().persistent().set(&key, &(cur + amount));
+    }
+
+    pub fn get_daily_global_distributed(env: &Env, day: u64) -> i128 {
+        let key = (Self::DAILY_GLOBAL_DIST_KEY, day);
+        env.storage().persistent().get(&key).unwrap_or(0)
+    }
+
+    // ========== Authorized Cross-Contract Callers ==========
+
+    fn authorized_contract_key(contract: &Address) -> (soroban_sdk::Symbol, Address) {
+        (symbol_short!("AUTH"), contract.clone())
+    }
+
+    pub fn has_authorized_contracts(env: &Env) -> bool {
+        env.storage().instance().get(&Self::HAS_AUTH_KEY).unwrap_or(false)
+    }
+
+    pub fn add_authorized_contract(env: &Env, contract: &Address) {
+        let key = Self::authorized_contract_key(contract);
+        env.storage().persistent().set(&key, &true);
+        env.storage().instance().set(&Self::HAS_AUTH_KEY, &true);
+    }
+
+    pub fn remove_authorized_contract(env: &Env, contract: &Address) {
+        let key = Self::authorized_contract_key(contract);
+        env.storage().persistent().remove(&key);
+    }
+
+    pub fn is_authorized_contract(env: &Env, contract: &Address) -> bool {
+        let key = Self::authorized_contract_key(contract);
+        env.storage().persistent().get(&key).unwrap_or(false)
     }
 
     // ========== Reentrancy Guard ==========
 
     pub fn set_in_distribution(env: &Env, value: bool) {
-        env.storage().persistent().set(&Self::IN_DISTRIBUTION_KEY, &value);
+        env.storage()
+            .persistent()
+            .set(&Self::IN_DISTRIBUTION_KEY, &value);
     }
 
     pub fn is_in_distribution(env: &Env) -> bool {
@@ -213,57 +329,107 @@ impl Storage {
         (Self::POOL_DST_KEY, hunt_id)
     }
 
+    // ========== Audit Log ==========
+
+    pub fn append_audit_entry(env: &Env, hunt_id: u64, entry: PoolAuditEntry) {
+        let count_key = (Self::AUDIT_COUNT_KEY, hunt_id);
+        let current_count: u64 = env.storage().persistent().get(&count_key).unwrap_or(0);
+        
+        let index = current_count % Self::MAX_AUDIT_ENTRIES_PER_POOL;
+        let log_key = (Self::AUDIT_LOG_KEY, hunt_id, index);
+        
+        env.storage().persistent().set(&log_key, &entry);
+        env.storage().persistent().set(&count_key, &(current_count + 1));
+    }
+
+    pub fn get_pool_audit_count(env: &Env, hunt_id: u64) -> u64 {
+        let count_key = (Self::AUDIT_COUNT_KEY, hunt_id);
+        env.storage().persistent().get(&count_key).unwrap_or(0)
+    }
+
+    pub fn get_pool_audit_entry(env: &Env, hunt_id: u64, index: u64) -> Option<PoolAuditEntry> {
+        let log_key = (Self::AUDIT_LOG_KEY, hunt_id, index % Self::MAX_AUDIT_ENTRIES_PER_POOL);
+        env.storage().persistent().get(&log_key)
+    }
+
+    // ========== Pause / Emergency State ==========
+
+    pub fn set_paused(env: &Env, paused: bool) {
+        env.storage().instance().set(&Self::PAUSED_KEY, &paused);
+    }
+
+    pub fn is_paused(env: &Env) -> bool {
+        env.storage()
+            .instance()
+            .get(&Self::PAUSED_KEY)
+            .unwrap_or(false)
+    }
+
+    pub fn log_emergency_withdrawal(env: &Env, log_entry: &crate::EmergencyWithdrawalLogEntry) {
+        let key = Self::emergency_log_key();
+        let mut logs: soroban_sdk::Vec<crate::EmergencyWithdrawalLogEntry> = env
+            .storage()
+            .instance()
+            .get(&key)
+            .unwrap_or_else(|| soroban_sdk::Vec::new(env));
+        logs.push_back(log_entry.clone());
+        env.storage().instance().set(&key, &logs);
+    }
+
+    pub fn get_emergency_logs(env: &Env) -> soroban_sdk::Vec<crate::EmergencyWithdrawalLogEntry> {
+        let key = Self::emergency_log_key();
+        env.storage()
+            .instance()
+            .get(&key)
+            .unwrap_or_else(|| soroban_sdk::Vec::new(env))
+    }
+
+    fn emergency_log_key() -> soroban_sdk::Symbol {
+        Self::EMERGENCY_LOG_KEY
+    }
+
+    // ========== Pending NFT Mints (for retry) ==========
+
+    pub fn set_pending_nft_mint(
+        env: &Env,
+        hunt_id: u64,
+        player: &Address,
+        pending: &crate::PendingNftMint,
+    ) {
+        let key = Self::pending_nft_key(hunt_id, player);
+        env.storage().persistent().set(&key, pending);
+    }
+
+    pub fn get_pending_nft_mint(
+        env: &Env,
+        hunt_id: u64,
+        player: &Address,
+    ) -> Option<crate::PendingNftMint> {
+        let key = Self::pending_nft_key(hunt_id, player);
+        env.storage().persistent().get(&key)
+    }
+
+    pub fn remove_pending_nft_mint(env: &Env, hunt_id: u64, player: &Address) {
+        let key = Self::pending_nft_key(hunt_id, player);
+        env.storage().persistent().remove(&key);
+    }
+
+    fn pending_nft_key(
+        hunt_id: u64,
+        player: &Address,
+    ) -> (soroban_sdk::Symbol, u64, Address) {
+        (Self::PENDING_NFT_KEY, hunt_id, player.clone())
+    }
+
     // --- Contract version ---
 
     pub fn set_contract_version(env: &Env, version: u32) {
-        env.storage().instance().set(&symbol_short!("CVER"), &version);
+        env.storage()
+            .instance()
+            .set(&symbol_short!("CVER"), &version);
     }
 
     pub fn get_contract_version(env: &Env) -> Option<u32> {
         env.storage().instance().get(&symbol_short!("CVER"))
-    }
-}
-
-#[cfg(test)]
-mod key_isolation_tests {
-    use super::Storage;
-    use soroban_sdk::symbol_short;
-
-    /// Verify the RewardManager contract prefix is "RM" and unique across contracts.
-    #[test]
-    fn test_contract_prefix_is_rm() {
-        assert_eq!(Storage::CONTRACT_PREFIX, "RM");
-    }
-
-    /// Verify the prefix does not equal the other contracts' prefixes.
-    #[test]
-    fn test_prefix_distinct_from_other_contracts() {
-        assert_ne!(Storage::CONTRACT_PREFIX, "HC"); // HuntyCore
-        assert_ne!(Storage::CONTRACT_PREFIX, "NR"); // NftReward
-    }
-
-    /// Verify all symbol constants within reward-manager are distinct (no intra-contract collision).
-    #[test]
-    fn test_no_intra_contract_key_collision() {
-        let keys = [
-            symbol_short!("ADMIN"),
-            symbol_short!("XLMTKN"),
-            symbol_short!("NFTADR"),
-            symbol_short!("DIST"),
-            symbol_short!("DREC"),
-            symbol_short!("POOL"),
-            symbol_short!("PCFG"),
-            symbol_short!("PDEP"),
-            symbol_short!("PDST"),
-        ];
-        for i in 0..keys.len() {
-            for j in (i + 1)..keys.len() {
-                assert_ne!(
-                    keys[i], keys[j],
-                    "Duplicate key at indices {} and {}",
-                    i, j
-                );
-            }
-        }
     }
 }

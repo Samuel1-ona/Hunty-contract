@@ -26,6 +26,23 @@ pub enum HuntErrorCode {
     RewardAlreadyClaimed = 19,
     RewardDistributionFailed = 20,
     NoRewardsConfigured = 21,
+    DuplicateSubmission = 22,
+    SubmissionExpired = 23,
+    BannedPlayer = 24,
+    NoRequiredClues = 25,
+    RateLimitExceeded = 26,
+    ScoreOverflow = 27,
+    RegistrationsPaused = 28,
+    AnswersPaused = 29,
+    RewardsPaused = 30,
+    HuntEndTimeInPast = 31,
+    NoPendingAdmin = 32,
+    PendingAdminMismatch = 33,
+    InvalidRarity = 34,
+    InvalidTimeBonusConfig = 35,
+    AddressBlacklisted = 36,
+    ContractPaused = 37,
+    InvalidMaxAttempts = 38,
 }
 
 #[derive(Debug)]
@@ -49,6 +66,23 @@ pub enum HuntError {
     RewardAlreadyClaimed { hunt_id: u64 },
     RewardDistributionFailed { hunt_id: u64 },
     NoRewardsConfigured { hunt_id: u64 },
+    DuplicateSubmission { hunt_id: u64, clue_id: u32 },
+    SubmissionExpired { submitted_at: u64, current_time: u64 },
+    BannedPlayer { hunt_id: u64, player: soroban_sdk::Address },
+    NoRequiredClues { hunt_id: u64 },
+    RateLimitExceeded { cooldown_remaining: u64 },
+    ScoreOverflow,
+    RegistrationsPaused,
+    AnswersPaused,
+    RewardsPaused,
+    HuntEndTimeInPast { end_time: u64, current_time: u64 },
+    NoPendingAdmin,
+    PendingAdminMismatch { expected: soroban_sdk::Address, actual: soroban_sdk::Address },
+    AdminAlreadyProposed { pending: soroban_sdk::Address },
+    InvalidRarity { value: u32 },
+    InvalidTimeBonusConfig,
+    AddressBlacklisted,
+    ContractPaused,
 }
 
 impl fmt::Display for HuntError {
@@ -118,6 +152,72 @@ impl fmt::Display for HuntError {
             HuntError::NoRewardsConfigured { hunt_id } => {
                 write!(f, "No rewards configured for hunt {}", hunt_id)
             }
+            HuntError::DuplicateSubmission { hunt_id, clue_id } => {
+                write!(
+                    f,
+                    "Duplicate submission detected for hunt {} clue {}",
+                    hunt_id, clue_id
+                )
+            }
+            HuntError::SubmissionExpired {
+                submitted_at,
+                current_time,
+            } => {
+                write!(
+                    f,
+                    "Submission expired or invalid: submitted_at {}, current_time {}",
+                    submitted_at, current_time
+                )
+            }
+            HuntError::BannedPlayer { hunt_id, player } => {
+                write!(f, "Player {:?} is banned from hunt {}", player, hunt_id)
+            }
+            HuntError::NoRequiredClues { hunt_id } => {
+                write!(f, "Hunt {} has no required clues; at least one required clue must exist before activation", hunt_id)
+            }
+            HuntError::RateLimitExceeded { cooldown_remaining } => {
+                write!(f, "Rate limit exceeded. Try again in {} seconds", cooldown_remaining)
+            }
+            HuntError::ScoreOverflow => {
+                write!(f, "Score calculation overflow")
+            }
+            HuntError::RegistrationsPaused => {
+                write!(f, "Registrations are currently paused")
+            }
+            HuntError::AnswersPaused => {
+                write!(f, "Answer submissions are currently paused")
+            }
+            HuntError::RewardsPaused => {
+                write!(f, "Reward claims are currently paused")
+            }
+            HuntError::HuntEndTimeInPast { end_time, current_time } => {
+                write!(f, "Hunt end_time {} is in the past (current time: {})", end_time, current_time)
+            }
+            HuntError::NoPendingAdmin => {
+                write!(f, "No pending admin rotation to accept")
+            }
+            HuntError::PendingAdminMismatch { expected, actual } => {
+                write!(
+                    f,
+                    "Pending admin mismatch: expected {:?}, got {:?}",
+                    expected, actual
+                )
+            }
+            HuntError::AdminAlreadyProposed { pending } => {
+                write!(f, "Admin rotation already proposed for {:?}", pending)
+            }
+            HuntError::AddressBlacklisted => {
+                write!(f, "Address is blacklisted from creating hunts")
+            }
+            HuntError::InvalidRarity { value } => {
+                write!(f, "Invalid rarity value: {}", value)
+            }
+            HuntError::InvalidTimeBonusConfig => {
+                write!(f, "Invalid time bonus configuration")
+            }
+            HuntError::ContractPaused => {
+                write!(f, "Contract is currently paused")
+            }
         }
     }
 }
@@ -144,6 +244,23 @@ impl From<HuntError> for HuntErrorCode {
             HuntError::RewardAlreadyClaimed { .. } => HuntErrorCode::RewardAlreadyClaimed,
             HuntError::RewardDistributionFailed { .. } => HuntErrorCode::RewardDistributionFailed,
             HuntError::NoRewardsConfigured { .. } => HuntErrorCode::NoRewardsConfigured,
+            HuntError::DuplicateSubmission { .. } => HuntErrorCode::DuplicateSubmission,
+            HuntError::SubmissionExpired { .. } => HuntErrorCode::SubmissionExpired,
+            HuntError::BannedPlayer { .. } => HuntErrorCode::BannedPlayer,
+            HuntError::NoRequiredClues { .. } => HuntErrorCode::NoRequiredClues,
+            HuntError::RateLimitExceeded { .. } => HuntErrorCode::RateLimitExceeded,
+            HuntError::ScoreOverflow => HuntErrorCode::ScoreOverflow,
+            HuntError::RegistrationsPaused => HuntErrorCode::RegistrationsPaused,
+            HuntError::AnswersPaused => HuntErrorCode::AnswersPaused,
+            HuntError::RewardsPaused => HuntErrorCode::RewardsPaused,
+            HuntError::HuntEndTimeInPast { .. } => HuntErrorCode::HuntEndTimeInPast,
+            HuntError::NoPendingAdmin => HuntErrorCode::NoPendingAdmin,
+            HuntError::PendingAdminMismatch { .. } => HuntErrorCode::PendingAdminMismatch,
+            HuntError::AdminAlreadyProposed { .. } => HuntErrorCode::Unauthorized,
+            HuntError::InvalidRarity { .. } => HuntErrorCode::InvalidRarity,
+            HuntError::InvalidTimeBonusConfig => HuntErrorCode::InvalidTimeBonusConfig,
+            HuntError::AddressBlacklisted => HuntErrorCode::AddressBlacklisted,
+            HuntError::ContractPaused => HuntErrorCode::ContractPaused,
         }
     }
 }
