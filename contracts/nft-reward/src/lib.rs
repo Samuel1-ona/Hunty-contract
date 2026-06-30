@@ -905,11 +905,13 @@ impl NftReward {
     /// * `nft_id` - The NFT to transfer
     /// * `from_address` - Current owner of the NFT
     /// * `to_address` - New owner
-    /// * `caller` - Address authorizing the transfer (must be owner or approved operator)
+    /// * `caller` - Address authorizing the transfer (must be owner, approved address, or approved operator)
     ///
     /// # Authorization
-    /// `caller` must authorize this call. `caller` must be either the current owner
-    /// or an operator approved by the owner via `set_operator`.
+    /// `caller` must authorize this call. `caller` must be either:
+    /// - The current owner
+    /// - An operator approved by the owner via `set_operator`
+    /// - An address approved for this specific NFT via `approve`
     pub fn transfer_nft(
         env: Env,
         nft_id: u64,
@@ -926,8 +928,13 @@ impl NftReward {
             return Err(crate::errors::NftErrorCode::NotOwner);
         }
 
-        // caller must be the owner or an approved operator
-        if caller != nft.owner && !Storage::is_operator(&env, &nft.owner, &caller) {
+        // Check if caller is authorized: owner, operator, or approved address
+        let is_owner = caller == nft.owner;
+        let is_operator = Storage::is_operator(&env, &nft.owner, &caller);
+        let approved = Storage::get_approval(&env, nft_id);
+        let is_approved = approved.as_ref().map(|a| a == &caller).unwrap_or(false);
+
+        if !is_owner && !is_operator && !is_approved {
             return Err(crate::errors::NftErrorCode::NotOperator);
         }
 
@@ -978,6 +985,9 @@ impl NftReward {
         nft.owner = to_address.clone();
         Storage::save_nft(&env, &nft);
         Storage::add_nft_to_owner(&env, &to_address, nft_id);
+
+        // Clear approval after successful transfer
+        Storage::clear_approval(&env, nft_id);
 
         env.events().publish(
             (Symbol::new(&env, "NftTransferred"), nft_id),
@@ -1033,6 +1043,83 @@ impl NftReward {
     /// Returns true if `operator` is approved to manage all NFTs of `owner`.
     pub fn is_operator(env: Env, owner: Address, operator: Address) -> bool {
         Storage::is_operator(&env, &owner, &operator)
+    }
+
+    /// Approves an address to transfer a specific NFT on behalf of the owner.
+    ///
+    /// # Arguments
+    /// * `caller` - The NFT owner authorizing the approval
+    /// * `nft_id` - The NFT to approve for
+    /// * `approved` - The address being approved to transfer this NFT
+    ///
+    /// # Authorization
+    /// `caller` must authorize this call and must be the current owner of the NFT.
+    pub fn approve(
+        env: Env,
+        caller: Address,
+        nft_id: u64,
+        approved: Address,
+    ) -> Result<(), crate::errors::NftErrorCode> {
+        caller.require_auth();
+
+        let nft = Storage::get_nft(&env, nft_id)
+            .ok_or(crate::errors::NftErrorCode::NftNotFound)?;
+
+        if nft.owner != caller {
+            return Err(crate::errors::NftErrorCode::NotOwner);
+        }
+
+        Storage::set_approval(&env, nft_id, &approved);
+
+        env.events().publish(
+            (Symbol::new(&env, "Approved"), nft_id),
+            (caller, approved, nft_id),
+        );
+
+        Ok(())
+    }
+
+    /// Returns the approved address for a specific NFT, if any.
+    ///
+    /// # Arguments
+    /// * `nft_id` - The NFT to query
+    ///
+    /// # Returns
+    /// The approved address, or `None` if no approval is set.
+    pub fn get_approved(env: Env, nft_id: u64) -> Option<Address> {
+        Storage::get_approval(&env, nft_id)
+    }
+
+    /// Revokes approval for a specific NFT.
+    ///
+    /// # Arguments
+    /// * `caller` - The NFT owner revoking the approval
+    /// * `nft_id` - The NFT whose approval should be revoked
+    ///
+    /// # Authorization
+    /// `caller` must authorize this call and must be the current owner of the NFT.
+    pub fn revoke_approval(
+        env: Env,
+        caller: Address,
+        nft_id: u64,
+    ) -> Result<(), crate::errors::NftErrorCode> {
+        caller.require_auth();
+
+        let nft = Storage::get_nft(&env, nft_id)
+            .ok_or(crate::errors::NftErrorCode::NftNotFound)?;
+
+        if nft.owner != caller {
+            return Err(crate::errors::NftErrorCode::NotOwner);
+        }
+
+        Storage::clear_approval(&env, nft_id);
+
+        env.events().publish(
+            (Symbol::new(&env, "ApprovalRevoked"), nft_id),
+            (caller, nft_id),
+        );
+
+        Ok(())
     }
 
     pub fn get_schema_version(env: Env) -> u32 {

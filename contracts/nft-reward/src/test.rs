@@ -590,10 +590,183 @@ fn test_transfer_nft_emits_event() {
     let metadata = create_metadata(&env, "Event NFT", "Desc", "ipfs://event");
 
     let nft_id = client.mint_reward_nft_from_map(&reward_manager, &1, &from, &metadata);
-    client.transfer_nft(&nft_id, &from, &to);
+    client.transfer_nft(&nft_id, &from, &to, &from);
 
     // Transfer succeeded; NftTransferred event is emitted by transfer_nft
     assert_eq!(client.owner_of(&nft_id), Some(to));
+}
+
+// =========================================================================
+// NFT APPROVAL TESTS - Per-token delegation system
+// =========================================================================
+
+#[test]
+fn test_approve_and_get_approved() {
+    let env = setup_env();
+    let (client, _) = setup_nft_reward(&env, None);
+    let admin = client.get_admin().unwrap();
+    let reward_manager = Address::generate(&env);
+    client.set_reward_manager(&admin, &reward_manager);
+
+    let owner = Address::generate(&env);
+    let spender = Address::generate(&env);
+    let metadata = create_metadata(&env, "Approval Test", "Test approve", "ipfs://approve");
+
+    let nft_id = client.mint_reward_nft_from_map(&reward_manager, &1, &owner, &metadata);
+
+    // Initially no approval
+    assert_eq!(client.get_approved(&nft_id), None);
+
+    // Owner approves spender
+    client.approve(&owner, &nft_id, &spender).unwrap();
+
+    // Verify approval is set
+    assert_eq!(client.get_approved(&nft_id), Some(spender));
+}
+
+#[test]
+fn test_approved_address_can_transfer() {
+    let env = setup_env();
+    let (client, _) = setup_nft_reward(&env, None);
+    let admin = client.get_admin().unwrap();
+    let reward_manager = Address::generate(&env);
+    client.set_reward_manager(&admin, &reward_manager);
+
+    let owner = Address::generate(&env);
+    let spender = Address::generate(&env);
+    let recipient = Address::generate(&env);
+    let metadata = create_metadata(&env, "Spender NFT", "Desc", "ipfs://spender");
+
+    let nft_id = client.mint_reward_nft_from_map(&reward_manager, &1, &owner, &metadata);
+
+    // Owner approves spender
+    client.approve(&owner, &nft_id, &spender).unwrap();
+
+    // Spender transfers to recipient (using spender as caller)
+    client.transfer_nft(&nft_id, &owner, &recipient, &spender).unwrap();
+
+    // Verify new owner
+    assert_eq!(client.owner_of(&nft_id), Some(recipient.clone()));
+
+    // Verify approval was cleared after transfer
+    assert_eq!(client.get_approved(&nft_id), None);
+}
+
+#[test]
+fn test_approval_cleared_after_transfer() {
+    let env = setup_env();
+    let (client, _) = setup_nft_reward(&env, None);
+    let admin = client.get_admin().unwrap();
+    let reward_manager = Address::generate(&env);
+    client.set_reward_manager(&admin, &reward_manager);
+
+    let owner = Address::generate(&env);
+    let spender = Address::generate(&env);
+    let recipient = Address::generate(&env);
+    let metadata = create_metadata(&env, "Clear Approval NFT", "Desc", "ipfs://clear");
+
+    let nft_id = client.mint_reward_nft_from_map(&reward_manager, &1, &owner, &metadata);
+
+    // Owner approves spender
+    client.approve(&owner, &nft_id, &spender).unwrap();
+    assert_eq!(client.get_approved(&nft_id), Some(spender.clone()));
+
+    // Owner transfers (owner is still authorized)
+    client.transfer_nft(&nft_id, &owner, &recipient, &owner).unwrap();
+
+    // Verify approval was cleared
+    assert_eq!(client.get_approved(&nft_id), None);
+}
+
+#[test]
+#[should_panic]
+fn test_only_owner_can_approve() {
+    let env = setup_env();
+    let (client, _) = setup_nft_reward(&env, None);
+    let admin = client.get_admin().unwrap();
+    let reward_manager = Address::generate(&env);
+    client.set_reward_manager(&admin, &reward_manager);
+
+    let owner = Address::generate(&env);
+    let non_owner = Address::generate(&env);
+    let spender = Address::generate(&env);
+    let metadata = create_metadata(&env, "Owner Only NFT", "Desc", "ipfs://owner_only");
+
+    let nft_id = client.mint_reward_nft_from_map(&reward_manager, &1, &owner, &metadata);
+
+    // Non-owner tries to approve - should panic
+    client.approve(&non_owner, &nft_id, &spender).unwrap();
+}
+
+#[test]
+fn test_revoke_approval() {
+    let env = setup_env();
+    let (client, _) = setup_nft_reward(&env, None);
+    let admin = client.get_admin().unwrap();
+    let reward_manager = Address::generate(&env);
+    client.set_reward_manager(&admin, &reward_manager);
+
+    let owner = Address::generate(&env);
+    let spender = Address::generate(&env);
+    let metadata = create_metadata(&env, "Revoke Test NFT", "Desc", "ipfs://revoke");
+
+    let nft_id = client.mint_reward_nft_from_map(&reward_manager, &1, &owner, &metadata);
+
+    // Owner approves spender
+    client.approve(&owner, &nft_id, &spender).unwrap();
+    assert_eq!(client.get_approved(&nft_id), Some(spender));
+
+    // Owner revokes approval
+    client.revoke_approval(&owner, &nft_id).unwrap();
+
+    // Verify approval is removed
+    assert_eq!(client.get_approved(&nft_id), None);
+}
+
+#[test]
+#[should_panic]
+fn test_revoked_address_cannot_transfer() {
+    let env = setup_env();
+    let (client, _) = setup_nft_reward(&env, None);
+    let admin = client.get_admin().unwrap();
+    let reward_manager = Address::generate(&env);
+    client.set_reward_manager(&admin, &reward_manager);
+
+    let owner = Address::generate(&env);
+    let spender = Address::generate(&env);
+    let recipient = Address::generate(&env);
+    let metadata = create_metadata(&env, "Cannot Transfer NFT", "Desc", "ipfs://notr");
+
+    let nft_id = client.mint_reward_nft_from_map(&reward_manager, &1, &owner, &metadata);
+
+    // Owner approves spender
+    client.approve(&owner, &nft_id, &spender).unwrap();
+
+    // Owner revokes approval
+    client.revoke_approval(&owner, &nft_id).unwrap();
+
+    // Spender tries to transfer - should panic
+    client.transfer_nft(&nft_id, &owner, &recipient, &spender).unwrap();
+}
+
+#[test]
+#[should_panic]
+fn test_non_approved_cannot_transfer() {
+    let env = setup_env();
+    let (client, _) = setup_nft_reward(&env, None);
+    let admin = client.get_admin().unwrap();
+    let reward_manager = Address::generate(&env);
+    client.set_reward_manager(&admin, &reward_manager);
+
+    let owner = Address::generate(&env);
+    let random_address = Address::generate(&env);
+    let recipient = Address::generate(&env);
+    let metadata = create_metadata(&env, "Unapproved NFT", "Desc", "ipfs://unappr");
+
+    let nft_id = client.mint_reward_nft_from_map(&reward_manager, &1, &owner, &metadata);
+
+    // Random address (not owner, not approved) tries to transfer - should panic
+    client.transfer_nft(&nft_id, &owner, &recipient, &random_address).unwrap();
 }
 
 #[test]

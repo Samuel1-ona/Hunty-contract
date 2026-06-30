@@ -64,6 +64,10 @@ impl Storage {
         (symbol_short!("OPKEY"), owner.clone(), operator.clone())
     }
 
+    fn approval_key(nft_id: u64) -> (soroban_sdk::Symbol, u64) {
+        (symbol_short!("APR"), nft_id)
+    }
+
     fn locker_key(locker: &Address) -> (soroban_sdk::Symbol, Address) {
         (symbol_short!("LOCKR"), locker.clone())
     }
@@ -390,6 +394,26 @@ impl Storage {
     pub fn is_locker(env: &Env, locker: &Address) -> bool {
         let key = Self::locker_key(locker);
         env.storage().persistent().get(&key).unwrap_or(false)
+    }
+
+    // --- Approval management (per-token delegation) ---
+
+    /// Sets the approved address for a specific NFT.
+    pub fn set_approval(env: &Env, nft_id: u64, approved: &Address) {
+        let key = Self::approval_key(nft_id);
+        env.storage().persistent().set(&key, approved);
+    }
+
+    /// Removes approval for a specific NFT.
+    pub fn clear_approval(env: &Env, nft_id: u64) {
+        let key = Self::approval_key(nft_id);
+        env.storage().persistent().remove(&key);
+    }
+
+    /// Gets the approved address for a specific NFT, if any.
+    pub fn get_approval(env: &Env, nft_id: u64) -> Option<Address> {
+        let key = Self::approval_key(nft_id);
+        env.storage().persistent().get(&key)
     }
 
     // --- Contract version ---
