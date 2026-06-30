@@ -5,12 +5,22 @@ pub use reward_interface::{
     TimeBasedRewardTier,
 };
 
-/// Outcome of a manually resolved distribution.
+/// Semantic versioning struct.
 #[contracttype]
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub enum ResolutionStatus {
-    Completed,
-    Refunded,
+pub struct SemVer {
+    pub major: u32,
+    pub minor: u32,
+    pub patch: u32,
+}
+
+impl SemVer {
+    /// Returns true if the other version is compatible (same major, minor >= required).
+    pub fn is_compatible_with(&self, required: &Self) -> bool {
+        self.major == required.major
+            && (self.minor > required.minor
+                || (self.minor == required.minor && self.patch >= required.patch))
+    }
 }
 
 /// Status of a reward distribution for a specific hunt and player.
@@ -23,6 +33,8 @@ pub struct DistributionStatus {
     pub xlm_amount: i128,
     /// NFT ID if an NFT was minted.
     pub nft_id: Option<u64>,
+    /// Whether NFT minting failed during distribution (retry available).
+    pub nft_mint_failed: bool,
 }
 
 /// Internal record stored for each distribution.
@@ -74,6 +86,21 @@ pub struct RewardPoolStatus {
     pub min_distribution_amount: i128,
 }
 
+/// Pending NFT mint that failed and can be retried by the admin.
+#[contracttype]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PendingNftMint {
+    pub hunt_id: u64,
+    pub player: Address,
+    pub nft_contract: Address,
+    pub nft_title: soroban_sdk::String,
+    pub nft_description: soroban_sdk::String,
+    pub nft_image_uri: soroban_sdk::String,
+    pub nft_hunt_title: soroban_sdk::String,
+    pub nft_rarity: u32,
+    pub nft_tier: u32,
+}
+
 /// Result of a pool validation check, returned by validate_pool().
 #[contracttype]
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -85,4 +112,28 @@ pub struct ValidationResult {
     pub balance: i128,
     /// Required amount that was checked against.
     pub required: i128,
+}
+
+/// Operation type for the pool audit log.
+#[contracttype]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum PoolOperation {
+    Create,
+    Fund,
+    Distribute,
+    Withdraw,
+}
+
+/// A single entry in the pool audit log.
+#[contracttype]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PoolAuditEntry {
+    /// Who triggered the operation.
+    pub actor: Address,
+    /// Operation performed.
+    pub operation: PoolOperation,
+    /// Timestamp (ledger time).
+    pub timestamp: u64,
+    /// The XLM amount involved, if applicable.
+    pub amount: Option<i128>,
 }

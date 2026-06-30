@@ -80,6 +80,16 @@ pub struct RewardsDistributedEvent {
     pub nft_id: Option<u64>,
 }
 
+/// Event emitted when NFT minting fails during reward distribution.
+/// XLM is still distributed; the NFT mint can be retried later.
+#[contracttype]
+#[derive(Clone, Debug)]
+pub struct NftMintFailedEvent {
+    pub hunt_id: u64,
+    pub player: Address,
+    pub nft_contract: Option<Address>,
+}
+
 /// Event emitted when admin withdraws unclaimed rewards from a pool.
 #[contracttype]
 #[derive(Clone, Debug)]
@@ -145,12 +155,20 @@ pub struct EmergencyWithdrawalLogEntry {
     pub timestamp: u64,
 }
 
+/// Paginated response for the audit log.
+#[contracttype]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PoolAuditLogResponse {
+    pub entries: Vec<PoolAuditEntry>,
+    pub total: u64,
+}
+
 #[contractimpl]
 impl RewardManager {
     /// Current semantic version of this contract.
-    pub const CONTRACT_VERSION: SemVer = SemVer { major: 1, minor: 0, patch: 0 };
+    pub const CONTRACT_VERSION: u32 = 2;
     /// Minimum NftReward version this contract requires.
-    pub const REQUIRED_NFT_REWARD_VERSION: SemVer = SemVer { major: 1, minor: 0, patch: 0 };
+    pub const REQUIRED_NFT_REWARD_VERSION: u32 = 2;
 
     /// Initializes the RewardManager with the XLM token contract address (SAC).
     /// Must be called once before any reward distribution.
@@ -162,7 +180,7 @@ impl RewardManager {
         admin.require_auth();
         Storage::set_admin(&env, &admin);
         Storage::set_xlm_token(&env, &xlm_token);
-        Storage::set_contract_version(&env, &Self::CONTRACT_VERSION);
+        Storage::set_contract_version(&env, Self::CONTRACT_VERSION);
         Ok(())
     }
 
@@ -278,10 +296,18 @@ impl RewardManager {
             (symbol_short!("POOL_CRT"), hunt_id),
             RewardPoolCreatedEvent {
                 hunt_id,
-                creator,
+                creator: creator.clone(),
                 min_distribution_amount,
             },
         );
+
+        let audit_entry = PoolAuditEntry {
+            actor: creator.clone(),
+            operation: PoolOperation::Create,
+            timestamp: env.ledger().timestamp(),
+            amount: None,
+        };
+        Storage::append_audit_entry(&env, hunt_id, audit_entry);
 
         Ok(())
     }
@@ -484,6 +510,14 @@ impl RewardManager {
             },
         );
 
+        let audit_entry = PoolAuditEntry {
+            actor: funder.clone(),
+            operation: PoolOperation::Fund,
+            timestamp: env.ledger().timestamp(),
+            amount: Some(amount),
+        };
+        Storage::append_audit_entry(&env, hunt_id, audit_entry);
+
         Ok(())
     }
 
@@ -508,6 +542,15 @@ impl RewardManager {
         client.transfer(&contract_addr, &creator, &balance);
 
         Storage::set_pool_balance(&env, hunt_id, 0);
+
+        let audit_entry = PoolAuditEntry {
+            actor: creator.clone(),
+            operation: PoolOperation::Withdraw,
+            timestamp: env.ledger().timestamp(),
+            amount: Some(balance),
+        };
+        Storage::append_audit_entry(&env, hunt_id, audit_entry);
+
         Ok(())
     }
 
@@ -645,7 +688,7 @@ impl RewardManager {
                 let used = Storage::get_daily_pool_distributed(&env, hunt_id, day);
                 if used > pool_cap { return Err(RewardErrorCode::DailyCapExceeded); }
                 if used >= (pool_cap * 8 / 10) {
-                    env.events().publish(symbol_short!("DP_WARN"), DailyPoolCapWarningEvent { hunt_id, used, cap: pool_cap });
+                    env.events().publish((symbol_short!("DP_WARN"),), DailyPoolCapWarningEvent { hunt_id, used, cap: pool_cap });
                 }
             }
 
@@ -654,7 +697,7 @@ impl RewardManager {
                 let global_used = Storage::get_daily_global_distributed(&env, day);
                 if global_used > global_cap { return Err(RewardErrorCode::GlobalDailyCapExceeded); }
                 if global_used >= (global_cap * 8 / 10) {
-                    env.events().publish(symbol_short!("DG_WARN"), GlobalDailyCapWarningEvent { used: global_used, cap: global_cap });
+                    env.events().publish((symbol_short!("DG_WARN"),), GlobalDailyCapWarningEvent { used: global_used, cap: global_cap });
                 }
             }
 
@@ -686,7 +729,7 @@ impl RewardManager {
                 .or_else(|| Storage::get_nft_contract(&env))
                 .ok_or(RewardErrorCode::InvalidConfig)?;
 
-            nft_id = Some(NftHandler::distribute_nft(
+            match NftHandler::distribute_nft(
                 &env,
                 &nft_contract,
                 hunt_id,
@@ -697,7 +740,35 @@ impl RewardManager {
                 reward_config.nft_hunt_title.clone(),
                 reward_config.nft_rarity,
                 reward_config.nft_tier,
-            )?);
+            ) {
+                Ok(id) => nft_id = Some(id),
+                Err(_) => {
+                    env.events().publish(
+                        (symbol_short!("NFT_FAIL"), hunt_id),
+                        NftMintFailedEvent {
+                            hunt_id,
+                            player: player_address.clone(),
+                            nft_contract: Some(nft_contract.clone()),
+                        },
+                    );
+                    Storage::set_pending_nft_mint(
+                        &env,
+                        hunt_id,
+                        &player_address,
+                        &PendingNftMint {
+                            hunt_id,
+                            player: player_address.clone(),
+                            nft_contract,
+                            nft_title: reward_config.nft_title.clone(),
+                            nft_description: reward_config.nft_description.clone(),
+                            nft_image_uri: reward_config.nft_image_uri.clone(),
+                            nft_hunt_title: reward_config.nft_hunt_title.clone(),
+                            nft_rarity: reward_config.nft_rarity,
+                            nft_tier: reward_config.nft_tier,
+                        },
+                    );
+                }
+            }
         }
 
         // Record distribution with monotonic nonce to prevent replay attacks
@@ -721,7 +792,72 @@ impl RewardManager {
         env.events()
             .publish((symbol_short!("RWD_DIST"), hunt_id), event);
 
+        let audit_entry = PoolAuditEntry {
+            actor: player_address.clone(),
+            operation: PoolOperation::Distribute,
+            timestamp: env.ledger().timestamp(),
+            amount: if xlm_amount > 0 { Some(xlm_amount) } else { None },
+        };
+        Storage::append_audit_entry(&env, hunt_id, audit_entry);
+
         Ok(())
+    }
+
+    /// Retries a failed NFT mint for a previously distributed reward.
+    ///
+    /// When NFT minting fails during `distribute_rewards`, the failure is logged
+    /// and the pending mint data is stored. This function allows the admin to
+    /// retry the failed NFT mint and update the distribution record.
+    ///
+    /// # Arguments
+    /// * `admin` - The contract admin address
+    /// * `hunt_id` - The hunt associated with the failed NFT mint
+    /// * `player` - The player who should receive the NFT
+    ///
+    /// # Returns
+    /// The NFT ID of the successfully minted NFT
+    ///
+    /// # Errors
+    /// * `NotInitialized` - Contract not initialized
+    /// * `Unauthorized` - Caller is not the contract admin
+    /// * `NftMintPendingNotFound` - No pending failed NFT mint for this hunt/player
+    /// * `NftMintFailed` - NFT mint attempt failed again
+    pub fn retry_failed_nft_mint(
+        env: Env,
+        admin: Address,
+        hunt_id: u64,
+        player: Address,
+    ) -> Result<u64, RewardErrorCode> {
+        admin.require_auth();
+        let configured_admin = Storage::get_admin(&env).ok_or(RewardErrorCode::NotInitialized)?;
+        if configured_admin != admin {
+            return Err(RewardErrorCode::Unauthorized);
+        }
+
+        let pending = Storage::get_pending_nft_mint(&env, hunt_id, &player)
+            .ok_or(RewardErrorCode::NftMintPendingNotFound)?;
+
+        let nft_id = NftHandler::distribute_nft(
+            &env,
+            &pending.nft_contract,
+            hunt_id,
+            &player,
+            pending.nft_title,
+            pending.nft_description,
+            pending.nft_image_uri,
+            pending.nft_hunt_title,
+            pending.nft_rarity,
+            pending.nft_tier,
+        )?;
+
+        if let Some(mut record) = Storage::get_distribution_record(&env, hunt_id, &player) {
+            record.nft_id = Some(nft_id);
+            Storage::set_distribution_record(&env, hunt_id, &player, &record);
+        }
+
+        Storage::remove_pending_nft_mint(&env, hunt_id, &player);
+
+        Ok(nft_id)
     }
 
     /// Returns the total XLM distributed across all hunts (protocol-level metric).
@@ -761,17 +897,20 @@ impl RewardManager {
     /// Returns the distribution status for a hunt/player pair.
     pub fn get_distribution_status(env: Env, hunt_id: u64, player: Address) -> DistributionStatus {
         let record = Storage::get_distribution_record(&env, hunt_id, &player);
+        let has_pending = Storage::get_pending_nft_mint(&env, hunt_id, &player).is_some();
 
         match record {
             Some(r) => DistributionStatus {
                 distributed: true,
                 xlm_amount: r.xlm_amount,
                 nft_id: r.nft_id,
+                nft_mint_failed: r.nft_id.is_none() && has_pending,
             },
             None => DistributionStatus {
                 distributed: false,
                 xlm_amount: 0,
                 nft_id: None,
+                nft_mint_failed: false,
             },
         }
     }
@@ -893,10 +1032,18 @@ impl RewardManager {
             (symbol_short!("ADM_WDR"), hunt_id),
             AdminWithdrawEvent {
                 hunt_id,
-                admin,
+                admin: admin.clone(),
                 amount: withdraw_amount,
             },
         );
+
+        let audit_entry = PoolAuditEntry {
+            actor: admin.clone(),
+            operation: PoolOperation::Withdraw,
+            timestamp: env.ledger().timestamp(),
+            amount: Some(withdraw_amount),
+        };
+        Storage::append_audit_entry(&env, hunt_id, audit_entry);
 
         Ok(())
     }
@@ -1057,10 +1204,10 @@ impl RewardManager {
     pub fn check_nft_reward_compatibility(env: Env, nft_reward_address: Address) -> bool {
         let ver: u32 = env.invoke_contract(
             &nft_reward_address,
-            &soroban_sdk::Symbol::new(&env, "get_version"),
+            &soroban_sdk::Symbol::new(&env, "contract_version"),
             soroban_sdk::Vec::new(&env),
         );
-        ver.is_compatible_with(&Self::REQUIRED_NFT_REWARD_VERSION)
+        ver >= Self::REQUIRED_NFT_REWARD_VERSION
     }
 
     pub fn get_schema_version(env: Env) -> u32 {
@@ -1142,6 +1289,40 @@ impl RewardManager {
 
     pub fn get_health_dashboard(env: Env) -> monitoring::ContractHealth {
         monitoring::Monitoring::health_dashboard(&env)
+    }
+
+    /// Exposes a paginated read query for the audit log of a given pool.
+    pub fn get_pool_audit_log(
+        env: Env,
+        hunt_id: u64,
+        start_after: Option<u64>,
+        limit: Option<u32>,
+    ) -> PoolAuditLogResponse {
+        let max_limit = 50;
+        let default_limit = 20;
+        let query_limit = limit.unwrap_or(default_limit).min(max_limit) as u64;
+
+        let total = Storage::get_pool_audit_count(&env, hunt_id);
+        let mut entries = Vec::new(&env);
+
+        if total == 0 {
+            return PoolAuditLogResponse { entries, total };
+        }
+
+        // Determine start index. start_after is a cursor index, so we start at start_after + 1.
+        // If None, we start at 0.
+        let mut current_idx = start_after.map(|idx| idx + 1).unwrap_or(0);
+        
+        let mut count = 0;
+        while count < query_limit && current_idx < total {
+            if let Some(entry) = Storage::get_pool_audit_entry(&env, hunt_id, current_idx) {
+                entries.push_back(entry);
+            }
+            current_idx += 1;
+            count += 1;
+        }
+
+        PoolAuditLogResponse { entries, total }
     }
 }
 

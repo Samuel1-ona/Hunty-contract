@@ -1004,7 +1004,6 @@ name = "reward-manager"
 version = "0.0.0"
 dependencies = [
  "hunty-migration",
- "nft-reward",
  "reward-interface",
  "soroban-sdk",
 ]

@@ -1,10 +1,12 @@
 use crate::errors::HuntError;
-use crate::types::{Clue, Hunt, LeaderboardIndexEntry, PlayerProgress};
-use soroban_sdk::{symbol_short, Address, Env, IntoVal, Map, Vec};
-
+use crate::types::{Clue, Hunt, LeaderboardIndexEntry, PlayerProgress, StoredPlayerProgress};
+use soroban_sdk::{symbol_short, Address, Env, IntoVal, Map, Vec, TryFromVal};
+use soroban_sdk::xdr::FromXdr;
 // Instance TTL constants used by blacklist and contract-pause storage.
 const INSTANCE_TTL_THRESHOLD: u32 = 518_400;
 const INSTANCE_TTL_EXTEND_TO: u32 = 518_400;
+const PERSISTENT_TTL_THRESHOLD: u32 = 172_800;
+const PERSISTENT_TTL_EXTEND_TO: u32 = 518_400;
 
 /// Storage access layer for hunts, clues, and player progress.
 /// Provides type-safe, efficient storage operations with consistent key management.
@@ -59,9 +61,12 @@ impl Storage {
     const PLAYERS_LIST_KEY: soroban_sdk::Symbol = symbol_short!("PL");
     const LEADERBOARD_KEY: soroban_sdk::Symbol = symbol_short!("LBD");
     const CLUES_LIST_KEY: soroban_sdk::Symbol = symbol_short!("CLS");
+    const PLAYER_ENTRY_KEY: soroban_sdk::Symbol = symbol_short!("PLRS");
+    const PLAYER_COUNT_KEY: soroban_sdk::Symbol = symbol_short!("PLCT");
+    const CLUE_ENTRY_KEY: soroban_sdk::Symbol = symbol_short!("CLST");
+    const CLUE_LIST_COUNT_KEY: soroban_sdk::Symbol = symbol_short!("CLCT");
     const HUNT_COUNTER_KEY: soroban_sdk::Symbol = symbol_short!("CN");
     const CLUE_COUNTER_KEY: soroban_sdk::Symbol = symbol_short!("CC");
-    const REQUIRED_CLUES_KEY: soroban_sdk::Symbol = symbol_short!("REQ");
     const REWARD_MGR_KEY: soroban_sdk::Symbol = symbol_short!("R");
     const BAN_KEY: soroban_sdk::Symbol = symbol_short!("BA");
     const SUBMISSION_KEY: soroban_sdk::Symbol = symbol_short!("S");
@@ -108,6 +113,8 @@ impl Storage {
     // ========== Hunt Storage Functions ==========
 
     /// Saves a Hunt struct with a unique key based on hunt_id.
+    /// Also automatically saves/refreshes the instance-storage cache
+    /// so that subsequent reads can use the cheaper HuntCache path.
     ///
     /// # Arguments
     /// * `env` - The Soroban environment
@@ -163,6 +170,62 @@ impl Storage {
     /// * `Err(HuntError)` if the hunt is not found
     pub fn get_hunt_or_error(env: &Env, hunt_id: u64) -> Result<Hunt, HuntError> {
         Self::get_hunt(env, hunt_id).ok_or(HuntError::HuntNotFound { hunt_id })
+    }
+
+    // ========== Hunt Cache Functions (instance storage) ==========
+
+    /// Saves a compact HuntCache to instance storage for faster reads.
+    /// The cache contains only frequently-accessed fields (no title/description strings).
+    /// Also extends the instance TTL so the cache stays warm for active hunts.
+    pub fn save_hunt_cache(env: &Env, hunt: &Hunt) {
+        let cache = HuntCache::from_hunt(hunt);
+        let key = Self::hunt_cache_key(hunt.hunt_id);
+        env.storage().instance().set(&key, &cache);
+        env.storage().instance().extend_ttl(INSTANCE_TTL_THRESHOLD, INSTANCE_TTL_EXTEND_TO);
+    }
+
+    /// Retrieves a HuntCache from instance storage.
+    /// Returns None if no cache exists for this hunt_id.
+    /// Records cache hit/miss for monitoring.
+    pub fn get_hunt_cache(env: &Env, hunt_id: u64) -> Option<HuntCache> {
+        let key = Self::hunt_cache_key(hunt_id);
+        let result: Option<HuntCache> = env.storage().instance().get(&key);
+        if result.is_some() {
+            Self::record_cache_hit(env);
+            env.storage().instance().extend_ttl(INSTANCE_TTL_THRESHOLD, INSTANCE_TTL_EXTEND_TO);
+        } else {
+            Self::record_cache_miss(env);
+        }
+        result
+    }
+
+    /// Removes the HuntCache for a given hunt from instance storage.
+    /// Use when a hunt is updated and the cache should be refreshed.
+    pub fn invalidate_hunt_cache(env: &Env, hunt_id: u64) {
+        let key = Self::hunt_cache_key(hunt_id);
+        env.storage().instance().remove(&key);
+    }
+
+    /// Bumps the instance TTL for the hunt cache without modifying its value.
+    /// Useful for keeping hot hunt caches alive between operations.
+    pub fn bump_hunt_cache_ttl(env: &Env, hunt_id: u64) {
+        let key = Self::hunt_cache_key(hunt_id);
+        if env.storage().instance().has(&key) {
+            env.storage().instance().extend_ttl(INSTANCE_TTL_THRESHOLD, INSTANCE_TTL_EXTEND_TO);
+        }
+    }
+
+    /// Resets cache hit/miss counters (admin use only).
+    pub fn reset_cache_counters(env: &Env) {
+        env.storage().instance().remove(&Self::CACHE_HIT_KEY);
+        env.storage().instance().remove(&Self::CACHE_MISS_KEY);
+    }
+
+    /// Checks whether a HuntCache exists in instance storage.
+    /// Useful for cheap existence checks without loading the full Hunt struct.
+    pub fn has_hunt_cache(env: &Env, hunt_id: u64) -> bool {
+        let key = Self::hunt_cache_key(hunt_id);
+        env.storage().instance().has(&key)
     }
 
     // ========== Clue Storage Functions ==========
@@ -342,26 +405,6 @@ impl Storage {
         result.unwrap_or_else(|| Vec::new(env))
     }
 
-    // ========== Leaderboard Index Storage ==========
-
-    pub fn save_leaderboard_index(
-        env: &Env,
-        hunt_id: u64,
-        entries: &Vec<LeaderboardIndexEntry>,
-    ) {
-        let key = Self::leaderboard_key(hunt_id);
-        env.storage().persistent().set(&key, entries);
-        extend_ttl(env, &key, TtlPolicy::Active);
-    }
-
-    pub fn get_leaderboard_index(env: &Env, hunt_id: u64) -> Vec<LeaderboardIndexEntry> {
-        let key = Self::leaderboard_key(hunt_id);
-        let result: Option<Vec<LeaderboardIndexEntry>> = env.storage().persistent().get(&key);
-        if result.is_some() {
-            extend_ttl(env, &key, TtlPolicy::Active);
-        }
-        result.unwrap_or_else(|| Vec::new(env))
-    }
 
     // ========== Helper Functions for Key Generation ==========
 
@@ -369,6 +412,10 @@ impl Storage {
     /// Uses tuple key (HUNT_KEY, hunt_id) for efficient storage access.
     fn hunt_key(hunt_id: u64) -> (soroban_sdk::Symbol, u64) {
         (Self::HUNT_KEY, hunt_id)
+    }
+
+    fn hunt_cache_key(hunt_id: u64) -> (soroban_sdk::Symbol, u64) {
+        (Self::HUNT_CACHE_KEY, hunt_id)
     }
 
     /// Generates a composite storage key for a clue.
@@ -391,10 +438,6 @@ impl Storage {
 
     fn clue_counter_key(hunt_id: u64) -> (soroban_sdk::Symbol, u64) {
         (Self::CLUE_COUNTER_KEY, hunt_id)
-    }
-
-    fn required_clues_key(hunt_id: u64) -> (soroban_sdk::Symbol, u64) {
-        (Self::REQUIRED_CLUES_KEY, hunt_id)
     }
 
     fn player_entry_key(hunt_id: u64, index: u32) -> (soroban_sdk::Symbol, u64, u32) {
@@ -603,28 +646,6 @@ impl Storage {
             extend_ttl(env, &key, TtlPolicy::Active);
         }
         result.unwrap_or(0)
-    }
-
-    // ========== Required Clues Storage (on-demand loading) ==========
-
-    /// Saves the list of required clue IDs for a hunt.
-    /// This allows `check_all_required_clues_completed` to verify completion
-    /// without loading full clue data, significantly reducing gas.
-    pub fn set_required_clues(env: &Env, hunt_id: u64, clue_ids: &soroban_sdk::Vec<u32>) {
-        let key = Self::required_clues_key(hunt_id);
-        env.storage().persistent().set(&key, clue_ids);
-        extend_ttl(env, &key, TtlPolicy::Active);
-    }
-
-    /// Returns the list of required clue IDs for a hunt.
-    /// Falls back to an empty vec if no list has been stored (e.g. pre-migration hunts).
-    pub fn get_required_clues(env: &Env, hunt_id: u64) -> soroban_sdk::Vec<u32> {
-        let key = Self::required_clues_key(hunt_id);
-        let result: Option<soroban_sdk::Vec<u32>> = env.storage().persistent().get(&key);
-        if result.is_some() {
-            extend_ttl(env, &key, TtlPolicy::Active);
-        }
-        result.unwrap_or_else(|| soroban_sdk::Vec::new(env))
     }
 
     // ========== Reward Manager Storage Functions ==========
@@ -854,24 +875,24 @@ impl Storage {
     }
     
     // Blacklist functions for backward compatibility
-    const BLACKLIST_KEY: soroban_sdk::Symbol = symbol_short!("BLACKLIST");
+    const BLACKLIST_VEC_KEY: soroban_sdk::Symbol = symbol_short!("BLKLST_V");
     pub fn set_blacklisted(env: &Env, address: &Address, blacklisted: bool) {
         if blacklisted {
-            let mut list = env.storage().instance().get(&Self::BLACKLIST_KEY).unwrap_or_else(|| Vec::new(env));
+            let mut list: Vec<Address> = env.storage().instance().get(&Self::BLACKLIST_VEC_KEY).unwrap_or_else(|| Vec::new(env));
             if list.first_index_of(address).is_none() {
                 list.push_back(address.clone());
-                env.storage().instance().set(&Self::BLACKLIST_KEY, &list);
+                env.storage().instance().set(&Self::BLACKLIST_VEC_KEY, &list);
             }
         } else {
-            let mut list = env.storage().instance().get(&Self::BLACKLIST_KEY).unwrap_or_else(|| Vec::new(env));
+            let mut list: Vec<Address> = env.storage().instance().get(&Self::BLACKLIST_VEC_KEY).unwrap_or_else(|| Vec::new(env));
             if let Some(idx) = list.first_index_of(address) {
                 list.remove(idx);
-                env.storage().instance().set(&Self::BLACKLIST_KEY, &list);
+                env.storage().instance().set(&Self::BLACKLIST_VEC_KEY, &list);
             }
         }
     }
-    pub fn is_blacklisted(env: &Env, address: &Address) -> bool {
-        let list: Vec<Address> = env.storage().instance().get(&Self::BLACKLIST_KEY).unwrap_or_else(|| Vec::new(env));
+    pub fn is_blacklisted_vec(env: &Env, address: &Address) -> bool {
+        let list: Vec<Address> = env.storage().instance().get(&Self::BLACKLIST_VEC_KEY).unwrap_or_else(|| Vec::new(env));
         list.first_index_of(address).is_some()
     }
     
@@ -971,15 +992,7 @@ impl Storage {
         env.storage().persistent().has(&Self::ban_key(hunt_id, player))
     }
 
-    // ========== Admin Storage Functions ==========
 
-    pub fn set_admin(env: &Env, admin: &Address) {
-        env.storage().instance().set(&Self::ADMIN_KEY, admin);
-    }
-
-    pub fn get_admin(env: &Env) -> Option<Address> {
-        env.storage().instance().get(&Self::ADMIN_KEY)
-    }
 
     // ========== Blacklist Storage Functions ==========
 

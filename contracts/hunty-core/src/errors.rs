@@ -42,6 +42,7 @@ pub enum HuntErrorCode {
     InvalidTimeBonusConfig = 35,
     AddressBlacklisted = 36,
     ContractPaused = 37,
+    InvalidMaxAttempts = 38,
 }
 
 #[derive(Debug)]
@@ -198,12 +199,12 @@ impl fmt::Display for HuntError {
             HuntError::PendingAdminMismatch { expected, actual } => {
                 write!(
                     f,
-                    "Pending admin mismatch: expected {}, got {}",
+                    "Pending admin mismatch: expected {:?}, got {:?}",
                     expected, actual
                 )
             }
             HuntError::AdminAlreadyProposed { pending } => {
-                write!(f, "Admin rotation already proposed for {}", pending)
+                write!(f, "Admin rotation already proposed for {:?}", pending)
             }
             HuntError::AddressBlacklisted => {
                 write!(f, "Address is blacklisted from creating hunts")

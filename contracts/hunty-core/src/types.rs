@@ -1,4 +1,21 @@
-use soroban_sdk::{contracttype, Address, BytesN, Env, String, Vec};
+use soroban_sdk::{contracttype, Address, BytesN, Env, Map, String, Vec};
+
+/// Semantic version (major.minor.patch). Compatible if major matches and self >= required.
+#[contracttype]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SemVer {
+    pub major: u32,
+    pub minor: u32,
+    pub patch: u32,
+}
+
+impl SemVer {
+    pub fn is_compatible_with(&self, required: &SemVer) -> bool {
+        self.major == required.major
+            && (self.minor > required.minor
+                || (self.minor == required.minor && self.patch >= required.patch))
+    }
+}
 
 /// Semantic version (major.minor.patch). Compatible if major matches and self >= required.
 #[contracttype]
@@ -25,6 +42,7 @@ pub enum HuntStatus {
     Completed,
     Cancelled,
     Paused,
+    EmergencyStopped,
 }
 
 #[contracttype]
@@ -60,6 +78,7 @@ pub struct Hunt {
     pub required_clues: u32,
     pub completed_count: u32,
     pub max_submissions_per_minute: u32,
+    pub max_attempts_per_clue: u32,
     pub start_multiplier_bps: u32,
 }
 
@@ -124,7 +143,7 @@ pub struct StoredPlayerProgress {
     pub started_at: u64,
     pub completed_at: u64,
     /// Packed boolean flags: bit 0 = is_completed, bit 1 = reward_claimed
-    pub flags: u8,
+    pub flags: u32,
     pub recent_submissions: Vec<u64>,
 }
 
@@ -159,18 +178,18 @@ impl PlayerProgress {
     }
 
     /// Extract is_completed flag from packed flags byte
-    fn flags_to_is_completed(flags: u8) -> bool {
+    fn flags_to_is_completed(flags: u32) -> bool {
         (flags & 0x01) != 0
     }
 
     /// Extract reward_claimed flag from packed flags byte
-    fn flags_to_reward_claimed(flags: u8) -> bool {
+    fn flags_to_reward_claimed(flags: u32) -> bool {
         (flags & 0x02) != 0
     }
 
     /// Pack boolean flags into a single byte
-    fn bools_to_flags(is_completed: bool, reward_claimed: bool) -> u8 {
-        let mut flags = 0u8;
+    fn bools_to_flags(is_completed: bool, reward_claimed: bool) -> u32 {
+        let mut flags = 0u32;
         if is_completed {
             flags |= 0x01;
         }

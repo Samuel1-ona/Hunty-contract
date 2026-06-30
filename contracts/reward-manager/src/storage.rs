@@ -1,7 +1,6 @@
 use soroban_sdk::{symbol_short, Address, Env};
 
-use crate::types::{DistributionRecord, ResolutionStatus, RewardPoolConfig};
-
+use crate::types::{DistributionRecord, RewardPoolConfig, PoolAuditEntry, PoolOperation};
 pub struct Storage;
 
 impl Storage {
@@ -28,6 +27,7 @@ impl Storage {
     const IN_DISTRIBUTION_KEY: soroban_sdk::Symbol = symbol_short!("IN_");
     const PAUSED_KEY: soroban_sdk::Symbol = symbol_short!("PA");
     const EMERGENCY_LOG_KEY: soroban_sdk::Symbol = symbol_short!("EML");
+    const PENDING_NFT_KEY: soroban_sdk::Symbol = symbol_short!("PNFT");
 
     // ========== Admin ==========
 
@@ -305,6 +305,29 @@ impl Storage {
         (Self::POOL_DST_KEY, hunt_id)
     }
 
+    // ========== Audit Log ==========
+
+    pub fn append_audit_entry(env: &Env, hunt_id: u64, entry: PoolAuditEntry) {
+        let count_key = (Self::AUDIT_COUNT_KEY, hunt_id);
+        let current_count: u64 = env.storage().persistent().get(&count_key).unwrap_or(0);
+        
+        let index = current_count % Self::MAX_AUDIT_ENTRIES_PER_POOL;
+        let log_key = (Self::AUDIT_LOG_KEY, hunt_id, index);
+        
+        env.storage().persistent().set(&log_key, &entry);
+        env.storage().persistent().set(&count_key, &(current_count + 1));
+    }
+
+    pub fn get_pool_audit_count(env: &Env, hunt_id: u64) -> u64 {
+        let count_key = (Self::AUDIT_COUNT_KEY, hunt_id);
+        env.storage().persistent().get(&count_key).unwrap_or(0)
+    }
+
+    pub fn get_pool_audit_entry(env: &Env, hunt_id: u64, index: u64) -> Option<PoolAuditEntry> {
+        let log_key = (Self::AUDIT_LOG_KEY, hunt_id, index % Self::MAX_AUDIT_ENTRIES_PER_POOL);
+        env.storage().persistent().get(&log_key)
+    }
+
     // ========== Pause / Emergency State ==========
 
     pub fn set_paused(env: &Env, paused: bool) {
@@ -341,6 +364,39 @@ impl Storage {
         Self::EMERGENCY_LOG_KEY
     }
 
+    // ========== Pending NFT Mints (for retry) ==========
+
+    pub fn set_pending_nft_mint(
+        env: &Env,
+        hunt_id: u64,
+        player: &Address,
+        pending: &crate::PendingNftMint,
+    ) {
+        let key = Self::pending_nft_key(hunt_id, player);
+        env.storage().persistent().set(&key, pending);
+    }
+
+    pub fn get_pending_nft_mint(
+        env: &Env,
+        hunt_id: u64,
+        player: &Address,
+    ) -> Option<crate::PendingNftMint> {
+        let key = Self::pending_nft_key(hunt_id, player);
+        env.storage().persistent().get(&key)
+    }
+
+    pub fn remove_pending_nft_mint(env: &Env, hunt_id: u64, player: &Address) {
+        let key = Self::pending_nft_key(hunt_id, player);
+        env.storage().persistent().remove(&key);
+    }
+
+    fn pending_nft_key(
+        hunt_id: u64,
+        player: &Address,
+    ) -> (soroban_sdk::Symbol, u64, Address) {
+        (Self::PENDING_NFT_KEY, hunt_id, player.clone())
+    }
+
     // --- Contract version ---
 
     pub fn set_contract_version(env: &Env, version: u32) {
@@ -349,7 +405,7 @@ impl Storage {
             .set(&symbol_short!("CVER"), &version);
     }
 
-    pub fn get_contract_version(env: &Env) -> Option<crate::types::SemVer> {
+    pub fn get_contract_version(env: &Env) -> Option<u32> {
         env.storage().instance().get(&symbol_short!("CVER"))
     }
 }

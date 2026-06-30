@@ -8,7 +8,6 @@ const MAX_URI_LEN: usize = 512;
 const MAX_NFT_TITLE_BYTES: u32 = 128;
 const MAX_NFT_DESCRIPTION_BYTES: u32 = 1024;
 const MAX_NFT_URI_BYTES: u32 = 512;
-const MAX_SCAN_LIMIT: u32 = 1000;
 
 /// Core display metadata for an NFT (title, description, image URI).
 /// Supports off-chain storage references to keep gas costs low.
@@ -32,12 +31,27 @@ pub struct NftMetadata {
     pub royalty_bps: Option<u32>,
 }
 
-fn is_valid_image_uri_format(uri: &String) -> bool {
-    let len = uri.len() as usize;
-    let mut buf = [0u8; 512];
-    uri.copy_into_slice(&mut buf[..len]);
-    let text = unsafe { core::str::from_utf8_unchecked(&buf[..len]) };
-    text.starts_with("https://") || text.starts_with("ipfs://")
+/// Collection-level statistics included in mint events for indexers.
+#[contracttype]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct NftCollectionStats {
+    pub total_supply: u64,
+    pub total_hunts: u64,
+    pub total_owners: u64,
+}
+
+fn image_uri_is_valid(uri: &String) -> bool {
+    let len = uri.len();
+    if len == 0 || len > 200 {
+        return false;
+    }
+    let mut buf = [0u8; 200];
+    uri.copy_into_slice(&mut buf[..len as usize]);
+    if let Ok(text) = core::str::from_utf8(&buf[..len as usize]) {
+        text.starts_with("https://") || text.starts_with("ipfs://")
+    } else {
+        false
+    }
 }
 
 /// Complete metadata returned by get_nft_metadata (includes NftData-derived fields).
@@ -59,6 +73,18 @@ pub struct NftMetadataResponse {
     pub royalty_bps: Option<u32>,
     /// Schema version of the NFT metadata.
     pub schema_version: u32,
+}
+
+#[contracttype]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct NftCore {
+    pub nft_id: u64,
+    pub hunt_id: u64,
+    pub owner: Address,
+    pub completion_player: Address,
+    pub transferable: bool,
+    pub minted_at: u64,
+    pub locked: bool,
 }
 
 /// NFT data structure stored on-chain.
@@ -88,10 +114,6 @@ pub struct NftMintedEvent {
     pub rarity: u32,
     pub tier: u32,
     pub metadata: NftMetadata,
-    pub hunt_title: String,
-    pub total_minted_for_hunt: u64,
-    pub completion_rank: u32,
-    pub collection_stats: NftCollectionStats,
     pub minted_at: u64,
 }
 
@@ -128,18 +150,6 @@ pub struct AdminImageUrisUpdatedEvent {
     pub old_prefix: String,
     pub new_prefix: String,
     pub updated_count: u32,
-}
-
-/// Event emitted when royalty is paid on NFT transfer with payment.
-#[contracttype]
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct RoyaltyPaidEvent {
-    pub nft_id: u64,
-    pub from: Address,
-    pub to: Address,
-    pub creator: Address,
-    pub royalty_amount: i128,
-    pub royalty_bps: u32,
 }
 
 mod errors;
@@ -311,6 +321,10 @@ impl NftReward {
             .and_then(|v| String::try_from_val(&env, &v).ok())
             .unwrap_or_else(|| String::from_str(&env, ""));
 
+        if !image_uri_is_valid(&image_uri) {
+            panic!("Invalid NFT image_uri: must be non-empty");
+        }
+
         let hunt_title = metadata
             .get(Symbol::new(&env, "hunt_title"))
             .and_then(|v| String::try_from_val(&env, &v).ok())
@@ -357,31 +371,16 @@ impl NftReward {
         Self::mint_reward_nft_impl(env, hunt_id, player_address, meta, transferable)
     }
 
-    fn validate_metadata_field(
+    fn sanitize_metadata_field(
         env: &Env,
         value: &String,
         max_bytes: u32,
         allow_empty: bool,
-        error_code: crate::errors::NftErrorCode,
     ) -> String {
         match sanitization::StringSanitizer::sanitize(env, value, max_bytes, allow_empty) {
             Ok(s) => s,
-            Err(_) => panic_with_error!(env, error_code),
+            Err(_) => panic_with_error!(env, crate::errors::NftErrorCode::InvalidMetadata),
         }
-    }
-
-    fn validate_image_uri(env: &Env, value: &String) -> String {
-        let s = Self::validate_metadata_field(
-            env,
-            value,
-            MAX_NFT_URI_BYTES,
-            false,
-            crate::errors::NftErrorCode::InvalidImageUri,
-        );
-        if !is_valid_image_uri_format(&s) {
-            panic_with_error!(env, crate::errors::NftErrorCode::InvalidImageUri);
-        }
-        s
     }
 
     fn mint_reward_nft_impl(
@@ -396,28 +395,18 @@ impl NftReward {
         }
 
         let mut metadata = metadata;
-        metadata.title = Self::validate_metadata_field(
-            &env,
-            &metadata.title,
-            MAX_NFT_TITLE_BYTES,
-            false,
-            crate::errors::NftErrorCode::InvalidTitle,
-        );
-        metadata.description = Self::validate_metadata_field(
+        metadata.title =
+            Self::sanitize_metadata_field(&env, &metadata.title, MAX_NFT_TITLE_BYTES, false);
+        metadata.description = Self::sanitize_metadata_field(
             &env,
             &metadata.description,
             MAX_NFT_DESCRIPTION_BYTES,
-            false,
-            crate::errors::NftErrorCode::InvalidDescription,
-        );
-        metadata.image_uri = Self::validate_image_uri(&env, &metadata.image_uri);
-        metadata.hunt_title = Self::validate_metadata_field(
-            &env,
-            &metadata.hunt_title,
-            MAX_NFT_TITLE_BYTES,
             true,
-            crate::errors::NftErrorCode::InvalidHuntTitle,
         );
+        metadata.image_uri =
+            Self::sanitize_metadata_field(&env, &metadata.image_uri, MAX_NFT_URI_BYTES, true);
+        metadata.hunt_title =
+            Self::sanitize_metadata_field(&env, &metadata.hunt_title, MAX_NFT_TITLE_BYTES, true);
 
         if let Some(max_supply) = Storage::get_max_supply(&env) {
             let current_supply = Storage::get_nft_counter(&env);
@@ -433,6 +422,7 @@ impl NftReward {
             nft_id,
             hunt_id,
             owner: player_address.clone(),
+            completion_player: player_address.clone(),
             metadata: metadata.clone(),
             transferable,
             minted_at,
@@ -451,7 +441,15 @@ impl NftReward {
             owner: player_address,
             rarity: metadata.rarity,
             tier: metadata.tier,
-            metadata,
+            metadata: metadata.clone(),
+            hunt_title: metadata.hunt_title.clone(),
+            total_minted_for_hunt: Storage::get_nft_count_for_hunt(&env, hunt_id),
+            completion_rank: Storage::get_nft_count_for_hunt(&env, hunt_id) as u32,
+            collection_stats: NftCollectionStats {
+                total_supply: Storage::get_nft_counter(&env),
+                total_hunts: Storage::get_total_hunts(&env),
+                total_owners: Storage::get_total_owners(&env),
+            },
             minted_at,
         };
         env.events()
@@ -487,22 +485,6 @@ impl NftReward {
         })
     }
 
-    /// Returns the configured admin address, if set.
-    pub fn get_admin(env: Env) -> Option<Address> {
-        Storage::get_admin(&env)
-    }
-
-    /// Sets the RewardManager contract address. Only the admin can call this.
-    pub fn set_reward_manager(
-        env: Env,
-        admin: Address,
-        reward_manager: Address,
-    ) -> Result<(), crate::errors::NftErrorCode> {
-        Self::require_admin(&env, &admin)?;
-        Storage::set_reward_manager(&env, &reward_manager);
-        Ok(())
-    }
-
     /// Batch-updates image URIs for all NFTs whose `image_uri` starts with `old_prefix`,
     /// replacing it with `new_prefix`. Useful for migrating between IPFS gateways or CDNs.
     ///
@@ -529,7 +511,7 @@ impl NftReward {
 
         for nft_id in all_ids.iter() {
             if let Some(mut nft) = Storage::get_nft(&env, nft_id) {
-                if let Some(new_uri) = replace_prefix(
+                if let Some(new_uri) = Self::replace_prefix(
                     &env,
                     &nft.metadata.image_uri,
                     &old_prefix,
@@ -554,6 +536,41 @@ impl NftReward {
         Ok(updated)
     }
 
+    fn replace_prefix(
+        env: &Env,
+        uri: &String,
+        old_prefix: &String,
+        new_prefix: &String,
+    ) -> Option<String> {
+        let uri_len = uri.len() as usize;
+        let old_len = old_prefix.len() as usize;
+        let new_len = new_prefix.len() as usize;
+
+        if uri_len < old_len {
+            return None;
+        }
+
+        let mut buf_uri = [0u8; 256];
+        let mut buf_old = [0u8; 256];
+        let mut buf_new = [0u8; 256];
+
+        uri.copy_into_slice(&mut buf_uri[..uri_len.min(256)]);
+        old_prefix.copy_into_slice(&mut buf_old[..old_len.min(256)]);
+        new_prefix.copy_into_slice(&mut buf_new[..new_len.min(256)]);
+
+        if buf_uri[..old_len] == buf_old[..old_len] {
+            let mut final_buf = [0u8; 512];
+            final_buf[..new_len].copy_from_slice(&buf_new[..new_len]);
+            let suffix_len = uri_len - old_len;
+            final_buf[new_len..new_len + suffix_len].copy_from_slice(&buf_uri[old_len..uri_len]);
+            let total_len = new_len + suffix_len;
+            if let Ok(text) = core::str::from_utf8(&final_buf[..total_len]) {
+                return Some(String::from_str(env, text));
+            }
+        }
+        None
+    }
+
     /// Updates mutable metadata fields (description, image_uri). Owner only.
     /// Title, hunt info, and attributes remain immutable for collectibility.
     pub fn update_nft_metadata(
@@ -572,14 +589,14 @@ impl NftReward {
             return Err(crate::errors::NftErrorCode::NotOwner);
         }
 
-        let new_description = Self::validate_metadata_field(
+        let new_description = Self::sanitize_metadata_field(
             &env,
             &new_description,
             MAX_NFT_DESCRIPTION_BYTES,
-            false,
-            crate::errors::NftErrorCode::InvalidDescription,
+            true,
         );
-        let new_image_uri = Self::validate_image_uri(&env, &new_image_uri);
+        let new_image_uri =
+            Self::sanitize_metadata_field(&env, &new_image_uri, MAX_NFT_URI_BYTES, true);
 
         nft.metadata.description = new_description;
         nft.metadata.image_uri = new_image_uri;
@@ -759,31 +776,13 @@ impl NftReward {
     pub fn search_by_title(env: Env, query: String) -> Vec<u64> {
         let all_nft_ids = Storage::get_all_nft_ids(&env);
         let mut results = Vec::new(&env);
-        
-        let query_lower = {
-            let mut lower = String::new(&env);
-            for c in query.chars() {
-                lower.push_char(c.to_ascii_lowercase());
-            }
-            lower
-        };
-
         for nft_id in all_nft_ids.iter() {
             if let Some(nft) = Storage::get_nft(&env, nft_id) {
-                let title_lower = {
-                    let mut lower = String::new(&env);
-                    for c in nft.metadata.title.chars() {
-                        lower.push_char(c.to_ascii_lowercase());
-                    }
-                    lower
-                };
-                
-                if title_lower.contains(&query_lower) {
+                if string_contains_ignore_case(&nft.metadata.title, &query) {
                     results.push_back(nft_id);
                 }
             }
         }
-        
         results
     }
 
@@ -792,31 +791,13 @@ impl NftReward {
     pub fn search_by_hunt_title(env: Env, query: String) -> Vec<u64> {
         let all_nft_ids = Storage::get_all_nft_ids(&env);
         let mut results = Vec::new(&env);
-        
-        let query_lower = {
-            let mut lower = String::new(&env);
-            for c in query.chars() {
-                lower.push_char(c.to_ascii_lowercase());
-            }
-            lower
-        };
-
         for nft_id in all_nft_ids.iter() {
             if let Some(nft) = Storage::get_nft(&env, nft_id) {
-                let hunt_title_lower = {
-                    let mut lower = String::new(&env);
-                    for c in nft.metadata.hunt_title.chars() {
-                        lower.push_char(c.to_ascii_lowercase());
-                    }
-                    lower
-                };
-                
-                if hunt_title_lower.contains(&query_lower) {
+                if string_contains_ignore_case(&nft.metadata.hunt_title, &query) {
                     results.push_back(nft_id);
                 }
             }
         }
-        
         results
     }
 
@@ -877,51 +858,21 @@ impl NftReward {
         let all_nft_ids = Storage::get_all_nft_ids(&env);
         let mut results = Vec::new(&env);
 
-        let title_lower_opt = title_query.map(|q| {
-            let mut lower = String::new(&env);
-            for c in q.chars() {
-                lower.push_char(c.to_ascii_lowercase());
-            }
-            lower
-        });
-
-        let hunt_title_lower_opt = hunt_title_query.map(|q| {
-            let mut lower = String::new(&env);
-            for c in q.chars() {
-                lower.push_char(c.to_ascii_lowercase());
-            }
-            lower
-        });
-
         for nft_id in all_nft_ids.iter() {
             if let Some(nft) = Storage::get_nft(&env, nft_id) {
                 let mut matches = true;
 
                 // Check title filter
-                if let Some(ref query_lower) = title_lower_opt {
-                    let title_lower = {
-                        let mut lower = String::new(&env);
-                        for c in nft.metadata.title.chars() {
-                            lower.push_char(c.to_ascii_lowercase());
-                        }
-                        lower
-                    };
-                    if !title_lower.contains(query_lower) {
+                if let Some(ref query) = title_query {
+                    if !string_contains_ignore_case(&nft.metadata.title, query) {
                         matches = false;
                     }
                 }
 
                 // Check hunt title filter
                 if matches {
-                    if let Some(ref query_lower) = hunt_title_lower_opt {
-                        let hunt_title_lower = {
-                            let mut lower = String::new(&env);
-                            for c in nft.metadata.hunt_title.chars() {
-                                lower.push_char(c.to_ascii_lowercase());
-                            }
-                            lower
-                        };
-                        if !hunt_title_lower.contains(query_lower) {
+                    if let Some(ref query) = hunt_title_query {
+                        if !string_contains_ignore_case(&nft.metadata.hunt_title, query) {
                             matches = false;
                         }
                     }
@@ -960,13 +911,11 @@ impl NftReward {
     /// * `nft_id` - The NFT to transfer
     /// * `from_address` - Current owner of the NFT
     /// * `to_address` - New owner
-    /// * `caller` - Address authorizing the transfer (must be owner, approved address, or approved operator)
+    /// * `caller` - Address authorizing the transfer (must be owner or approved operator)
     ///
     /// # Authorization
-    /// `caller` must authorize this call. `caller` must be either:
-    /// - The current owner
-    /// - An operator approved by the owner via `set_operator`
-    /// - An address approved for this specific NFT via `approve`
+    /// `caller` must authorize this call. `caller` must be either the current owner
+    /// or an operator approved by the owner via `set_operator`.
     pub fn transfer_nft(
         env: Env,
         nft_id: u64,
@@ -983,13 +932,8 @@ impl NftReward {
             return Err(crate::errors::NftErrorCode::NotOwner);
         }
 
-        // Check if caller is authorized: owner, operator, or approved address
-        let is_owner = caller == nft.owner;
-        let is_operator = Storage::is_operator(&env, &nft.owner, &caller);
-        let approved = Storage::get_approval(&env, nft_id);
-        let is_approved = approved.as_ref().map(|a| a == &caller).unwrap_or(false);
-
-        if !is_owner && !is_operator && !is_approved {
+        // caller must be the owner or an approved operator
+        if caller != nft.owner && !Storage::is_operator(&env, &nft.owner, &caller) {
             return Err(crate::errors::NftErrorCode::NotOperator);
         }
 
@@ -1041,9 +985,6 @@ impl NftReward {
         Storage::save_nft(&env, &nft);
         Storage::add_nft_to_owner(&env, &to_address, nft_id);
 
-        // Clear approval after successful transfer
-        Storage::clear_approval(&env, nft_id);
-
         env.events().publish(
             (Symbol::new(&env, "NftTransferred"), nft_id),
             NftTransferredEvent {
@@ -1054,66 +995,6 @@ impl NftReward {
         );
 
         Ok(())
-    }
-
-    /// Transfers an NFT from one address to another with royalty enforcement.
-    ///
-    /// When a payment is made during transfer, royalty is calculated and transferred
-    /// to the original creator if royalty_bps is set.
-    ///
-    /// # Arguments
-    /// * `nft_id` - The NFT to transfer
-    /// * `from_address` - Current owner of the NFT
-    /// * `to_address` - Recipient of the NFT
-    /// * `caller` - Address authorizing the transfer (must be owner or approved operator)
-    /// * `payment_token` - Address of the payment token contract
-    /// * `payment_amount` - Amount of payment in smallest token units
-    ///
-    /// # Authorization
-    /// `caller` must authorize this call.
-    ///
-    /// # Errors
-    /// Returns standard NFT transfer errors (NftNotFound, NotOwner, etc.) plus:
-    /// - If royalty_bps is set but creator is not set, no royalty is transferred
-    pub fn transfer_with_payment(
-        env: Env,
-        nft_id: u64,
-        from_address: Address,
-        to_address: Address,
-        caller: Address,
-        payment_token: Address,
-        payment_amount: i128,
-    ) -> Result<(), crate::errors::NftErrorCode> {
-        caller.require_auth();
-
-        let nft =
-            Storage::get_nft(&env, nft_id).ok_or(crate::errors::NftErrorCode::NftNotFound)?;
-
-        // Calculate and transfer royalty if applicable
-        if let (Some(creator), Some(royalty_bps)) = (nft.metadata.creator.clone(), nft.metadata.royalty_bps) {
-            if royalty_bps > 0 && payment_amount > 0 {
-                let royalty_amount = (payment_amount as i128 * royalty_bps as i128) / 10000i128;
-                if royalty_amount > 0 {
-                    let client = soroban_sdk::token::Client::new(&env, &payment_token);
-                    client.transfer(&from_address, &creator, &royalty_amount);
-
-                    env.events().publish(
-                        (Symbol::new(&env, "RoyaltyPaid"), nft_id),
-                        RoyaltyPaidEvent {
-                            nft_id,
-                            from: from_address.clone(),
-                            to: to_address.clone(),
-                            creator: creator.clone(),
-                            royalty_amount,
-                            royalty_bps,
-                        },
-                    );
-                }
-            }
-        }
-
-        // Perform standard NFT transfer
-        Self::transfer_nft(env, nft_id, from_address, to_address, caller)
     }
 
     /// Returns the on-chain version stored during initialize, or the compiled constant.
@@ -1160,90 +1041,13 @@ impl NftReward {
         Storage::is_operator(&env, &owner, &operator)
     }
 
-    /// Approves an address to transfer a specific NFT on behalf of the owner.
-    ///
-    /// # Arguments
-    /// * `caller` - The NFT owner authorizing the approval
-    /// * `nft_id` - The NFT to approve for
-    /// * `approved` - The address being approved to transfer this NFT
-    ///
-    /// # Authorization
-    /// `caller` must authorize this call and must be the current owner of the NFT.
-    pub fn approve(
-        env: Env,
-        caller: Address,
-        nft_id: u64,
-        approved: Address,
-    ) -> Result<(), crate::errors::NftErrorCode> {
-        caller.require_auth();
-
-        let nft = Storage::get_nft(&env, nft_id)
-            .ok_or(crate::errors::NftErrorCode::NftNotFound)?;
-
-        if nft.owner != caller {
-            return Err(crate::errors::NftErrorCode::NotOwner);
-        }
-
-        Storage::set_approval(&env, nft_id, &approved);
-
-        env.events().publish(
-            (Symbol::new(&env, "Approved"), nft_id),
-            (caller, approved, nft_id),
-        );
-
-        Ok(())
-    }
-
-    /// Returns the approved address for a specific NFT, if any.
-    ///
-    /// # Arguments
-    /// * `nft_id` - The NFT to query
-    ///
-    /// # Returns
-    /// The approved address, or `None` if no approval is set.
-    pub fn get_approved(env: Env, nft_id: u64) -> Option<Address> {
-        Storage::get_approval(&env, nft_id)
-    }
-
-    /// Revokes approval for a specific NFT.
-    ///
-    /// # Arguments
-    /// * `caller` - The NFT owner revoking the approval
-    /// * `nft_id` - The NFT whose approval should be revoked
-    ///
-    /// # Authorization
-    /// `caller` must authorize this call and must be the current owner of the NFT.
-    pub fn revoke_approval(
-        env: Env,
-        caller: Address,
-        nft_id: u64,
-    ) -> Result<(), crate::errors::NftErrorCode> {
-        caller.require_auth();
-
-        let nft = Storage::get_nft(&env, nft_id)
-            .ok_or(crate::errors::NftErrorCode::NftNotFound)?;
-
-        if nft.owner != caller {
-            return Err(crate::errors::NftErrorCode::NotOwner);
-        }
-
-        Storage::clear_approval(&env, nft_id);
-
-        env.events().publish(
-            (Symbol::new(&env, "ApprovalRevoked"), nft_id),
-            (caller, nft_id),
-        );
-
-        Ok(())
-    }
-
     pub fn get_schema_version(env: Env) -> u32 {
         migration::NftRewardMigration::get_schema_version(&env)
     }
 
     pub fn initialize_schema(env: Env, admin: Address) {
         admin.require_auth();
-        migration::NftRewardMigration::initialize_schema(&env);
+        migration::NftRewardMigration::initialize_schema(&env, &admin);
     }
 
     pub fn propose_upgrade(
@@ -1456,6 +1260,36 @@ impl NftReward {
 
         Ok(())
     }
+}
+
+fn string_contains_ignore_case(a: &String, b: &String) -> bool {
+    let a_len = a.len() as usize;
+    let b_len = b.len() as usize;
+    if b_len == 0 {
+        return true;
+    }
+    if a_len < b_len {
+        return false;
+    }
+    let mut buf_a = [0u8; 256];
+    let mut buf_b = [0u8; 256];
+    a.copy_into_slice(&mut buf_a[..a_len.min(256)]);
+    b.copy_into_slice(&mut buf_b[..b_len.min(256)]);
+    
+    for i in 0..a_len.min(256) {
+        buf_a[i] = buf_a[i].to_ascii_lowercase();
+    }
+    for i in 0..b_len.min(256) {
+        buf_b[i] = buf_b[i].to_ascii_lowercase();
+    }
+    
+    let limit = a_len.min(256) - b_len.min(256);
+    for idx in 0..=limit {
+        if buf_a[idx..idx + b_len.min(256)] == buf_b[..b_len.min(256)] {
+            return true;
+        }
+    }
+    false
 }
 
 #[cfg(test)]
