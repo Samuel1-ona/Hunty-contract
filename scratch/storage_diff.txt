@@ -1,0 +1,73 @@
+﻿diff --git a/contracts/hunty-core/src/storage.rs b/contracts/hunty-core/src/storage.rs
+index 3be044b..8c98f15 100644
+--- a/contracts/hunty-core/src/storage.rs
++++ b/contracts/hunty-core/src/storage.rs
+@@ -1,6 +1,7 @@
+ use crate::errors::HuntError;
+ use crate::types::{Clue, Hunt, PlayerProgress, StoredPlayerProgress};
+-use soroban_sdk::{symbol_short, Address, Env, Vec};
++use soroban_sdk::{symbol_short, Address, Env, Vec, TryFromVal};
++use soroban_sdk::xdr::FromXdr;
+ 
+ // ~30 days at 5s/ledger. Instance TTL is bumped on every write ΓÇö one call covers all keys.
+ const INSTANCE_TTL_THRESHOLD: u32 = 518_400;
+@@ -69,8 +70,8 @@ impl Storage {
+         Self::get_clue(env, hunt_id, clue_id).ok_or(HuntError::ClueNotFound { hunt_id })
+     }
+ 
+-    pub fn list_clues_for_hunt(env: &Env, hunt_id: u64) -> Vec<Clue> {
+-        let clue_ids = Self::get_clue_ids_for_hunt(env, hunt_id);
++    pub fn list_clues_for_hunt(env: &Env, hunt_id: u64, offset: u32, limit: u32) -> Vec<Clue> {
++        let clue_ids = Self::get_clue_ids_for_hunt(env, hunt_id, offset, limit);
+         let mut clues = Vec::new(env);
+ 
+         for i in 0..clue_ids.len() {
+@@ -101,11 +102,16 @@ impl Storage {
+         player: &Address,
+     ) -> Option<PlayerProgress> {
+         let key = Self::progress_key(hunt_id, player);
+-        let result = env
+-            .storage()
+-            .persistent()
+-            .get::<_, StoredPlayerProgress>(&key)
+-            .map(|stored| PlayerProgress::from_stored(env, stored, player.clone(), hunt_id))
++        let raw_val: Option<soroban_sdk::Val> = env.storage().persistent().get(&key);
++        raw_val.map(|val| {
++            if let Ok(bytes) = soroban_sdk::Bytes::try_from_val(env, &val) {
++                let stored: StoredPlayerProgress = StoredPlayerProgress::from_xdr(env, &bytes).unwrap();
++                PlayerProgress::from_stored(env, stored, player.clone(), hunt_id)
++            } else {
++                let stored: StoredPlayerProgress = StoredPlayerProgress::try_from_val(env, &val).unwrap();
++                PlayerProgress::from_stored(env, stored, player.clone(), hunt_id)
++            }
++        })
+     }
+ 
+     pub fn get_player_progress_or_error(
+@@ -142,7 +148,7 @@ impl Storage {
+         (Self::CLUE_KEY, hunt_id, clue_id)
+     }
+ 
+-    fn progress_key(hunt_id: u64, player: &Address) -> (soroban_sdk::Symbol, u64, Address) {
++    pub fn progress_key(hunt_id: u64, player: &Address) -> (soroban_sdk::Symbol, u64, Address) {
+         (Self::PROGRESS_KEY, hunt_id, player.clone())
+     }
+ 
+@@ -188,7 +194,7 @@ impl Storage {
+             .extend_ttl(INSTANCE_TTL_THRESHOLD, INSTANCE_TTL_EXTEND_TO);
+     }
+ 
+-    fn get_clue_ids_for_hunt(env: &Env, hunt_id: u64) -> Vec<u32> {
++    fn get_clue_ids_for_hunt(env: &Env, hunt_id: u64, offset: u32, limit: u32) -> Vec<u32> {
+         let count_key = Self::clue_list_count_key(hunt_id);
+         let count: u32 = env.storage().instance().get(&count_key).unwrap_or(0);
+         let mut ids = Vec::new(env);
+@@ -246,7 +252,7 @@ impl Storage {
+         );
+     }
+ 
+-    fn get_player_addresses_for_hunt(env: &Env, hunt_id: u64) -> Vec<Address> {
++    pub fn get_player_addresses_for_hunt(env: &Env, hunt_id: u64) -> Vec<Address> {
+         let count_key = Self::player_count_key(hunt_id);
+         let count: u32 = env.storage().persistent().get(&count_key).unwrap_or(0);
+         let mut addrs = Vec::new(env);

@@ -1,0 +1,35 @@
+name: Generate Contract Bindings
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  bindings:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown,wasm32v1-none
+
+      - name: Install Stellar CLI
+        uses: stellar/stellar-cli@v27.0.0
+
+      - name: Build contracts
+        run: stellar contract build
+
+      - name: Generate TypeScript bindings
+        run: make bindings
+
+      - name: Check for uncommitted changes in bindings
+        run: git diff --exit-code bindings
+
+      - name: Upload bindings artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: contract-bindings
+          path: bindings/

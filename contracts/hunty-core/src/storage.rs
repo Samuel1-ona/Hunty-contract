@@ -113,6 +113,8 @@ impl Storage {
     // ========== Hunt Storage Functions ==========
 
     /// Saves a Hunt struct with a unique key based on hunt_id.
+    /// Also automatically saves/refreshes the instance-storage cache
+    /// so that subsequent reads can use the cheaper HuntCache path.
     ///
     /// # Arguments
     /// * `env` - The Soroban environment
@@ -168,6 +170,62 @@ impl Storage {
     /// * `Err(HuntError)` if the hunt is not found
     pub fn get_hunt_or_error(env: &Env, hunt_id: u64) -> Result<Hunt, HuntError> {
         Self::get_hunt(env, hunt_id).ok_or(HuntError::HuntNotFound { hunt_id })
+    }
+
+    // ========== Hunt Cache Functions (instance storage) ==========
+
+    /// Saves a compact HuntCache to instance storage for faster reads.
+    /// The cache contains only frequently-accessed fields (no title/description strings).
+    /// Also extends the instance TTL so the cache stays warm for active hunts.
+    pub fn save_hunt_cache(env: &Env, hunt: &Hunt) {
+        let cache = HuntCache::from_hunt(hunt);
+        let key = Self::hunt_cache_key(hunt.hunt_id);
+        env.storage().instance().set(&key, &cache);
+        env.storage().instance().extend_ttl(INSTANCE_TTL_THRESHOLD, INSTANCE_TTL_EXTEND_TO);
+    }
+
+    /// Retrieves a HuntCache from instance storage.
+    /// Returns None if no cache exists for this hunt_id.
+    /// Records cache hit/miss for monitoring.
+    pub fn get_hunt_cache(env: &Env, hunt_id: u64) -> Option<HuntCache> {
+        let key = Self::hunt_cache_key(hunt_id);
+        let result: Option<HuntCache> = env.storage().instance().get(&key);
+        if result.is_some() {
+            Self::record_cache_hit(env);
+            env.storage().instance().extend_ttl(INSTANCE_TTL_THRESHOLD, INSTANCE_TTL_EXTEND_TO);
+        } else {
+            Self::record_cache_miss(env);
+        }
+        result
+    }
+
+    /// Removes the HuntCache for a given hunt from instance storage.
+    /// Use when a hunt is updated and the cache should be refreshed.
+    pub fn invalidate_hunt_cache(env: &Env, hunt_id: u64) {
+        let key = Self::hunt_cache_key(hunt_id);
+        env.storage().instance().remove(&key);
+    }
+
+    /// Bumps the instance TTL for the hunt cache without modifying its value.
+    /// Useful for keeping hot hunt caches alive between operations.
+    pub fn bump_hunt_cache_ttl(env: &Env, hunt_id: u64) {
+        let key = Self::hunt_cache_key(hunt_id);
+        if env.storage().instance().has(&key) {
+            env.storage().instance().extend_ttl(INSTANCE_TTL_THRESHOLD, INSTANCE_TTL_EXTEND_TO);
+        }
+    }
+
+    /// Resets cache hit/miss counters (admin use only).
+    pub fn reset_cache_counters(env: &Env) {
+        env.storage().instance().remove(&Self::CACHE_HIT_KEY);
+        env.storage().instance().remove(&Self::CACHE_MISS_KEY);
+    }
+
+    /// Checks whether a HuntCache exists in instance storage.
+    /// Useful for cheap existence checks without loading the full Hunt struct.
+    pub fn has_hunt_cache(env: &Env, hunt_id: u64) -> bool {
+        let key = Self::hunt_cache_key(hunt_id);
+        env.storage().instance().has(&key)
     }
 
     // ========== Clue Storage Functions ==========
@@ -354,6 +412,10 @@ impl Storage {
     /// Uses tuple key (HUNT_KEY, hunt_id) for efficient storage access.
     fn hunt_key(hunt_id: u64) -> (soroban_sdk::Symbol, u64) {
         (Self::HUNT_KEY, hunt_id)
+    }
+
+    fn hunt_cache_key(hunt_id: u64) -> (soroban_sdk::Symbol, u64) {
+        (Self::HUNT_CACHE_KEY, hunt_id)
     }
 
     /// Generates a composite storage key for a clue.

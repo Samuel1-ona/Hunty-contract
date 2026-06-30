@@ -1,17 +1,51 @@
 #![cfg_attr(not(test), no_std)]
-use soroban_sdk::{contract, contractimpl, contracttype, symbol_short, Address, Env};
+use soroban_sdk::{
+    contract, contractimpl, contracttype, symbol_short, Address, Env, IntoVal, Symbol, Val, Vec,
+};
 
 pub use crate::errors::RewardErrorCode;
+use crate::nft_handler::NftHandler;
+use crate::storage::Storage;
 pub use crate::types::{
     DistributionRecord, DistributionStatus, RewardConfig, RewardPoolConfig, RewardPoolStatus,
-    ValidationResult,
+    SemVer, ValidationResult, PoolAuditEntry, PoolOperation,
 };
-use crate::storage::Storage;
 use crate::xlm_handler::XlmHandler;
-use crate::nft_handler::NftHandler;
+
+// Funding validation constants
+// 1 XLM = 10_000_000 stroops (Stellar's base unit)
+/// Minimum funding amount: 1 XLM (prevents dust attacks)
+const MIN_FUNDING_AMOUNT: i128 = 10_000_000;
+
+/// Maximum single funding amount: 1 billion XLM (prevents overflow and unreasonable deposits)
+const MAX_FUNDING_AMOUNT: i128 = 1_000_000_000 * 10_000_000;
+
+/// Maximum pool balance: 1 billion XLM (prevents overflow)
+const MAX_POOL_BALANCE: i128 = 1_000_000_000 * 10_000_000;
 
 #[contract]
 pub struct RewardManager;
+
+struct ReentrancyGuard {
+    env: Env,
+}
+
+impl ReentrancyGuard {
+    fn acquire(env: &Env) -> Result<Self, RewardErrorCode> {
+        if Storage::is_in_distribution(env) {
+            return Err(RewardErrorCode::ReentrancyDetected);
+        }
+        let env = env.clone();
+        Storage::set_in_distribution(&env, true);
+        Ok(Self { env })
+    }
+}
+
+impl Drop for ReentrancyGuard {
+    fn drop(&mut self) {
+        Storage::set_in_distribution(&self.env, false);
+    }
+}
 
 /// Event emitted when a reward pool is created for a hunt.
 #[contracttype]
@@ -30,6 +64,7 @@ pub struct RewardPoolFundedEvent {
     pub funder: Address,
     pub amount: i128,
     pub new_balance: i128,
+    pub total_deposited: i128,
 }
 
 /// Event emitted when rewards are successfully distributed.
@@ -51,8 +86,77 @@ pub struct AdminWithdrawEvent {
     pub amount: i128,
 }
 
+/// Event emitted when daily pool cap warning (80% usage) is reached.
+#[contracttype]
+#[derive(Clone, Debug)]
+pub struct DailyPoolCapWarningEvent {
+    pub hunt_id: u64,
+    pub used: i128,
+    pub cap: i128,
+}
+
+/// Event emitted when global daily cap warning (80% usage) is reached.
+#[contracttype]
+#[derive(Clone, Debug)]
+pub struct GlobalDailyCapWarningEvent {
+    pub used: i128,
+    pub cap: i128,
+}
+
+/// Event emitted when the default NFT reward contract is set or updated.
+#[contracttype]
+#[derive(Clone, Debug)]
+pub struct NftContractSetEvent {
+    pub old_contract: Option<Address>,
+    pub new_contract: Address,
+}
+
+/// Event emitted when an admin resolves a failed distribution.
+#[contracttype]
+#[derive(Clone, Debug)]
+pub struct DistributionResolvedEvent {
+    pub hunt_id: u64,
+    pub player: Address,
+    pub admin: Address,
+    pub resolution: ResolutionStatus,
+}
+
+/// Event emitted when emergency withdrawal is executed.
+#[contracttype]
+#[derive(Clone, Debug)]
+pub struct EmergencyWithdrawalEvent {
+    pub admin: Address,
+    pub hunt_id: u64,
+    pub amount: i128,
+    pub reason: soroban_sdk::String,
+    pub timestamp: u64,
+}
+
+/// Log entry for emergency withdrawal record-keeping.
+#[contracttype]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct EmergencyWithdrawalLogEntry {
+    pub hunt_id: u64,
+    pub amount: i128,
+    pub reason: soroban_sdk::String,
+    pub timestamp: u64,
+}
+
+/// Paginated response for the audit log.
+#[contracttype]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PoolAuditLogResponse {
+    pub entries: Vec<PoolAuditEntry>,
+    pub total: u64,
+}
+
 #[contractimpl]
 impl RewardManager {
+    /// Current semantic version of this contract.
+    pub const CONTRACT_VERSION: SemVer = SemVer { major: 1, minor: 0, patch: 0 };
+    /// Minimum NftReward version this contract requires.
+    pub const REQUIRED_NFT_REWARD_VERSION: SemVer = SemVer { major: 1, minor: 0, patch: 0 };
+
     /// Initializes the RewardManager with the XLM token contract address (SAC).
     /// Must be called once before any reward distribution.
     pub fn initialize(env: Env, admin: Address, xlm_token: Address) -> Result<(), RewardErrorCode> {
@@ -63,11 +167,13 @@ impl RewardManager {
         admin.require_auth();
         Storage::set_admin(&env, &admin);
         Storage::set_xlm_token(&env, &xlm_token);
+        Storage::set_contract_version(&env, &Self::CONTRACT_VERSION);
         Ok(())
     }
 
     /// Sets the default NftReward contract address used for NFT distributions
     /// when a per-call NFT contract is not provided.
+    /// Emits an NftContractSetEvent with the old and new contract addresses.
     pub fn set_nft_reward_contract(
         env: Env,
         admin: Address,
@@ -78,7 +184,39 @@ impl RewardManager {
         if configured_admin != admin {
             return Err(RewardErrorCode::Unauthorized);
         }
+
+        // Capture the old contract address before updating
+        let old_contract = Storage::get_nft_contract(&env);
+
+        // Update the contract
         Storage::set_nft_contract(&env, &nft_contract);
+
+        // Emit the event
+        env.events().publish(
+            (symbol_short!("NFT_SET"),),
+            NftContractSetEvent {
+                old_contract,
+                new_contract: nft_contract,
+            },
+        );
+
+        Ok(())
+    }
+
+    /// Sets the optional HuntyCore contract address used to validate hunt_id existence
+    /// in `create_reward_pool`. When set, pool creation will be rejected for unknown
+    /// hunt IDs. If not set, hunt_id is assumed caller-trusted.
+    pub fn set_hunty_core(
+        env: Env,
+        admin: Address,
+        hunty_core: Address,
+    ) -> Result<(), RewardErrorCode> {
+        admin.require_auth();
+        let configured_admin = Storage::get_admin(&env).ok_or(RewardErrorCode::NotInitialized)?;
+        if configured_admin != admin {
+            return Err(RewardErrorCode::Unauthorized);
+        }
+        Storage::set_hunty_core(&env, &hunty_core);
         Ok(())
     }
 
@@ -95,6 +233,7 @@ impl RewardManager {
     /// # Errors
     /// * `PoolAlreadyExists` - A pool already exists for this hunt_id
     /// * `InvalidAmount` - min_distribution_amount is negative
+    /// * `HuntNotFound` - hunt_id does not exist in HuntyCore (only when `set_hunty_core` has been called)
     pub fn create_reward_pool(
         env: Env,
         creator: Address,
@@ -112,6 +251,27 @@ impl RewardManager {
             return Err(RewardErrorCode::PoolAlreadyExists);
         }
 
+        // Validate hunt_id exists in HuntyCore when the core contract is configured.
+        // If not configured, hunt_id is caller-trusted (no cross-contract call is made).
+        if let Some(hunty_core) = Storage::get_hunty_core(&env) {
+            let mut args: Vec<Val> = Vec::new(&env);
+            args.push_back(hunt_id.into_val(&env));
+            // get_hunt_info returns Result<Hunt, HuntErrorCode>.
+            // We use Val as the success type to avoid importing Hunt from hunty-core.
+            // Any non-Ok(Ok(_)) result means the hunt doesn't exist or the call failed.
+            let hunt_exists = matches!(
+                env.try_invoke_contract::<Val, Val>(
+                    &hunty_core,
+                    &Symbol::new(&env, "get_hunt_info"),
+                    args
+                ),
+                Ok(Ok(_))
+            );
+            if !hunt_exists {
+                return Err(RewardErrorCode::HuntNotFound);
+            }
+        }
+
         let config = RewardPoolConfig {
             creator: creator.clone(),
             min_distribution_amount,
@@ -122,10 +282,58 @@ impl RewardManager {
             (symbol_short!("POOL_CRT"), hunt_id),
             RewardPoolCreatedEvent {
                 hunt_id,
-                creator,
+                creator: creator.clone(),
                 min_distribution_amount,
             },
         );
+
+        let audit_entry = PoolAuditEntry {
+            actor: creator.clone(),
+            operation: PoolOperation::Create,
+            timestamp: env.ledger().timestamp(),
+            amount: None,
+        };
+        Storage::append_audit_entry(&env, hunt_id, audit_entry);
+
+        Ok(())
+    }
+
+    /// Updates the `min_distribution_amount` for an existing reward pool.
+    ///
+    /// Only the pool creator is authorized to call this. Useful when a creator
+    /// has underfunded the pool and needs to lower the minimum so distributions
+    /// can proceed.
+    ///
+    /// # Arguments
+    /// * `creator` - The pool creator (must match the stored creator)
+    /// * `hunt_id` - The hunt whose pool config to update
+    /// * `min_distribution_amount` - New minimum XLM per distribution (0 = no minimum)
+    ///
+    /// # Errors
+    /// * `PoolNotFound` - No pool exists for this hunt_id
+    /// * `Unauthorized` - Caller is not the pool creator
+    /// * `InvalidAmount` - min_distribution_amount is negative
+    pub fn update_pool_config(
+        env: Env,
+        creator: Address,
+        hunt_id: u64,
+        min_distribution_amount: i128,
+    ) -> Result<(), RewardErrorCode> {
+        creator.require_auth();
+
+        let mut config =
+            Storage::get_pool_config(&env, hunt_id).ok_or(RewardErrorCode::PoolNotFound)?;
+
+        if creator != config.creator {
+            return Err(RewardErrorCode::Unauthorized);
+        }
+
+        if min_distribution_amount < 0 {
+            return Err(RewardErrorCode::InvalidAmount);
+        }
+
+        config.min_distribution_amount = min_distribution_amount;
+        Storage::set_pool_config(&env, hunt_id, &config);
 
         Ok(())
     }
@@ -136,6 +344,12 @@ impl RewardManager {
     /// Only the original pool creator is authorized to fund it.
     /// Transfers XLM from the funder to this contract and records the balance.
     ///
+    /// # Validation
+    /// - Minimum funding: 1 XLM (10,000,000 stroops) to prevent dust attacks
+    /// - Maximum single funding: 1 billion XLM to prevent overflow
+    /// - Pool balance limit: 1 billion XLM total to prevent overflow
+    /// - Rejects zero or negative amounts
+    ///
     /// # Arguments
     /// * `funder` - The address funding the pool (must be the pool creator)
     /// * `hunt_id` - The hunt to fund
@@ -145,6 +359,9 @@ impl RewardManager {
     /// * `PoolNotFound` - Pool has not been created yet
     /// * `Unauthorized` - Funder is not the pool creator
     /// * `InvalidAmount` - Amount is <= 0
+    /// * `BelowMinimumFunding` - Amount is less than 1 XLM (dust attack prevention)
+    /// * `ExceedsMaximumFunding` - Amount exceeds 1 billion XLM
+    /// * `PoolBalanceOverflow` - Adding this amount would exceed pool balance limit
     /// * `NotInitialized` - XLM token address not set
     pub fn fund_reward_pool(
         env: Env,
@@ -152,22 +369,40 @@ impl RewardManager {
         hunt_id: u64,
         amount: i128,
     ) -> Result<(), RewardErrorCode> {
-        #[cfg(not(test))]
-        funder.require_auth();
-
         if amount <= 0 {
             return Err(RewardErrorCode::InvalidAmount);
         }
 
-        let pool_config = Storage::get_pool_config(&env, hunt_id)
-            .ok_or(RewardErrorCode::PoolNotFound)?;
+        // Validate minimum funding amount (1 XLM) to prevent dust attacks
+        if amount < MIN_FUNDING_AMOUNT {
+            return Err(RewardErrorCode::BelowMinimumFunding);
+        }
+
+        // Validate maximum single funding amount to prevent overflow
+        if amount > MAX_FUNDING_AMOUNT {
+            return Err(RewardErrorCode::ExceedsMaximumFunding);
+        }
+
+        let pool_config =
+            Storage::get_pool_config(&env, hunt_id).ok_or(RewardErrorCode::PoolNotFound)?;
 
         if funder != pool_config.creator {
             return Err(RewardErrorCode::Unauthorized);
         }
 
-        let xlm_token = Storage::get_xlm_token(&env)
-            .ok_or(RewardErrorCode::NotInitialized)?;
+        pool_config.creator.require_auth();
+
+        let xlm_token = Storage::get_xlm_token(&env).ok_or(RewardErrorCode::NotInitialized)?;
+
+        // Check for overflow before adding to pool balance
+        let current = Storage::get_pool_balance(&env, hunt_id);
+        let new_balance = current.checked_add(amount)
+            .ok_or(RewardErrorCode::PoolBalanceOverflow)?;
+        
+        // Validate the new balance doesn't exceed maximum pool balance
+        if new_balance > MAX_POOL_BALANCE {
+            return Err(RewardErrorCode::PoolBalanceOverflow);
+        }
 
         // Transfer XLM from funder to this contract
         let contract_addr = env.current_contract_address();
@@ -175,11 +410,11 @@ impl RewardManager {
         client.transfer(&funder, &contract_addr, &amount);
 
         // Update pool balance and cumulative deposit total
-        let current = Storage::get_pool_balance(&env, hunt_id);
-        let new_balance = current + amount;
         Storage::set_pool_balance(&env, hunt_id, new_balance);
 
-        let total_deposited = Storage::get_pool_total_deposited(&env, hunt_id) + amount;
+        let total_deposited = Storage::get_pool_total_deposited(&env, hunt_id)
+            .checked_add(amount)
+            .ok_or(RewardErrorCode::PoolBalanceOverflow)?;
         Storage::set_pool_total_deposited(&env, hunt_id, total_deposited);
 
         env.events().publish(
@@ -189,21 +424,26 @@ impl RewardManager {
                 funder,
                 amount,
                 new_balance,
+                total_deposited,
             },
         );
+
+        let audit_entry = PoolAuditEntry {
+            actor: funder.clone(),
+            operation: PoolOperation::Fund,
+            timestamp: env.ledger().timestamp(),
+            amount: Some(amount),
+        };
+        Storage::append_audit_entry(&env, hunt_id, audit_entry);
 
         Ok(())
     }
 
     /// Refunds the entire remaining pool balance for a hunt back to the pool creator.
     /// Can only be called by the same creator that owns the pool.
-    pub fn refund_pool(
-        env: Env,
-        creator: Address,
-        hunt_id: u64,
-    ) -> Result<(), RewardErrorCode> {
-        let pool_config = Storage::get_pool_config(&env, hunt_id)
-            .ok_or(RewardErrorCode::PoolNotFound)?;
+    pub fn refund_pool(env: Env, creator: Address, hunt_id: u64) -> Result<(), RewardErrorCode> {
+        let pool_config =
+            Storage::get_pool_config(&env, hunt_id).ok_or(RewardErrorCode::PoolNotFound)?;
         if creator != pool_config.creator {
             return Err(RewardErrorCode::Unauthorized);
         }
@@ -213,14 +453,22 @@ impl RewardManager {
             return Ok(());
         }
 
-        let xlm_token = Storage::get_xlm_token(&env)
-            .ok_or(RewardErrorCode::NotInitialized)?;
+        let xlm_token = Storage::get_xlm_token(&env).ok_or(RewardErrorCode::NotInitialized)?;
 
         let contract_addr = env.current_contract_address();
         let client = soroban_sdk::token::Client::new(&env, &xlm_token);
         client.transfer(&contract_addr, &creator, &balance);
 
         Storage::set_pool_balance(&env, hunt_id, 0);
+
+        let audit_entry = PoolAuditEntry {
+            actor: creator.clone(),
+            operation: PoolOperation::Withdraw,
+            timestamp: env.ledger().timestamp(),
+            amount: Some(balance),
+        };
+        Storage::append_audit_entry(&env, hunt_id, audit_entry);
+
         Ok(())
     }
 
@@ -271,25 +519,22 @@ impl RewardManager {
         }
     }
 
-    /// Main entry point for reward distribution. Determines reward type from configuration,
-    /// routes to XLM and/or NFT handlers, and ensures atomic all-or-nothing execution.
-    ///
-    /// # Arguments
-    /// * `hunt_id` - The hunt being rewarded
-    /// * `player_address` - The player receiving rewards
-    /// * `reward_config` - Configuration specifying XLM amount and/or NFT metadata
-    ///
-    /// # Returns
-    /// `Ok(())` on success
-    ///
-    /// # Errors
-    /// * `InvalidConfig` - No reward type configured or invalid values
-    /// * `NotInitialized` - XLM token not set (when XLM rewards requested)
-    /// * `AlreadyDistributed` - Rewards already distributed for this hunt/player
-    /// * `InsufficientPool` - Pool has insufficient XLM for requested amount
-    /// * `InvalidAmount` - XLM amount <= 0 (when XLM requested)
-    /// * `BelowMinimumAmount` - XLM amount is below the pool's minimum distribution threshold
-    /// * `NftMintFailed` - NFT minting failed (when NFT requested)
+    pub fn set_daily_pool_cap(env: Env, admin: Address, hunt_id: u64, cap: i128) -> Result<(), RewardErrorCode> {
+        admin.require_auth();
+        let configured_admin = Storage::get_admin(&env).ok_or(RewardErrorCode::NotInitialized)?;
+        if configured_admin != admin { return Err(RewardErrorCode::Unauthorized); }
+        Storage::set_daily_pool_cap(&env, hunt_id, cap);
+        Ok(())
+    }
+
+    pub fn set_daily_global_cap(env: Env, admin: Address, cap: i128) -> Result<(), RewardErrorCode> {
+        admin.require_auth();
+        let configured_admin = Storage::get_admin(&env).ok_or(RewardErrorCode::NotInitialized)?;
+        if configured_admin != admin { return Err(RewardErrorCode::Unauthorized); }
+        Storage::set_daily_global_cap(&env, cap);
+        Ok(())
+    }
+
     pub fn distribute_rewards(
         env: Env,
         hunt_id: u64,
@@ -301,10 +546,23 @@ impl RewardManager {
             return Err(RewardErrorCode::InvalidConfig);
         }
 
-        // Prevent double distribution
-        if Storage::is_distributed(&env, hunt_id, &player_address) {
+        // Prevent double distribution using monotonic nonce
+        // Get current distribution state before any mutations
+        let distribution_record = Storage::get_distribution_record(&env, hunt_id, &player_address);
+        let current_nonce = Storage::get_distribution_nonce(&env, hunt_id, &player_address);
+        
+        // Detect replay: if record exists but nonce hasn't been incremented, it's a replay attempt
+        if distribution_record.is_some() && current_nonce == 0 {
             return Err(RewardErrorCode::AlreadyDistributed);
         }
+        
+        // Verify distribution state consistency
+        let expected_nonce = if distribution_record.is_some() { 1 } else { 0 };
+        if current_nonce != expected_nonce {
+            return Err(RewardErrorCode::ReplayDetected);
+        }
+
+        let _reentrancy_guard = ReentrancyGuard::acquire(&env)?;
 
         let mut xlm_amount = 0i128;
         let mut nft_id: Option<u64> = None;
@@ -325,8 +583,7 @@ impl RewardManager {
                 }
             }
 
-            let xlm_token = Storage::get_xlm_token(&env)
-                .ok_or(RewardErrorCode::NotInitialized)?;
+            let xlm_token = Storage::get_xlm_token(&env).ok_or(RewardErrorCode::NotInitialized)?;
 
             let pool_balance = Storage::get_pool_balance(&env, hunt_id);
             if pool_balance < amount {
@@ -334,6 +591,34 @@ impl RewardManager {
             }
 
             let contract_addr = env.current_contract_address();
+
+            if !XlmHandler::validate_pool(&env, &xlm_token, &contract_addr, amount) {
+                return Err(RewardErrorCode::PoolBalanceDivergence);
+            }
+
+            // Check caps
+            let day = env.ledger().timestamp() / 86400;
+            Storage::add_daily_pool_distributed(&env, hunt_id, day, amount);
+            Storage::add_daily_global_distributed(&env, day, amount);
+
+            let pool_cap = Storage::get_daily_pool_cap(&env, hunt_id);
+            if pool_cap > 0 {
+                let used = Storage::get_daily_pool_distributed(&env, hunt_id, day);
+                if used > pool_cap { return Err(RewardErrorCode::DailyCapExceeded); }
+                if used >= (pool_cap * 8 / 10) {
+                    env.events().publish(symbol_short!("DP_WARN"), DailyPoolCapWarningEvent { hunt_id, used, cap: pool_cap });
+                }
+            }
+
+            let global_cap = Storage::get_daily_global_cap(&env);
+            if global_cap > 0 {
+                let global_used = Storage::get_daily_global_distributed(&env, day);
+                if global_used > global_cap { return Err(RewardErrorCode::GlobalDailyCapExceeded); }
+                if global_used >= (global_cap * 8 / 10) {
+                    env.events().publish(symbol_short!("DG_WARN"), GlobalDailyCapWarningEvent { used: global_used, cap: global_cap });
+                }
+            }
+
             XlmHandler::distribute_xlm(
                 &env,
                 &xlm_token,
@@ -344,13 +629,17 @@ impl RewardManager {
             xlm_amount = amount;
             Storage::set_pool_balance(&env, hunt_id, pool_balance - amount);
 
-            // Track cumulative distributed amount
             let total_distributed = Storage::get_pool_total_distributed(&env, hunt_id) + amount;
             Storage::set_pool_total_distributed(&env, hunt_id, total_distributed);
+            let global_total = Storage::get_total_xlm_distributed(&env) + amount;
+            Storage::set_total_xlm_distributed(&env, global_total);
         }
 
         // Route to NFT handler if configured
         if reward_config.has_nft() {
+            if reward_config.nft_rarity > 5 {
+                return Err(RewardErrorCode::InvalidConfig);
+            }
             let nft_contract = reward_config
                 .nft_contract
                 .as_ref()
@@ -369,22 +658,21 @@ impl RewardManager {
                 reward_config.nft_hunt_title.clone(),
                 reward_config.nft_rarity,
                 reward_config.nft_tier,
-            ));
+            )?);
         }
 
-        // All operations succeeded — update state atomically
-        Storage::set_distributed(&env, hunt_id, &player_address);
+        // Record distribution with monotonic nonce to prevent replay attacks
         Storage::set_distribution_record(
             &env,
             hunt_id,
             &player_address,
-            &DistributionRecord {
-                xlm_amount,
-                nft_id,
-            },
+            &DistributionRecord { xlm_amount, nft_id },
         );
+        
+        // Increment nonce atomically after successful distribution
+        // Instance storage is immutable and not subject to TTL expiration
+        Storage::increment_distribution_nonce(&env, hunt_id, &player_address);
 
-        // Emit RewardsDistributed event
         let event = RewardsDistributedEvent {
             hunt_id,
             player: player_address.clone(),
@@ -394,7 +682,20 @@ impl RewardManager {
         env.events()
             .publish((symbol_short!("RWD_DIST"), hunt_id), event);
 
+        let audit_entry = PoolAuditEntry {
+            actor: player_address.clone(),
+            operation: PoolOperation::Distribute,
+            timestamp: env.ledger().timestamp(),
+            amount: if xlm_amount > 0 { Some(xlm_amount) } else { None },
+        };
+        Storage::append_audit_entry(&env, hunt_id, audit_entry);
+
         Ok(())
+    }
+
+    /// Returns the total XLM distributed across all hunts (protocol-level metric).
+    pub fn get_total_xlm_distributed(env: Env) -> i128 {
+        Storage::get_total_xlm_distributed(&env)
     }
 
     /// Legacy entry point for XLM-only distribution.
@@ -427,22 +728,17 @@ impl RewardManager {
     }
 
     /// Returns the distribution status for a hunt/player pair.
-    pub fn get_distribution_status(
-        env: Env,
-        hunt_id: u64,
-        player: Address,
-    ) -> DistributionStatus {
-        let distributed = Storage::is_distributed(&env, hunt_id, &player);
+    pub fn get_distribution_status(env: Env, hunt_id: u64, player: Address) -> DistributionStatus {
         let record = Storage::get_distribution_record(&env, hunt_id, &player);
 
         match record {
             Some(r) => DistributionStatus {
-                distributed,
+                distributed: true,
                 xlm_amount: r.xlm_amount,
                 nft_id: r.nft_id,
             },
             None => DistributionStatus {
-                distributed,
+                distributed: false,
                 xlm_amount: 0,
                 nft_id: None,
             },
@@ -457,6 +753,55 @@ impl RewardManager {
     /// Returns whether a reward has been distributed to a player for a hunt.
     pub fn is_reward_distributed(env: Env, hunt_id: u64, player: Address) -> bool {
         Storage::is_distributed(&env, hunt_id, &player)
+    }
+
+    /// Manually resolves a distribution that failed mid-execution.
+    ///
+    /// Allows the contract admin to mark a distribution as either `Completed`
+    /// or `Refunded` when the automatic distribution process could not finish
+    /// (e.g., XLM was sent but NFT mint failed). This is a bookkeeping-only
+    /// operation and does not move funds.
+    ///
+    /// # Arguments
+    /// * `admin` - The contract admin address (must match the stored admin)
+    /// * `hunt_id` - The hunt whose distribution to resolve
+    /// * `player` - The player whose distribution to resolve
+    /// * `resolution` - Outcome: `ResolutionStatus::Completed` or `ResolutionStatus::Refunded`
+    ///
+    /// # Errors
+    /// * `NotInitialized` - Contract has not been initialized (no admin set)
+    /// * `Unauthorized` - Caller is not the contract admin
+    /// * `DistributionNotFound` - No distribution record exists for this hunt/player
+    pub fn admin_resolve_distribution(
+        env: Env,
+        admin: Address,
+        hunt_id: u64,
+        player: Address,
+        resolution: ResolutionStatus,
+    ) -> Result<(), RewardErrorCode> {
+        admin.require_auth();
+        let configured_admin = Storage::get_admin(&env).ok_or(RewardErrorCode::NotInitialized)?;
+        if configured_admin != admin {
+            return Err(RewardErrorCode::Unauthorized);
+        }
+
+        if !Storage::is_distributed(&env, hunt_id, &player) {
+            return Err(RewardErrorCode::DistributionNotFound);
+        }
+
+        Storage::set_distribution_resolution(&env, hunt_id, &player, &resolution);
+
+        env.events().publish(
+            (symbol_short!("RSLV_D"), hunt_id),
+            DistributionResolvedEvent {
+                hunt_id,
+                player,
+                admin,
+                resolution,
+            },
+        );
+
+        Ok(())
     }
 
     /// Allows the admin to withdraw any unclaimed (surplus) XLM remaining in a reward pool.
@@ -479,7 +824,11 @@ impl RewardManager {
         admin: Address,
         hunt_id: u64,
         recipient: Address,
+        amount: i128,
     ) -> Result<(), RewardErrorCode> {
+        if amount < 0 {
+            return Err(RewardErrorCode::InvalidAmount);
+        }
         #[cfg(not(test))]
         admin.require_auth();
 
@@ -492,32 +841,324 @@ impl RewardManager {
         Storage::get_pool_config(&env, hunt_id).ok_or(RewardErrorCode::PoolNotFound)?;
 
         let balance = Storage::get_pool_balance(&env, hunt_id);
-        if balance == 0 {
+        let withdraw_amount = if amount == 0 { balance } else { amount };
+
+        if withdraw_amount <= 0 || withdraw_amount > balance {
             return Err(RewardErrorCode::InvalidAmount);
         }
+
+        monitoring::Monitoring::record_large_withdrawal(&env, withdraw_amount);
+        monitoring::Monitoring::record_invocation(&env, 80_000, true);
 
         let xlm_token = Storage::get_xlm_token(&env).ok_or(RewardErrorCode::NotInitialized)?;
 
         let contract_addr = env.current_contract_address();
         let client = soroban_sdk::token::Client::new(&env, &xlm_token);
-        client.transfer(&contract_addr, &recipient, &balance);
+        client.transfer(&contract_addr, &recipient, &withdraw_amount);
 
-        Storage::set_pool_balance(&env, hunt_id, 0);
+        Storage::set_pool_balance(&env, hunt_id, balance - withdraw_amount);
 
         env.events().publish(
             (symbol_short!("ADM_WDR"), hunt_id),
             AdminWithdrawEvent {
                 hunt_id,
-                admin,
-                amount: balance,
+                admin: admin.clone(),
+                amount: withdraw_amount,
             },
         );
 
+        let audit_entry = PoolAuditEntry {
+            actor: admin.clone(),
+            operation: PoolOperation::Withdraw,
+            timestamp: env.ledger().timestamp(),
+            amount: Some(withdraw_amount),
+        };
+        Storage::append_audit_entry(&env, hunt_id, audit_entry);
+
         Ok(())
+    }
+
+    /// Pauses the contract, preventing reward distributions and withdrawals.
+    /// Only the contract admin can call this. Emits an emergency event.
+    pub fn pause(
+        env: Env,
+        admin: Address,
+        reason: soroban_sdk::String,
+    ) -> Result<(), RewardErrorCode> {
+        #[cfg(not(test))]
+        admin.require_auth();
+        let configured_admin = Storage::get_admin(&env).ok_or(RewardErrorCode::NotInitialized)?;
+        if configured_admin != admin {
+            return Err(RewardErrorCode::Unauthorized);
+        }
+        Storage::set_paused(&env, true);
+        env.events().publish(
+            (symbol_short!("PAUSED"),),
+            EmergencyWithdrawalEvent {
+                admin,
+                hunt_id: 0,
+                amount: 0,
+                reason,
+                timestamp: env.ledger().timestamp(),
+            },
+        );
+        Ok(())
+    }
+
+    /// Unpauses the contract, resuming normal operations.
+    /// Only the contract admin can call this.
+    pub fn unpause(env: Env, admin: Address) -> Result<(), RewardErrorCode> {
+        #[cfg(not(test))]
+        admin.require_auth();
+        let configured_admin = Storage::get_admin(&env).ok_or(RewardErrorCode::NotInitialized)?;
+        if configured_admin != admin {
+            return Err(RewardErrorCode::Unauthorized);
+        }
+        Storage::set_paused(&env, false);
+        env.events()
+            .publish((symbol_short!("UNPAUSED"),), admin.clone());
+        Ok(())
+    }
+
+    /// Returns whether the contract is currently paused.
+    pub fn is_paused(env: Env) -> bool {
+        Storage::is_paused(&env)
+    }
+
+    /// Emergency withdrawal: allows the admin to withdraw all funds from one or all
+    /// reward pools when the contract is paused (e.g. due to a critical vulnerability).
+    /// When `hunt_id` is 0, all pools with non-zero balances are drained.
+    /// When `all_pools` is true, iterates all hunts up to `max_hunt_id` and withdraws.
+    ///
+    /// # Arguments
+    /// * `admin` - The contract admin address
+    /// * `hunt_id` - Specific hunt pool to drain (0 = all pools up to max_hunt_id)
+    /// * `recipient` - Address to receive the withdrawn funds
+    /// * `reason` - Reason for the emergency withdrawal (emitted in events)
+    /// * `max_hunt_id` - When hunt_id is 0, drains all pools from 1..=max_hunt_id
+    ///
+    /// # Errors
+    /// * `NotInitialized` - Contract not initialized
+    /// * `Unauthorized` - Caller is not admin
+    /// * `ContractPaused` - Contract must be paused to call this
+    pub fn emergency_withdraw(
+        env: Env,
+        admin: Address,
+        hunt_id: u64,
+        recipient: Address,
+        reason: soroban_sdk::String,
+        max_hunt_id: u64,
+    ) -> Result<i128, RewardErrorCode> {
+        #[cfg(not(test))]
+        admin.require_auth();
+        let configured_admin = Storage::get_admin(&env).ok_or(RewardErrorCode::NotInitialized)?;
+        if configured_admin != admin {
+            return Err(RewardErrorCode::Unauthorized);
+        }
+        if !Storage::is_paused(&env) {
+            return Err(RewardErrorCode::ContractPaused);
+        }
+        let xlm_token = Storage::get_xlm_token(&env).ok_or(RewardErrorCode::NotInitialized)?;
+        let contract_addr = env.current_contract_address();
+        let client = soroban_sdk::token::Client::new(&env, &xlm_token);
+        let mut total_withdrawn: i128 = 0;
+
+        if hunt_id > 0 {
+            // Single pool emergency withdrawal
+            let balance = Storage::get_pool_balance(&env, hunt_id);
+            if balance > 0 {
+                client.transfer(&contract_addr, &recipient, &balance);
+                Storage::set_pool_balance(&env, hunt_id, 0);
+                total_withdrawn = balance;
+                let log_entry = EmergencyWithdrawalLogEntry {
+                    hunt_id,
+                    amount: balance,
+                    reason: reason.clone(),
+                    timestamp: env.ledger().timestamp(),
+                };
+                Storage::log_emergency_withdrawal(&env, &log_entry);
+                env.events().publish(
+                    (symbol_short!("EMERG_WDR"), hunt_id),
+                    EmergencyWithdrawalEvent {
+                        admin: admin.clone(),
+                        hunt_id,
+                        amount: balance,
+                        reason: reason.clone(),
+                        timestamp: env.ledger().timestamp(),
+                    },
+                );
+            }
+        } else {
+            // Drain all pools up to max_hunt_id
+            for pid in 1..=max_hunt_id {
+                let balance = Storage::get_pool_balance(&env, pid);
+                if balance > 0 {
+                    client.transfer(&contract_addr, &recipient, &balance);
+                    Storage::set_pool_balance(&env, pid, 0);
+                    total_withdrawn += balance;
+                    let log_entry = EmergencyWithdrawalLogEntry {
+                        hunt_id: pid,
+                        amount: balance,
+                        reason: reason.clone(),
+                        timestamp: env.ledger().timestamp(),
+                    };
+                    Storage::log_emergency_withdrawal(&env, &log_entry);
+                    env.events().publish(
+                        (symbol_short!("EMERG_WDR"), pid),
+                        EmergencyWithdrawalEvent {
+                            admin: admin.clone(),
+                            hunt_id: pid,
+                            amount: balance,
+                            reason: reason.clone(),
+                            timestamp: env.ledger().timestamp(),
+                        },
+                    );
+                }
+            }
+        }
+
+        Ok(total_withdrawn)
+    }
+
+    /// Returns the emergency withdrawal log entries.
+    pub fn get_emergency_logs(env: Env) -> soroban_sdk::Vec<EmergencyWithdrawalLogEntry> {
+        Storage::get_emergency_logs(&env)
+    }
+
+    /// Returns the on-chain version stored during initialize, or the compiled constant.
+    pub fn contract_version(env: Env) -> u32 {
+        Storage::get_contract_version(&env).unwrap_or(Self::CONTRACT_VERSION)
+    }
+
+    /// Returns true if the given NftReward contract meets the minimum required version.
+    pub fn check_nft_reward_compatibility(env: Env, nft_reward_address: Address) -> bool {
+        let ver: u32 = env.invoke_contract(
+            &nft_reward_address,
+            &soroban_sdk::Symbol::new(&env, "get_version"),
+            soroban_sdk::Vec::new(&env),
+        );
+        ver.is_compatible_with(&Self::REQUIRED_NFT_REWARD_VERSION)
+    }
+
+    pub fn get_schema_version(env: Env) -> u32 {
+        migration::RewardManagerMigration::get_schema_version(&env)
+    }
+
+    pub fn initialize_schema(env: Env, admin: Address) {
+        admin.require_auth();
+        migration::RewardManagerMigration::initialize_schema(&env);
+    }
+
+    pub fn propose_upgrade(
+        env: Env,
+        admin: Address,
+        target_version: u32,
+    ) -> Result<hunty_migration::UpgradeProposal, hunty_migration::UpgradeAuthError> {
+        let proposal =
+            migration::RewardManagerMigration::propose_upgrade(&env, &admin, target_version)?;
+        env.events().publish(
+            migration::RewardManagerMigration::upgrade_proposed_topic(&env),
+            migration::RewardManagerMigration::upgrade_proposed_event(&proposal),
+        );
+        Ok(proposal)
+    }
+
+    pub fn set_upgrade_timelock(
+        env: Env,
+        admin: Address,
+        delay_seconds: u64,
+    ) -> Result<(), hunty_migration::UpgradeAuthError> {
+        migration::RewardManagerMigration::set_upgrade_timelock(&env, &admin, delay_seconds)
+    }
+
+    pub fn get_upgrade_proposal(env: Env) -> Option<hunty_migration::UpgradeProposal> {
+        migration::RewardManagerMigration::get_upgrade_proposal(&env)
+    }
+
+    pub fn get_upgrade_timelock(env: Env) -> u64 {
+        migration::RewardManagerMigration::get_upgrade_timelock(&env)
+    }
+
+    pub fn get_upgrade_history(
+        env: Env,
+        offset: u32,
+        limit: u32,
+    ) -> soroban_sdk::Vec<hunty_migration::UpgradeHistoryEntry> {
+        migration::RewardManagerMigration::get_upgrade_history(&env, offset, limit)
+    }
+
+    pub fn run_migration(
+        env: Env,
+        admin: Address,
+        target_version: u32,
+        dry_run: bool,
+    ) -> Result<migration::MigrationReport, hunty_migration::UpgradeAuthError> {
+        let from_version = migration::RewardManagerMigration::get_schema_version(&env);
+        let report =
+            migration::RewardManagerMigration::run_migration(&env, &admin, target_version, dry_run)?;
+        if !dry_run && report.succeeded && report.from_version < report.to_version {
+            env.events().publish(
+                migration::RewardManagerMigration::upgrade_executed_topic(&env),
+                migration::RewardManagerMigration::upgrade_executed_event(
+                    from_version,
+                    report.to_version,
+                    env.ledger().timestamp(),
+                    admin,
+                ),
+            );
+        }
+        Ok(report)
+    }
+
+    pub fn rollback_migration(
+        env: Env,
+        admin: Address,
+    ) -> Result<migration::MigrationReport, hunty_migration::UpgradeAuthError> {
+        migration::RewardManagerMigration::rollback_migration(&env, &admin)
+    }
+
+    pub fn get_health_dashboard(env: Env) -> monitoring::ContractHealth {
+        monitoring::Monitoring::health_dashboard(&env)
+    }
+
+    /// Exposes a paginated read query for the audit log of a given pool.
+    pub fn get_pool_audit_log(
+        env: Env,
+        hunt_id: u64,
+        start_after: Option<u64>,
+        limit: Option<u32>,
+    ) -> PoolAuditLogResponse {
+        let max_limit = 50;
+        let default_limit = 20;
+        let query_limit = limit.unwrap_or(default_limit).min(max_limit) as u64;
+
+        let total = Storage::get_pool_audit_count(&env, hunt_id);
+        let mut entries = Vec::new(&env);
+
+        if total == 0 {
+            return PoolAuditLogResponse { entries, total };
+        }
+
+        // Determine start index. start_after is a cursor index, so we start at start_after + 1.
+        // If None, we start at 0.
+        let mut current_idx = start_after.map(|idx| idx + 1).unwrap_or(0);
+        
+        let mut count = 0;
+        while count < query_limit && current_idx < total {
+            if let Some(entry) = Storage::get_pool_audit_entry(&env, hunt_id, current_idx) {
+                entries.push_back(entry);
+            }
+            current_idx += 1;
+            count += 1;
+        }
+
+        PoolAuditLogResponse { entries, total }
     }
 }
 
 pub mod errors;
+mod migration;
+mod monitoring;
 mod nft_handler;
 mod storage;
 mod types;

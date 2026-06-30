@@ -1,7 +1,9 @@
 [workspace]
 resolver = "2"
 members = [
-  "contracts/*",
+  "contracts/hunty-core",
+  "contracts/nft-reward",
+  "contracts/reward-manager",
 ]
 
 [workspace.dependencies]

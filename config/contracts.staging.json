@@ -1,0 +1,11 @@
+{
+  "environment": "staging",
+  "network": "testnet",
+  "rpcUrl": "https://soroban-testnet.stellar.org",
+  "networkPassphrase": "Test SDF Network ; September 2015",
+  "contracts": {
+    "huntyCore": "replace-with-staging-hunty-core-contract-id",
+    "rewardManager": "replace-with-staging-reward-manager-contract-id",
+    "nftReward": "replace-with-staging-nft-reward-contract-id"
+  }
+}

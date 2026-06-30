@@ -1,4 +1,21 @@
-use soroban_sdk::{contracttype, Address, BytesN, Env, String, Vec};
+use soroban_sdk::{contracttype, Address, BytesN, Env, Map, String, Vec};
+
+/// Semantic version (major.minor.patch). Compatible if major matches and self >= required.
+#[contracttype]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SemVer {
+    pub major: u32,
+    pub minor: u32,
+    pub patch: u32,
+}
+
+impl SemVer {
+    pub fn is_compatible_with(&self, required: &SemVer) -> bool {
+        self.major == required.major
+            && (self.minor > required.minor
+                || (self.minor == required.minor && self.patch >= required.patch))
+    }
+}
 
 /// Semantic version (major.minor.patch). Compatible if major matches and self >= required.
 #[contracttype]

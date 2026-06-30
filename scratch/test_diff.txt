@@ -1,0 +1,991 @@
+﻿diff --git a/contracts/hunty-core/src/test.rs b/contracts/hunty-core/src/test.rs
+index c65901c..0eca2a5 100644
+--- a/contracts/hunty-core/src/test.rs
++++ b/contracts/hunty-core/src/test.rs
+@@ -22,12 +22,12 @@ mod test {
+     // Bring Soroban testutils traits into scope (generate addresses, set ledger info, register contracts).
+     use crate::errors::{HuntError, HuntErrorCode};
+     use crate::storage::Storage;
+-    use crate::types::{HuntStatus, TimeBonusConfig};
++    use crate::types::{HuntStatus, TimeBonusConfig, ClueInfo, HuntCancelledEvent, RewardClaimFailedEvent};
+     use crate::HuntyCore;
+     use nft_reward::{NftMetadata, NftReward};
+     use reward_manager::RewardManager;
+     use soroban_sdk::testutils::{Address as _, Events as _, Ledger as _, Register as _};
+-    use soroban_sdk::{token, String as SorobanString, Symbol, TryFromVal, Val};
++    use soroban_sdk::{token, String as SorobanString, TryFromVal, Val};
+ 
+     /// Runs a closure inside a registered HuntyCore contract context so storage is accessible.
+     fn with_core_contract<T>(env: &Env, f: impl FnOnce(&Env, &Address) -> T) -> T {
+@@ -203,8 +203,7 @@ mod test {
+                 question.clone(),
+                 answer.clone(),
+                 10,
+-                true,
+-            )
++                true, 1)
+             .unwrap();
+             HuntyCore::activate_hunt(env.clone(), hunt_id, creator.clone()).unwrap();
+         });
+@@ -252,7 +251,7 @@ mod test {
+         assert_eq!(slow_progress.total_score, 10);
+ 
+         let board = as_core_contract(&env, &contract_id, |env| {
+-            HuntyCore::get_hunt_leaderboard(env.clone(), hunt_id, 3).unwrap()
++            HuntyCore::get_hunt_leaderboard(env.clone(), hunt_id, 3, 0).unwrap()
+         });
+ 
+         assert_eq!(board.len(), 3);
+@@ -660,18 +659,18 @@ mod test {
+         let mut template_hunt = as_core_contract(&env, &contract_id, |env| {
+             Storage::get_hunt(env, template_hunt_id).unwrap()
+         });
+-        template_hunt.reward_config = crate::types::RewardConfig::new(0, false, None, 1, 0, 0);
++        template_hunt.reward_config = crate::types::HuntRewardConfig::new(&env, 0, false, None, 1, 0, 0);
+         as_core_contract(&env, &contract_id, |env| {
+             Storage::save_hunt(env, &template_hunt);
+         });
+ 
+         env.mock_all_auths();
+         as_core_contract(&env, &contract_id, |env| {
+-            HuntyCore::add_clue(env.clone(), template_hunt_id, q1, a1.clone(), 10, true).unwrap();
++            HuntyCore::add_clue(env.clone(), template_hunt_id, q1, a1.clone(), 10, true, 1).unwrap();
+         });
+         env.mock_all_auths();
+         as_core_contract(&env, &contract_id, |env| {
+-            HuntyCore::add_clue(env.clone(), template_hunt_id, q2, a2.clone(), 20, false)
++            HuntyCore::add_clue(env.clone(), template_hunt_id, q2, a2.clone(), 20, false, 1)
+                 .unwrap();
+         });
+         env.mock_all_auths();
+@@ -703,7 +702,7 @@ mod test {
+             Storage::get_hunt(env, template_hunt_id).unwrap()
+         });
+         let template_clues =
+-            as_core_contract(&env, &contract_id, |env| Storage::list_clues_for_hunt(env, template_hunt_id));
++            as_core_contract(&env, &contract_id, |env| Storage::list_clues_for_hunt(env, template_hunt_id, 0, 100));
+ 
+         let cloned_hunt_id = as_core_contract(&env, &contract_id, |env| {
+             HuntyCore::create_hunt_from_template(
+@@ -721,7 +720,7 @@ mod test {
+         let cloned_hunt =
+             as_core_contract(&env, &contract_id, |env| Storage::get_hunt(env, cloned_hunt_id).unwrap());
+         let cloned_clues =
+-            as_core_contract(&env, &contract_id, |env| Storage::list_clues_for_hunt(env, cloned_hunt_id));
++            as_core_contract(&env, &contract_id, |env| Storage::list_clues_for_hunt(env, cloned_hunt_id, 0, 100));
+ 
+         assert_eq!(template_hunt.status, HuntStatus::Completed);
+         assert_eq!(cloned_hunt.status, HuntStatus::Draft);
+@@ -761,7 +760,7 @@ mod test {
+         });
+         env.mock_all_auths();
+         as_core_contract(&env, &contract_id, |env| {
+-            HuntyCore::add_clue(env.clone(), template_hunt_id, q, a, 10, true).unwrap();
++            HuntyCore::add_clue(env.clone(), template_hunt_id, q, a, 10, true, 1).unwrap();
+         });
+         env.mock_all_auths();
+         as_core_contract(&env, &contract_id, |env| {
+@@ -907,7 +906,7 @@ mod test {
+             )
+             .unwrap();
+             let _cid2 =
+-                HuntyCore::add_clue(env.clone(), hid2, question, answer2, 5, false).unwrap();
++                HuntyCore::add_clue(env.clone(), hid2, question, answer2, 5, false, 1).unwrap();
+             let c2 = Storage::get_clue(env, hid2, _cid2).unwrap();
+             let h2 = c2.answer_hashes.get(0).unwrap();
+             (h1, h2)
+@@ -941,10 +940,10 @@ mod test {
+                 None,
+             )
+             .unwrap();
+-            let cid = HuntyCore::add_clue(env.clone(), hid, question.clone(), answer1, 5, false)
++            let cid = HuntyCore::add_clue(env.clone(), hid, question.clone(), answer1, 5, false, 1)
+                 .unwrap();
+             let c = Storage::get_clue(env, hid, cid).unwrap();
+-            let h1 = c.answer_hash;
++            let h1 = c.answer_hashes.get(0).unwrap();
+             let hid2 = HuntyCore::create_hunt(
+                 env.clone(),
+                 Address::generate(&env),
+@@ -954,9 +953,9 @@ mod test {
+                 None,
+             )
+             .unwrap();
+-            let _cid2 = HuntyCore::add_clue(env.clone(), hid2, question, answer2, 5, false).unwrap();
++            let _cid2 = HuntyCore::add_clue(env.clone(), hid2, question, answer2, 5, false, 1).unwrap();
+             let c2 = Storage::get_clue(env, hid2, _cid2).unwrap();
+-            let h2 = c2.answer_hash;
++            let h2 = c2.answer_hashes.get(0).unwrap();
+             (h1, h2)
+         });
+ 
+@@ -989,9 +988,9 @@ mod test {
+             )
+             .unwrap();
+             let cid =
+-                HuntyCore::add_clue(env.clone(), hid, question.clone(), answer1, 5, false).unwrap();
++                HuntyCore::add_clue(env.clone(), hid, question.clone(), answer1, 5, false, 1).unwrap();
+             let c = Storage::get_clue(env, hid, cid).unwrap();
+-            let h1 = c.answer_hash;
++            let h1 = c.answer_hashes.get(0).unwrap();
+             let hid2 = HuntyCore::create_hunt(
+                 env.clone(),
+                 Address::generate(&env),
+@@ -1004,7 +1003,7 @@ mod test {
+             let _cid2 =
+                 HuntyCore::add_clue(env.clone(), hid2, question, answer2, 5, false, 1).unwrap();
+             let c2 = Storage::get_clue(env, hid2, _cid2).unwrap();
+-            let h2 = c2.answer_hash;
++            let h2 = c2.answer_hashes.get(0).unwrap();
+             (h1, h2)
+         });
+ 
+@@ -1039,6 +1038,7 @@ mod test {
+             question: ret_question,
+             points,
+             is_required,
++            ..
+         } = info;
+ 
+         assert_eq!(clue_id, 1);
+@@ -1071,9 +1071,11 @@ mod test {
+         env.ledger().set_timestamp(1_700_000_000);
+         env.mock_all_auths();
+         let creator = Address::generate(&env);
++        let title = String::from_str(&env, "Hunt");
++        let description = String::from_str(&env, "Desc");
+ 
+         let list = with_core_contract(&env, |env, _cid| {
+-            let hid = HuntyCore::create_hunt(env.clone(), creator, title, description, None, None)
++            let hid = HuntyCore::create_hunt(env.clone(), creator.clone(), title.clone(), description.clone(), None, None)
+                 .unwrap();
+             HuntyCore::list_clues(env.clone(), hid, 0, 10)
+         });
+@@ -1099,7 +1101,7 @@ mod test {
+                 .unwrap();
+             HuntyCore::add_clue(env.clone(), hid, q1, a.clone(), 1, false, 1).unwrap();
+             HuntyCore::add_clue(env.clone(), hid, q2, a, 2, true, 1).unwrap();
+-            HuntyCore::list_clues(env.clone(), hid)
++            HuntyCore::list_clues(env.clone(), hid, 0, 10)
+         });
+ 
+         assert_eq!(list.len(), 2);
+@@ -1129,9 +1131,9 @@ mod test {
+         let (list1, list2, list_all) = with_core_contract(&env, |env, _cid| {
+             let hid = HuntyCore::create_hunt(env.clone(), creator, title, description, None, None)
+                 .unwrap();
+-            HuntyCore::add_clue(env.clone(), hid, q1, a.clone(), 1, false).unwrap();
+-            HuntyCore::add_clue(env.clone(), hid, q2, a.clone(), 2, true).unwrap();
+-            HuntyCore::add_clue(env.clone(), hid, q3, a, 3, false).unwrap();
++            HuntyCore::add_clue(env.clone(), hid, q1, a.clone(), 1, false, 1).unwrap();
++            HuntyCore::add_clue(env.clone(), hid, q2, a.clone(), 2, true, 1).unwrap();
++            HuntyCore::add_clue(env.clone(), hid, q3, a, 3, false, 1).unwrap();
+             (
+                 HuntyCore::list_clues(env.clone(), hid, 0, 2),
+                 HuntyCore::list_clues(env.clone(), hid, 2, 2),
+@@ -1302,14 +1304,14 @@ mod test {
+             .unwrap();
+ 
+             // Add a required clue to allow activation
+-            HuntyCore::add_clue(env.clone(), hid, question.clone(), answer.clone(), 1, true)
++            HuntyCore::add_clue(env.clone(), hid, question.clone(), answer.clone(), 1, true, 1)
+                 .unwrap();
+ 
+             // Activate the hunt
+             HuntyCore::activate_hunt(env.clone(), hid, creator.clone()).unwrap();
+ 
+             // Attempt to add a clue after activation (should fail)
+-            HuntyCore::add_clue(env.clone(), hid, question, answer, 1, false).unwrap_err()
++            HuntyCore::add_clue(env.clone(), hid, question, answer, 1, false, 1).unwrap_err()
+         });
+ 
+         assert_eq!(err, HuntErrorCode::InvalidHuntStatus);
+@@ -1363,8 +1365,7 @@ mod test {
+                 String::from_str(env, "Capital of USA?"),
+                 String::from_str(env, "Washington"),
+                 10,
+-                true,
+-            )
++                true, 1)
+             .unwrap()
+         });
+         env.mock_all_auths();
+@@ -1409,8 +1410,7 @@ mod test {
+                 String::from_str(env, "Capital of USA?"),
+                 String::from_str(env, "Washington"),
+                 10,
+-                true,
+-            )
++                true, 1)
+             .unwrap()
+         });
+         env.mock_all_auths();
+@@ -1536,8 +1536,7 @@ mod test {
+                 String::from_str(env, "Q"),
+                 String::from_str(env, "a"),
+                 1,
+-                true,
+-            )
++                true, 1)
+             .unwrap()
+         });
+         env.mock_all_auths();
+@@ -1580,8 +1579,7 @@ mod test {
+                 String::from_str(env, "Q"),
+                 String::from_str(env, "original"),
+                 5,
+-                true,
+-            )
++                true, 1)
+             .unwrap()
+         });
+         let original_hash = as_core_contract(&env, &contract_id, |env| {
+@@ -1627,8 +1625,7 @@ mod test {
+                 String::from_str(env, "Q"),
+                 String::from_str(env, "a"),
+                 1,
+-                true,
+-            )
++                true, 1)
+             .unwrap()
+         });
+         env.mock_all_auths();
+@@ -1666,8 +1663,7 @@ mod test {
+                 String::from_str(env, "Q"),
+                 String::from_str(env, "a"),
+                 1,
+-                true,
+-            )
++                true, 1)
+             .unwrap();
+             let _ = HuntyCore::add_clue_aliases(env.clone(), hid, cid, aliases);
+         });
+@@ -1687,7 +1683,7 @@ mod test {
+         let err = with_core_contract(&env, |env, _cid| {
+             let hid = HuntyCore::create_hunt(env.clone(), creator, title, description, None, None)
+                 .unwrap();
+-            HuntyCore::add_clue(env.clone(), hid, question, answer, 0, false).unwrap_err()
++            HuntyCore::add_clue(env.clone(), hid, question, answer, 0, false, 1).unwrap_err()
+         });
+ 
+         assert_eq!(err, HuntErrorCode::InvalidPoints);
+@@ -1820,7 +1816,7 @@ mod test {
+             assert_eq!(info.points, 20);
+ 
+             // List clues and verify difficulty is included
+-            let list = HuntyCore::list_clues(env.clone(), hunt_id);
++            let list = HuntyCore::list_clues(env.clone(), hunt_id, 0, 10);
+             assert_eq!(list.len(), 1);
+             let c = list.get(0).unwrap();
+             assert_eq!(c.difficulty, 5);
+@@ -2011,7 +2007,7 @@ mod test {
+                 env.clone(), creator.clone(),
+                 String::from_str(env, "Hunt"), String::from_str(env, "Desc"), None, None,
+             ).unwrap();
+-            HuntyCore::add_clue(env.clone(), hunt_id, question, answer, 1, true).unwrap();
++            HuntyCore::add_clue(env.clone(), hunt_id, question, answer, 1, true, 1).unwrap();
+             HuntyCore::activate_hunt(env.clone(), hunt_id, creator.clone()).unwrap();
+             HuntyCore::deactivate_hunt(env.clone(), hunt_id, creator.clone()).unwrap();
+             let hunt = Storage::get_hunt(env, hunt_id).unwrap();
+@@ -2033,7 +2029,7 @@ mod test {
+                 env.clone(), creator.clone(),
+                 String::from_str(env, "Hunt"), String::from_str(env, "Desc"), None, None,
+             ).unwrap();
+-            HuntyCore::add_clue(env.clone(), hunt_id, question, answer, 1, true).unwrap();
++            HuntyCore::add_clue(env.clone(), hunt_id, question, answer, 1, true, 1).unwrap();
+             HuntyCore::activate_hunt(env.clone(), hunt_id, creator.clone()).unwrap();
+             HuntyCore::deactivate_hunt(env.clone(), hunt_id, creator.clone()).unwrap();
+             HuntyCore::activate_hunt(env.clone(), hunt_id, creator.clone()).unwrap();
+@@ -2055,7 +2051,7 @@ mod test {
+                 env.clone(), creator.clone(),
+                 String::from_str(env, "Hunt"), String::from_str(env, "Desc"), None, None,
+             ).unwrap();
+-            HuntyCore::add_clue(env.clone(), hunt_id, question, answer, 1, true).unwrap();
++            HuntyCore::add_clue(env.clone(), hunt_id, question, answer, 1, true, 1).unwrap();
+             // Hunt is Draft ΓÇö deactivate must reject it.
+             let err = HuntyCore::deactivate_hunt(env.clone(), hunt_id, creator.clone()).unwrap_err();
+             assert_eq!(err, HuntErrorCode::InvalidHuntStatus);
+@@ -2075,10 +2071,10 @@ mod test {
+                 env.clone(), creator.clone(),
+                 String::from_str(env, "Hunt"), String::from_str(env, "Desc"), None, None,
+             ).unwrap();
+-            HuntyCore::add_clue(env.clone(), hunt_id, question.clone(), answer.clone(), 1, true).unwrap();
++            HuntyCore::add_clue(env.clone(), hunt_id, question.clone(), answer.clone(), 1, true, 1).unwrap();
+             HuntyCore::activate_hunt(env.clone(), hunt_id, creator.clone()).unwrap();
+             HuntyCore::deactivate_hunt(env.clone(), hunt_id, creator.clone()).unwrap();
+-            let err = HuntyCore::add_clue(env.clone(), hunt_id, question, answer, 1, false).unwrap_err();
++            let err = HuntyCore::add_clue(env.clone(), hunt_id, question, answer, 1, false, 1).unwrap_err();
+             assert_eq!(err, HuntErrorCode::InvalidHuntStatus);
+         });
+     }
+@@ -2097,7 +2093,7 @@ mod test {
+                 env.clone(), creator.clone(),
+                 String::from_str(env, "Hunt"), String::from_str(env, "Desc"), None, None,
+             ).unwrap();
+-            HuntyCore::add_clue(env.clone(), hunt_id, question, answer, 1, true).unwrap();
++            HuntyCore::add_clue(env.clone(), hunt_id, question, answer, 1, true, 1).unwrap();
+             HuntyCore::activate_hunt(env.clone(), hunt_id, creator.clone()).unwrap();
+             HuntyCore::deactivate_hunt(env.clone(), hunt_id, creator.clone()).unwrap();
+             let err = HuntyCore::register_player(env.clone(), hunt_id, player.clone()).unwrap_err();
+@@ -2118,7 +2114,7 @@ mod test {
+                 env.clone(), creator.clone(),
+                 String::from_str(env, "Hunt"), String::from_str(env, "Desc"), None, None,
+             ).unwrap();
+-            HuntyCore::add_clue(env.clone(), hunt_id, question, answer, 1, true).unwrap();
++            HuntyCore::add_clue(env.clone(), hunt_id, question, answer, 1, true, 1).unwrap();
+             HuntyCore::activate_hunt(env.clone(), hunt_id, creator.clone()).unwrap();
+             HuntyCore::deactivate_hunt(env.clone(), hunt_id, creator.clone()).unwrap();
+             HuntyCore::cancel_hunt(env.clone(), hunt_id, creator.clone()).unwrap();
+@@ -2232,7 +2228,7 @@ mod test {
+             )
+             .unwrap();
+ 
+-            HuntyCore::add_clue(env.clone(), hunt_id, question, answer, 1, true).unwrap();
++            HuntyCore::add_clue(env.clone(), hunt_id, question, answer, 1, true, 1).unwrap();
+             HuntyCore::activate_hunt(env.clone(), hunt_id, creator.clone()).unwrap();
+             HuntyCore::cancel_hunt(env.clone(), hunt_id, creator.clone()).unwrap();
+ 
+@@ -2286,7 +2282,7 @@ mod test {
+             .unwrap();
+             HuntyCore::add_clue(env.clone(), hunt_id, question, answer, 1, true, 1).unwrap();
+             HuntyCore::activate_hunt(env.clone(), hunt_id, creator.clone()).unwrap();
+-            HuntyCore::set_reward_manager(env.clone(), reward_manager_id.clone());
++            HuntyCore::set_reward_manager(env.clone(), creator.clone(), reward_manager_id.clone());
+             hunt_id
+         });
+ 
+@@ -2490,7 +2486,7 @@ mod test {
+                 None,
+             )
+             .unwrap();
+-            HuntyCore::add_clue(env.clone(), hunt_id, question, answer, 1, true).unwrap();
++            HuntyCore::add_clue(env.clone(), hunt_id, question, answer, 1, true, 1).unwrap();
+             HuntyCore::activate_hunt(env.clone(), hunt_id, creator.clone()).unwrap();
+             HuntyCore::pause_contract(env.clone(), admin.clone()).unwrap();
+ 
+@@ -2569,7 +2565,7 @@ mod test {
+         let question = String::from_str(&env, "Q");
+         let answer = String::from_str(&env, "a");
+ 
+-        with_core_contract(&env, |env, _cid| {
++        let (hunt_id, core_id) = with_core_contract(&env, |env, cid| {
+             env.ledger().set_timestamp(1_000);
+             let hunt_id = HuntyCore::create_hunt(
+                 env.clone(),
+@@ -2581,31 +2577,56 @@ mod test {
+             )
+             .unwrap();
+             HuntyCore::add_clue(env.clone(), hunt_id, question, answer, 1, true, 1).unwrap();
++            (hunt_id, cid.clone())
++        });
+ 
+-            // First activation ΓÇö player registers
++        // First activation
++        as_core_contract(&env, &core_id, |env| {
+             HuntyCore::activate_hunt(env.clone(), hunt_id, creator.clone()).unwrap();
++        });
++
++        // Player registers
++        as_core_contract(&env, &core_id, |env| {
+             HuntyCore::register_player(env.clone(), hunt_id, player.clone()).unwrap();
+-            let first_progress =
+-                HuntyCore::get_player_progress(env.clone(), hunt_id, player.clone()).unwrap();
++        });
++
++        let first_progress = as_core_contract(&env, &core_id, |env| {
++            HuntyCore::get_player_progress(env.clone(), hunt_id, player.clone()).unwrap()
++        });
+ 
+-            // Creator deactivates then reactivates (new cycle)
++        // Creator deactivates
++        as_core_contract(&env, &core_id, |env| {
+             HuntyCore::deactivate_hunt(env.clone(), hunt_id, creator.clone()).unwrap();
+-            env.ledger().set_timestamp(2_000);
++        });
++
++        env.ledger().set_timestamp(2_000);
++
++        // Reactivate
++        as_core_contract(&env, &core_id, |env| {
+             HuntyCore::activate_hunt(env.clone(), hunt_id, creator.clone()).unwrap();
+-            let hunt = Storage::get_hunt(&env, hunt_id).unwrap();
+-            assert!(first_progress.started_at < hunt.activated_at);
++        });
++
++        let hunt = as_core_contract(&env, &core_id, |env| {
++            Storage::get_hunt(env, hunt_id).unwrap()
++        });
++        assert!(first_progress.started_at < hunt.activated_at);
+ 
+-            // Player should be able to register again ΓÇö old progress is stale
++        // Player should be able to register again ΓÇö old progress is stale
++        as_core_contract(&env, &core_id, |env| {
+             HuntyCore::register_player(env.clone(), hunt_id, player.clone()).unwrap();
+-            let latest_progress =
+-                HuntyCore::get_player_progress(env.clone(), hunt_id, player.clone()).unwrap();
+-            assert!(latest_progress.started_at >= hunt.activated_at);
+-            assert_eq!(latest_progress.completed_clues.len(), 0);
++        });
+ 
+-            // But a second call in the same cycle must still be rejected
+-            let err = HuntyCore::register_player(env.clone(), hunt_id, player.clone()).unwrap_err();
+-            assert_eq!(err, HuntErrorCode::DuplicateRegistration);
++        let latest_progress = as_core_contract(&env, &core_id, |env| {
++            HuntyCore::get_player_progress(env.clone(), hunt_id, player.clone()).unwrap()
++        });
++        assert!(latest_progress.started_at >= hunt.activated_at);
++        assert_eq!(latest_progress.completed_clues.len(), 0);
++
++        // But a second call in the same cycle must still be rejected
++        let err = as_core_contract(&env, &core_id, |env| {
++            HuntyCore::register_player(env.clone(), hunt_id, player.clone()).unwrap_err()
+         });
++        assert_eq!(err, HuntErrorCode::DuplicateRegistration);
+     }
+ 
+     #[test]
+@@ -2695,7 +2716,7 @@ mod test {
+         let answer = String::from_str(&env, "a");
+         let end_time = 1_700_000_001; // One second after "now"
+ 
+-        let err = with_core_contract(&env, |env, _cid| {
++        let (hunt_id, core_id) = with_core_contract(&env, |env, cid| {
+             let hunt_id = HuntyCore::create_hunt(
+                 env.clone(),
+                 creator.clone(),
+@@ -2705,12 +2726,17 @@ mod test {
+                 Some(end_time),
+             )
+             .unwrap();
+-            HuntyCore::add_clue(env.clone(), hunt_id, question, answer.clone(), 1, true).unwrap();
++            HuntyCore::add_clue(env.clone(), hunt_id, question, answer.clone(), 1, true, 1).unwrap();
+             HuntyCore::activate_hunt(env.clone(), hunt_id, creator.clone()).unwrap();
+             HuntyCore::register_player(env.clone(), hunt_id, player.clone()).unwrap();
+-            // Move time past end_time
+-            env.ledger().set_timestamp(1_700_000_002);
+-            env.mock_all_auths();
++            (hunt_id, cid.clone())
++        });
++
++        // Move time past end_time
++        env.ledger().set_timestamp(1_700_000_002);
++        env.mock_all_auths();
++
++        let err = as_core_contract(&env, &core_id, |env| {
+             HuntyCore::submit_answer(env.clone(), hunt_id, 1, player.clone(), answer.clone())
+                 .unwrap_err()
+         });
+@@ -2849,8 +2875,7 @@ mod test {
+                 question.clone(),
+                 answer.clone(),
+                 10,
+-                true,
+-            )
++                true, 1)
+             .unwrap();
+             HuntyCore::activate_hunt(env.clone(), hunt_id, creator.clone()).unwrap();
+         });
+@@ -2890,6 +2915,7 @@ mod test {
+         let contract_id = env.register_contract(None, HuntyCore);
+         env.mock_all_auths();
+         let hunt_id = as_core_contract(&env, &contract_id, |env| {
++            HuntyCore::initialize_admin(env.clone(), admin.clone()).unwrap();
+             let hunt_id = HuntyCore::create_hunt(
+                 env.clone(),
+                 creator.clone(),
+@@ -2899,11 +2925,70 @@ mod test {
+                 None,
+             )
+             .unwrap();
+-            HuntyCore::add_clue(env.clone(), hunt_id, question, answer.clone(), 10, true)
++            HuntyCore::add_clue(env.clone(), hunt_id, question, answer.clone(), 10, true, 1)
+                 .unwrap();
+             HuntyCore::activate_hunt(env.clone(), hunt_id, creator.clone()).unwrap();
+             HuntyCore::register_player(env.clone(), hunt_id, player.clone()).unwrap();
+             HuntyCore::pause_contract(env.clone(), admin.clone()).unwrap();
++            hunt_id
++        });
++
++        env.mock_all_auths();
++        let err = as_core_contract(&env, &contract_id, |env| {
++            HuntyCore::submit_answer(
++                env.clone(),
++                hunt_id,
++                1,
++                player.clone(),
++                answer.clone(),
++            )
++            .unwrap_err()
++        });
++        assert_eq!(err, HuntErrorCode::ContractPaused);
++
++        env.mock_all_auths();
++        as_core_contract(&env, &contract_id, |env| {
++            HuntyCore::unpause_contract(env.clone(), admin.clone()).unwrap();
++            HuntyCore::submit_answer(env.clone(), hunt_id, 1, player.clone(), answer)
++                .unwrap();
++        });
++    }
++
++    #[test]
++    fn test_required_completed_counter_marks_completion_without_clue_scan() {
++        let env = Env::default();
++        env.mock_all_auths();
++        env.ledger().set_timestamp(1_700_000_000);
++
++        let creator = Address::generate(&env);
++        let player = Address::generate(&env);
++        let question = String::from_str(&env, "Q");
++        let answer = String::from_str(&env, "a");
++
++        let contract_id = env.register_contract(None, HuntyCore);
++        let hunt_id = as_core_contract(&env, &contract_id, |env| {
++            let hunt_id = HuntyCore::create_hunt(
++                env.clone(),
++                creator.clone(),
++                String::from_str(env, "Hunt"),
++                String::from_str(env, "Desc"),
++                None,
++                None,
++            )
++            .unwrap();
++            HuntyCore::add_clue(env.clone(), hunt_id, question, answer.clone(), 10, true, 1).unwrap();
++            HuntyCore::activate_hunt(env.clone(), hunt_id, creator.clone()).unwrap();
++            hunt_id
++        });
++
++        env.mock_all_auths();
++        as_core_contract(&env, &contract_id, |env| {
++            HuntyCore::register_player(env.clone(), hunt_id, player.clone()).unwrap();
++        });
++        env.mock_all_auths();
++        as_core_contract(&env, &contract_id, |env| {
++            HuntyCore::submit_answer(env.clone(), hunt_id, 1, player.clone(), answer).unwrap();
++        });
+ 
+         let progress = as_core_contract(&env, &contract_id, |env| {
+             HuntyCore::get_player_progress(env.clone(), hunt_id, player.clone()).unwrap()
+@@ -2923,17 +3008,20 @@ mod test {
+         let answer = String::from_str(&env, "a");
+ 
+         let contract_id = env.register_contract(None, HuntyCore);
+-        env.mock_all_auths();
+         let hunt_id = as_core_contract(&env, &contract_id, |env| {
+             let hunt_id = HuntyCore::create_hunt(
+                 env.clone(),
+-                hunt_id,
+-                1,
+-                player.clone(),
+-                answer.clone(),
++                creator.clone(),
++                String::from_str(env, "Hunt"),
++                String::from_str(env, "Desc"),
++                None,
++                None,
+             )
+-            .unwrap_err();
+-            assert_eq!(err, HuntErrorCode::ContractPaused);
++            .unwrap();
++            HuntyCore::add_clue(env.clone(), hunt_id, question, answer.clone(), 10, true, 1).unwrap();
++            HuntyCore::activate_hunt(env.clone(), hunt_id, creator.clone()).unwrap();
++            hunt_id
++        });
+ 
+         env.mock_all_auths();
+         as_core_contract(&env, &contract_id, |env| {
+@@ -2941,13 +3029,11 @@ mod test {
+         });
+         env.mock_all_auths();
+         as_core_contract(&env, &contract_id, |env| {
+-            HuntyCore::submit_answer(env.clone(), hunt_id, 1, player.clone(), answer.clone())
+-                .unwrap();
++            HuntyCore::submit_answer(env.clone(), hunt_id, 1, player.clone(), answer.clone()).unwrap();
+         });
+         env.mock_all_auths();
+         let resubmit = as_core_contract(&env, &contract_id, |env| {
+             HuntyCore::submit_answer(env.clone(), hunt_id, 1, player.clone(), answer)
+-                .unwrap();
+         });
+ 
+         assert_eq!(resubmit, Err(HuntErrorCode::ClueAlreadyCompleted));
+@@ -2961,6 +3047,7 @@ mod test {
+     #[test]
+     fn test_required_completed_counter_stays_isolated_per_player() {
+         let env = Env::default();
++        env.mock_all_auths();
+         env.ledger().set_timestamp(1_700_000_000);
+ 
+         let creator = Address::generate(&env);
+@@ -2970,7 +3057,7 @@ mod test {
+ 
+         let contract_id = env.register_contract(None, HuntyCore);
+         let hunt_id = as_core_contract(&env, &contract_id, |env| {
+-            let hunt_id = HuntyCore::create_hunt(
++            HuntyCore::create_hunt(
+                 env.clone(),
+                 creator.clone(),
+                 String::from_str(env, "Hunt"),
+@@ -2978,7 +3065,10 @@ mod test {
+                 None,
+                 None,
+             )
+-            .unwrap();
++            .unwrap()
++        });
++
++        as_core_contract(&env, &contract_id, |env| {
+             HuntyCore::add_clue(
+                 env.clone(),
+                 hunt_id,
+@@ -2986,8 +3076,12 @@ mod test {
+                 answer.clone(),
+                 5,
+                 true,
++                1,
+             )
+             .unwrap();
++        });
++
++        as_core_contract(&env, &contract_id, |env| {
+             HuntyCore::add_clue(
+                 env.clone(),
+                 hunt_id,
+@@ -2995,10 +3089,13 @@ mod test {
+                 answer.clone(),
+                 5,
+                 true,
++                1,
+             )
+             .unwrap();
++        });
++
++        as_core_contract(&env, &contract_id, |env| {
+             HuntyCore::activate_hunt(env.clone(), hunt_id, creator.clone()).unwrap();
+-            hunt_id
+         });
+ 
+         env.mock_all_auths();
+@@ -3134,7 +3231,7 @@ mod test {
+ 
+         env.mock_all_auths();
+         as_core_contract(&env, &contract_id, |env| {
+-            HuntyCore::add_clue(env.clone(), hunt_id, question, answer.clone(), 10, true).unwrap();
++            HuntyCore::add_clue(env.clone(), hunt_id, question, answer.clone(), 10, true, 1).unwrap();
+             HuntyCore::activate_hunt(env.clone(), hunt_id, creator.clone()).unwrap();
+         });
+ 
+@@ -3237,8 +3334,7 @@ mod test {
+                 question.clone(),
+                 answer.clone(),
+                 10,
+-                false,
+-            )
++                false, 1)
+             .unwrap();
+         });
+         env.mock_all_auths();
+@@ -3249,8 +3345,7 @@ mod test {
+                 question.clone(),
+                 answer.clone(),
+                 5,
+-                true,
+-            )
++                true, 1)
+             .unwrap();
+             HuntyCore::activate_hunt(env.clone(), hunt_id, creator.clone()).unwrap();
+         });
+@@ -3340,8 +3435,7 @@ mod test {
+                 question.clone(),
+                 answer.clone(),
+                 1,
+-                true,
+-            )
++                true, 1)
+             .unwrap();
+             HuntyCore::activate_hunt(env.clone(), hunt_id, creator.clone()).unwrap();
+             let mut players = Vec::new(env);
+@@ -3385,12 +3479,12 @@ mod test {
+         });
+         env.mock_all_auths();
+         as_core_contract(&env, &contract_id, |env| {
+-            HuntyCore::add_clue(env.clone(), hunt_id, question.clone(), answer.clone(), 10, true)
++            HuntyCore::add_clue(env.clone(), hunt_id, question.clone(), answer.clone(), 10, true, 1)
+                 .unwrap();
+         });
+         env.mock_all_auths();
+         as_core_contract(&env, &contract_id, |env| {
+-            HuntyCore::add_clue(env.clone(), hunt_id, question.clone(), answer.clone(), 5, false)
++            HuntyCore::add_clue(env.clone(), hunt_id, question.clone(), answer.clone(), 5, false, 1)
+                 .unwrap();
+             HuntyCore::activate_hunt(env.clone(), hunt_id, creator.clone()).unwrap();
+         });
+@@ -3539,8 +3633,7 @@ mod test {
+                 question.clone(),
+                 answer.clone(),
+                 10,
+-                true,
+-            )
++                true, 1)
+             .unwrap();
+             HuntyCore::activate_hunt(env.clone(), hunt_id, creator.clone()).unwrap();
+         });
+@@ -3614,14 +3707,13 @@ mod test {
+                 question.clone(),
+                 answer.clone(),
+                 10,
+-                true,
+-            )
++                true, 1)
+             .unwrap();
+ 
+             // Update reward config on the hunt
+             let mut hunt = Storage::get_hunt(env, hunt_id).unwrap();
+             hunt.reward_config =
+-                crate::types::RewardConfig::new(xlm_pool, false, None, max_winners, 0, 0);
++                crate::types::HuntRewardConfig::new(env, xlm_pool, false, None, max_winners, 0, 0);
+             Storage::save_hunt(env, &hunt);
+ 
+             HuntyCore::activate_hunt(env.clone(), hunt_id, creator.clone()).unwrap();
+@@ -3685,8 +3777,7 @@ mod test {
+                 SorobanString::from_str(env, "What is 1+1?"),
+                 SorobanString::from_str(env, "2"),
+                 10,
+-                true,
+-            )
++                true, 1)
+             .unwrap();
+ 
+             // Configure rewards on the hunt: 3 winners sharing 9_000 XLM
+@@ -3720,7 +3811,7 @@ mod test {
+         // Wire HuntyCore -> RewardManager
+         env.mock_all_auths();
+         as_core_contract(&env, &core_id, |env| {
+-            HuntyCore::set_reward_manager(env.clone(), reward_manager_id.clone());
++            HuntyCore::set_reward_manager(env.clone(), creator.clone(), reward_manager_id.clone());
+         });
+ 
+         // Register player and complete hunt
+@@ -3787,7 +3878,7 @@ mod test {
+         // Verify NFT was minted to the player with correct metadata
+         let minted_nft_id = status.nft_id.unwrap();
+         let nft_client = nft_reward::NftRewardClient::new(&env, &nft_contract_id);
+-        let owned_nfts = nft_client.get_player_nfts(&player);
++        let owned_nfts = nft_client.get_player_nfts(&player, &0, &100);
+         assert!(owned_nfts.len() >= 1);
+         assert!(owned_nfts.iter().any(|id| id == minted_nft_id));
+ 
+@@ -3830,12 +3921,11 @@ mod test {
+                 SorobanString::from_str(env, "1+1?"),
+                 SorobanString::from_str(env, "2"),
+                 10,
+-                true,
+-            )
++                true, 1)
+             .unwrap();
+ 
+             let mut hunt = Storage::get_hunt(env, hunt_id).unwrap();
+-            hunt.reward_config = crate::types::RewardConfig::new(0, false, None, 3, 0, 0);
++            hunt.reward_config = crate::types::HuntRewardConfig::new(env, 0, false, None, 3, 0, 0);
+             Storage::save_hunt(env, &hunt);
+ 
+             HuntyCore::activate_hunt(env.clone(), hunt_id, creator.clone()).unwrap();
+@@ -3857,7 +3947,7 @@ mod test {
+ 
+         env.mock_all_auths();
+         as_core_contract(&env, &core_id, |env| {
+-            HuntyCore::set_reward_manager(env.clone(), reward_manager_id.clone());
++            HuntyCore::set_reward_manager(env.clone(), creator.clone(), reward_manager_id.clone());
+         });
+ 
+         env.mock_all_auths();
+@@ -3921,12 +4011,11 @@ mod test {
+                 SorobanString::from_str(env, "What is 1+1?"),
+                 SorobanString::from_str(env, "2"),
+                 10,
+-                true,
+-            )
++                true, 1)
+             .unwrap();
+ 
+             let mut hunt = Storage::get_hunt(env, hunt_id).unwrap();
+-            hunt.reward_config = crate::types::RewardConfig::new(0, false, None, 3, 0, 0);
++            hunt.reward_config = crate::types::HuntRewardConfig::new(env, 0, false, None, 3, 0, 0);
+             Storage::save_hunt(env, &hunt);
+ 
+             HuntyCore::activate_hunt(env.clone(), hunt_id, creator.clone()).unwrap();
+@@ -3943,7 +4032,7 @@ mod test {
+ 
+         env.mock_all_auths();
+         as_core_contract(&env, &core_id, |env| {
+-            HuntyCore::set_reward_manager(env.clone(), reward_manager_id.clone());
++            HuntyCore::set_reward_manager(env.clone(), creator.clone(), reward_manager_id.clone());
+         });
+ 
+         let hunt = as_core_contract(&env, &core_id, |env| {
+@@ -3972,7 +4061,7 @@ mod test {
+         // Wire HuntyCore -> RewardManager
+         env.mock_all_auths();
+         as_core_contract(&env, &core_id, |env| {
+-            HuntyCore::set_reward_manager(env.clone(), reward_manager_id.clone());
++            HuntyCore::set_reward_manager(env.clone(), creator.clone(), reward_manager_id.clone());
+         });
+ 
+         // Attempt to complete hunt - RewardManager::distribute_rewards should fail
+@@ -4027,8 +4116,7 @@ mod test {
+                 SorobanString::from_str(env, "What is 1+1?"),
+                 SorobanString::from_str(env, "2"),
+                 10,
+-                true,
+-            )
++                true, 1)
+             .unwrap();
+ 
+             // Configure rewards: xlm_pool = 6_000, max_winners = 3
+@@ -4062,7 +4150,7 @@ mod test {
+         // Wire HuntyCore -> RewardManager
+         env.mock_all_auths();
+         as_core_contract(&env, &core_id, |env| {
+-            HuntyCore::set_reward_manager(env.clone(), reward_manager_id.clone());
++            HuntyCore::set_reward_manager(env.clone(), creator.clone(), reward_manager_id.clone());
+         });
+ 
+         // Helper closure to register, answer, and claim for a player
+@@ -4178,8 +4266,7 @@ mod test {
+                 String::from_str(env, "Q"),
+                 String::from_str(env, "a"),
+                 10,
+-                true,
+-            )
++                true, 1)
+             .unwrap();
+ 
+             let mut hunt = Storage::get_hunt(env, hid).unwrap();
+@@ -4260,12 +4347,11 @@ mod test {
+                 String::from_str(env, "Q"),
+                 String::from_str(env, "a"),
+                 10,
+-                true,
+-            )
++                true, 1)
+             .unwrap();
+ 
+             let mut hunt = Storage::get_hunt(env, hid).unwrap();
+-            hunt.reward_config = crate::types::RewardConfig::new(1000, false, None, 10, 0, 0);
++            hunt.reward_config = crate::types::HuntRewardConfig::new(env, 1000, false, None, 10, 0, 0);
+             Storage::save_hunt(env, &hunt);
+ 
+             HuntyCore::activate_hunt(env.clone(), hid, creator.clone()).unwrap();
+@@ -4383,8 +4469,7 @@ mod test {
+                 String::from_str(env, "Q1"),
+                 String::from_str(env, "a1"),
+                 10,
+-                true,
+-            )
++                true, 1)
+             .unwrap();
+             HuntyCore::add_clue(
+                 env.clone(),
+@@ -4392,12 +4477,11 @@ mod test {
+                 String::from_str(env, "Q2"),
+                 String::from_str(env, "a2"),
+                 10,
+-                true,
+-            )
++                true, 1)
+             .unwrap();
+ 
+             let mut hunt = Storage::get_hunt(env, hunt_id).unwrap();
+-            hunt.reward_config = crate::types::RewardConfig::new(1000, false, None, 5, 0, 0);
++            hunt.reward_config = crate::types::HuntRewardConfig::new(env, 1000, false, None, 5, 0, 0);
+             Storage::save_hunt(env, &hunt);
+ 
+             HuntyCore::activate_hunt(env.clone(), hunt_id, creator.clone()).unwrap();
+@@ -4534,6 +4618,7 @@ mod test {
+     #[test]
+     fn test_set_reward_manager_non_admin_fails() {
+         let env = Env::default();
++        env.mock_all_auths();
+         env.ledger().set_timestamp(1_700_000_000);
+ 
+         let admin = Address::generate(&env);
+@@ -4542,6 +4627,11 @@ mod test {
+         // Deploy HuntyCore
+         let core_id = env.register_contract(None, HuntyCore);
+ 
++        // Initialize admin
++        as_core_contract(&env, &core_id, |env| {
++            HuntyCore::initialize_admin(env.clone(), admin.clone()).unwrap();
++        });
++
+         // Deploy RewardManager
+         let reward_manager_id = env.register(RewardManager, ());
+         let token_admin = Address::generate(&env);
+@@ -4555,16 +4645,15 @@ mod test {
+ 
+         // Non-admin tries to set RewardManager on HuntyCore.
+         // Access control should cause Unauthorized failure.
+-        // (env.as_contract(&addr,..) makes invoker==addr)
+-        let result = env.as_contract(&non_admin, || {
+-            HuntyCore::set_reward_manager(env.clone(), reward_manager_id.clone())
++        let result = as_core_contract(&env, &core_id, |env| {
++            HuntyCore::set_reward_manager(env.clone(), non_admin.clone(), reward_manager_id.clone())
+         });
+ 
+         assert_eq!(result, Err(HuntErrorCode::Unauthorized));
+ 
+         // Sanity: admin should be able to set (auth succeeds when invoker==admin)
+-        let ok = env.as_contract(&admin, || {
+-            HuntyCore::set_reward_manager(env.clone(), reward_manager_id.clone())
++        let ok = as_core_contract(&env, &core_id, |env| {
++            HuntyCore::set_reward_manager(env.clone(), admin.clone(), reward_manager_id.clone())
+         });
+         assert_eq!(ok, Ok(()));
+     }
+@@ -4614,8 +4703,7 @@ fn test_get_hunt_statistics_mixed_completion_states() {
+             question.clone(),
+             answer.clone(),
+             10,
+-            true,
+-        )
++            true, 1)
+         .unwrap();
+         HuntyCore::activate_hunt(env.clone(), hunt_id, creator.clone()).unwrap();
+     });
+@@ -4672,7 +4760,8 @@ fn test_get_hunt_statistics_mixed_completion_states() {
+ 
+     #[test]
+     fn test_reward_per_winner_when_pool_less_than_winners() {
+-        let config = crate::types::RewardConfig::new(5, false, None, 10, 0, 0);
++        let env = Env::default();
++        let config = crate::types::HuntRewardConfig::new(&env, 5, false, None, 10, 0, 0);
+         let amount = config.reward_per_winner();
+         assert_eq!(
+             amount, 0,
+@@ -4682,21 +4771,24 @@ fn test_get_hunt_statistics_mixed_completion_states() {
+ 
+     #[test]
+     fn test_reward_per_winner_zero_max_winners() {
+-        let config = crate::types::RewardConfig::new(100, false, None, 0, 0, 0);
++        let env = Env::default();
++        let config = crate::types::HuntRewardConfig::new(&env, 100, false, None, 0, 0, 0);
+         let amount = config.reward_per_winner();
+         assert_eq!(amount, 0, "max_winners=0 must return 0");
+     }
+ 
+     #[test]
+     fn test_reward_per_winner_exact_division() {
+-        let config = crate::types::RewardConfig::new(100, false, None, 10, 0, 0);
++        let env = Env::default();
++        let config = crate::types::HuntRewardConfig::new(&env, 100, false, None, 10, 0, 0);
+         let amount = config.reward_per_winner();
+         assert_eq!(amount, 10, "xlm_pool=100 / max_winners=10 must be 10");
+     }
+ 
+     #[test]
+     fn test_reward_per_winner_rounds_down() {
+-        let config = crate::types::RewardConfig::new(7, false, None, 3, 0, 0);
++        let env = Env::default();
++        let config = crate::types::HuntRewardConfig::new(&env, 7, false, None, 3, 0, 0);
+         let amount = config.reward_per_winner();
+         assert_eq!(amount, 2, "xlm_pool=7 / max_winners=3 must round down to 2");
+     }
