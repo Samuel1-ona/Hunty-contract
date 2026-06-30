@@ -1075,24 +1075,24 @@ fn test_mint_reward_nft_from_map_with_invalid_types_uses_defaults() {
     let player = Address::generate(&env);
     let mut metadata: Map<Symbol, Val> = Map::new(&env);
     
-    // Provide valid title
+    // Provide valid values for required fields
     metadata.set(Symbol::new(&env, "title"), String::from_str(&env, "Valid Title").into_val(&env));
+    metadata.set(Symbol::new(&env, "description"), String::from_str(&env, "Valid description").into_val(&env));
+    metadata.set(Symbol::new(&env, "image_uri"), String::from_str(&env, "ipfs://valid").into_val(&env));
     
-    // Provide invalid types for other fields (wrong type conversions will fail and use defaults)
-    metadata.set(Symbol::new(&env, "description"), 123456u32.into_val(&env)); // u32 instead of String
-    metadata.set(Symbol::new(&env, "image_uri"), true.into_val(&env)); // bool instead of String
+    // Provide invalid types for optional fields (wrong type conversions will fail and use defaults)
     metadata.set(Symbol::new(&env, "hunt_title"), 999u32.into_val(&env)); // u32 instead of String
     metadata.set(Symbol::new(&env, "rarity"), String::from_str(&env, "invalid").into_val(&env)); // String instead of u32
     metadata.set(Symbol::new(&env, "tier"), String::from_str(&env, "invalid").into_val(&env)); // String instead of u32
     metadata.set(Symbol::new(&env, "transferable"), 123u32.into_val(&env)); // u32 instead of bool
 
-    // This should not panic; invalid types should use defaults
+    // This should not panic; invalid types for optional fields should use defaults
     let nft_id = client.mint_reward_nft_from_map(&Address::generate(&env), &1, &player, &metadata);
 
     let nft = client.get_nft(&nft_id).unwrap();
     assert_eq!(nft.metadata.title, String::from_str(&env, "Valid Title"));
-    assert_eq!(nft.metadata.description, String::from_str(&env, "")); // default due to invalid type
-    assert_eq!(nft.metadata.image_uri, String::from_str(&env, "")); // default due to invalid type
+    assert_eq!(nft.metadata.description, String::from_str(&env, "Valid description"));
+    assert_eq!(nft.metadata.image_uri, String::from_str(&env, "ipfs://valid"));
     assert_eq!(nft.metadata.hunt_title, String::from_str(&env, "Valid Title")); // defaults to title
     assert_eq!(nft.metadata.rarity, 0u32); // default due to invalid type
     assert_eq!(nft.metadata.tier, 0u32); // default due to invalid type

@@ -31,18 +31,12 @@ pub struct NftMetadata {
     pub royalty_bps: Option<u32>,
 }
 
-fn image_uri_is_valid(uri: &String) -> bool {
-    let len = uri.len();
-    if len == 0 || len > 200 {
-        return false;
-    }
-    let mut buf = [0u8; 200];
-    uri.copy_into_slice(&mut buf[..len as usize]);
-    if let Ok(text) = core::str::from_utf8(&buf[..len as usize]) {
-        text.starts_with("https://") || text.starts_with("ipfs://")
-    } else {
-        false
-    }
+fn is_valid_image_uri_format(uri: &String) -> bool {
+    let len = uri.len() as usize;
+    let mut buf = [0u8; 512];
+    uri.copy_into_slice(&mut buf[..len]);
+    let text = unsafe { core::str::from_utf8_unchecked(&buf[..len]) };
+    text.starts_with("https://") || text.starts_with("ipfs://")
 }
 
 /// Complete metadata returned by get_nft_metadata (includes NftData-derived fields).
@@ -304,10 +298,6 @@ impl NftReward {
             .and_then(|v| String::try_from_val(&env, &v).ok())
             .unwrap_or_else(|| String::from_str(&env, ""));
 
-        if !image_uri_is_valid(&image_uri) {
-            panic!("Invalid NFT image_uri: must be non-empty");
-        }
-
         let hunt_title = metadata
             .get(Symbol::new(&env, "hunt_title"))
             .and_then(|v| String::try_from_val(&env, &v).ok())
@@ -354,16 +344,31 @@ impl NftReward {
         Self::mint_reward_nft_impl(env, hunt_id, player_address, meta, transferable)
     }
 
-    fn sanitize_metadata_field(
+    fn validate_metadata_field(
         env: &Env,
         value: &String,
         max_bytes: u32,
         allow_empty: bool,
+        error_code: crate::errors::NftErrorCode,
     ) -> String {
         match sanitization::StringSanitizer::sanitize(env, value, max_bytes, allow_empty) {
             Ok(s) => s,
-            Err(_) => panic_with_error!(env, crate::errors::NftErrorCode::InvalidMetadata),
+            Err(_) => panic_with_error!(env, error_code),
         }
+    }
+
+    fn validate_image_uri(env: &Env, value: &String) -> String {
+        let s = Self::validate_metadata_field(
+            env,
+            value,
+            MAX_NFT_URI_BYTES,
+            false,
+            crate::errors::NftErrorCode::InvalidImageUri,
+        );
+        if !is_valid_image_uri_format(&s) {
+            panic_with_error!(env, crate::errors::NftErrorCode::InvalidImageUri);
+        }
+        s
     }
 
     fn mint_reward_nft_impl(
@@ -378,18 +383,28 @@ impl NftReward {
         }
 
         let mut metadata = metadata;
-        metadata.title =
-            Self::sanitize_metadata_field(&env, &metadata.title, MAX_NFT_TITLE_BYTES, false);
-        metadata.description = Self::sanitize_metadata_field(
+        metadata.title = Self::validate_metadata_field(
+            &env,
+            &metadata.title,
+            MAX_NFT_TITLE_BYTES,
+            false,
+            crate::errors::NftErrorCode::InvalidTitle,
+        );
+        metadata.description = Self::validate_metadata_field(
             &env,
             &metadata.description,
             MAX_NFT_DESCRIPTION_BYTES,
-            true,
+            false,
+            crate::errors::NftErrorCode::InvalidDescription,
         );
-        metadata.image_uri =
-            Self::sanitize_metadata_field(&env, &metadata.image_uri, MAX_NFT_URI_BYTES, true);
-        metadata.hunt_title =
-            Self::sanitize_metadata_field(&env, &metadata.hunt_title, MAX_NFT_TITLE_BYTES, true);
+        metadata.image_uri = Self::validate_image_uri(&env, &metadata.image_uri);
+        metadata.hunt_title = Self::validate_metadata_field(
+            &env,
+            &metadata.hunt_title,
+            MAX_NFT_TITLE_BYTES,
+            true,
+            crate::errors::NftErrorCode::InvalidHuntTitle,
+        );
 
         if let Some(max_supply) = Storage::get_max_supply(&env) {
             let current_supply = Storage::get_nft_counter(&env);
@@ -544,14 +559,14 @@ impl NftReward {
             return Err(crate::errors::NftErrorCode::NotOwner);
         }
 
-        let new_description = Self::sanitize_metadata_field(
+        let new_description = Self::validate_metadata_field(
             &env,
             &new_description,
             MAX_NFT_DESCRIPTION_BYTES,
-            true,
+            false,
+            crate::errors::NftErrorCode::InvalidDescription,
         );
-        let new_image_uri =
-            Self::sanitize_metadata_field(&env, &new_image_uri, MAX_NFT_URI_BYTES, true);
+        let new_image_uri = Self::validate_image_uri(&env, &new_image_uri);
 
         nft.metadata.description = new_description;
         nft.metadata.image_uri = new_image_uri;
