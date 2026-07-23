@@ -131,7 +131,7 @@ jobs:
           set -e
 
           warning_count=$(grep -cE 'warning:' security-reports/clippy-security.txt || true)
-          error_count=$(grep -cE '^error' security-reports/clippy-security.txt || true)
+          error_count=$(grep -cEi 'error(\[| :)|could not compile' security-reports/clippy-security.txt || true)
 
           {
             echo "| Metric | Count |"
@@ -154,8 +154,8 @@ jobs:
             echo "</details>"
           } >> security-reports/summary.md
 
-          # Report-oriented: only fail if Clippy cannot analyze the workspace.
-          if [ "$clippy_exit" -eq 0 ] || [ "$error_count" -eq 0 ]; then
+          # Pass when Clippy finishes cleanly; fail on compile/analysis errors.
+          if [ "$clippy_exit" -eq 0 ]; then
             echo "clippy_status=pass" >> "$GITHUB_OUTPUT"
           else
             echo "" >> security-reports/summary.md
@@ -216,7 +216,7 @@ jobs:
           echo "wasm_status=fail" >> "$GITHUB_OUTPUT"
 
       # ------------------------------------------------------------------
-      # 4) Report findings in PR comments
+      # 4) Report findings (job summary + PR comment when permitted)
       # ------------------------------------------------------------------
       - name: Upload security report artifacts
         if: always()
@@ -226,8 +226,19 @@ jobs:
           path: security-reports/
           if-no-files-found: ignore
 
+      - name: Write security findings to job summary
+        if: always()
+        run: |
+          if [ -f security-reports/summary.md ]; then
+            cat security-reports/summary.md >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "Security report was not generated." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
       - name: Comment security findings on PR
+        # Fork PRs often lack pull-requests:write; do not fail the scan for that.
         if: always() && github.event_name == 'pull_request'
+        continue-on-error: true
         uses: marocchino/sticky-pull-request-comment@v2
         with:
           header: hunty-security-scan
