@@ -60,4 +60,7 @@ pub enum RewardErrorCode {
 
     /// No pending failed NFT mint found for retry.
     NftMintPendingNotFound = 23,
+
+    /// Pool is frozen and distributions have been temporarily disabled.
+    PoolFrozen = 24,
 }

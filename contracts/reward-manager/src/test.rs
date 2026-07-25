@@ -913,6 +913,7 @@ mod test {
                 creator: creator.clone(),
                 min_distribution_amount: 0,
                 time_based_tiers: Vec::new(&env),
+                frozen: false,
             });
             let _ = RewardManager::fund_reward_pool(env.clone(), creator.clone(), 1, 10_000_000);
         });

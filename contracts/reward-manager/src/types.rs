@@ -68,6 +68,10 @@ pub struct RewardPoolConfig {
     /// the appropriate tier's `xlm_amount` is selected at distribution time
     /// based on the player's (completion_time - registration_time) elapsed.
     pub time_based_tiers: Vec<TimeBasedRewardTier>,
+    /// Whether distributions from this pool are temporarily frozen.
+    /// When `true`, `distribute_rewards` and other distribution functions
+    /// will reject calls with `RewardErrorCode::PoolFrozen`.
+    pub frozen: bool,
 }
 
 /// Full status of a reward pool, returned by get_reward_pool().
@@ -84,6 +88,8 @@ pub struct RewardPoolStatus {
     pub creator: Address,
     /// Minimum XLM per distribution (0 = no minimum).
     pub min_distribution_amount: i128,
+    /// Whether distributions from this pool are temporarily frozen.
+    pub frozen: bool,
 }
 
 /// Pending NFT mint that failed and can be retried by the admin.
@@ -122,6 +128,8 @@ pub enum PoolOperation {
     Fund,
     Distribute,
     Withdraw,
+    Freeze,
+    Unfreeze,
 }
 
 /// A single entry in the pool audit log.
