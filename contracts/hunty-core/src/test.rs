@@ -5723,13 +5723,8 @@ mod test {
         let (hunt_id, contract_id) =
             setup_completed_hunt_with_rewards(&env, &creator, &player1, 1, 1000);
 
-        // Player1 claims successfully
-        env.mock_all_auths();
-        as_core_contract(&env, &contract_id, |env| {
-            HuntyCore::complete_hunt(env.clone(), hunt_id, player1.clone()).unwrap();
-        });
-
-        // Register and complete for player2
+        // Player2 registers and finishes the clues while the hunt is still Active,
+        // racing player1 for the single reward slot.
         env.mock_all_auths();
         as_core_contract(&env, &contract_id, |env| {
             HuntyCore::register_player(env.clone(), hunt_id, player2.clone()).unwrap();
@@ -5748,7 +5743,27 @@ mod test {
             .unwrap();
         });
 
-        // Player2 tries to claim — no slots left (Hunt is now Completed)
+        // Player1 claims the only reward slot — this exhausts the pool and
+        // completes the hunt (emitting HuntStatusChanged Active -> Completed).
+        env.mock_all_auths();
+        as_core_contract(&env, &contract_id, |env| {
+            HuntyCore::complete_hunt(env.clone(), hunt_id, player1.clone()).unwrap();
+        });
+
+        let hunt = as_core_contract(&env, &contract_id, |env| {
+            Storage::get_hunt(env, hunt_id).unwrap()
+        });
+        assert_eq!(hunt.status, HuntStatus::Completed);
+
+        let status_event = as_core_contract(&env, &contract_id, |env| {
+            find_hunt_status_changed_event(env)
+        })
+        .expect("expected HuntStatusChanged event after last reward claimed");
+        assert_eq!(status_event.hunt_id, hunt_id);
+        assert_eq!(status_event.old_status, HuntStatus::Active);
+        assert_eq!(status_event.new_status, HuntStatus::Completed);
+
+        // Player2 tries to claim — no slots left, hunt is no longer Active.
         env.mock_all_auths();
         let result = as_core_contract(&env, &contract_id, |env| {
             HuntyCore::complete_hunt(env.clone(), hunt_id, player2.clone())
@@ -5845,87 +5860,11 @@ mod test {
         let (hunt_id, contract_id) =
             setup_completed_hunt_with_rewards(&env, &creator, &player, 5, 1000);
 
-#[test]
-fn test_get_hunt_statistics_mixed_completion_states() {
-    let env = Env::default();
-    env.ledger().set_timestamp(1_700_000_000);
-
-    let creator = Address::generate(&env);
-    let player1 = Address::generate(&env);
-    let player2 = Address::generate(&env);
-    let player3 = Address::generate(&env);
-    let question = String::from_str(&env, "Q");
-    let answer = String::from_str(&env, "a");
-
-    // Register contract and create hunt
-    let contract_id = env.register(super::HuntyCore, ());
-    let hunt_id = execute_in_contract(&env, &contract_id, |env| {
-        HuntyCore::create_hunt(
-            env.clone(),
-            creator.clone(),
-            String::from_str(env, "Mixed Hunt"),
-            String::from_str(env, "Desc"),
-            None,
-            None,
-        )
-        .unwrap()
-    });
-
-    // Add a single required clue worth 10 points and activate
-    env.mock_all_auths();
-    execute_in_contract(&env, &contract_id, |env| {
-        HuntyCore::add_clue(
-            env.clone(),
-            hunt_id,
-            question.clone(),
-            answer.clone(),
-            10,
-            true, 1)
-        .unwrap();
-        HuntyCore::activate_hunt(env.clone(), hunt_id, creator.clone()).unwrap();
-    });
-
-    // Register three players
-    env.mock_all_auths();
-    execute_in_contract(&env, &contract_id, |env| {
-        HuntyCore::register_player(env.clone(), hunt_id, player1.clone()).unwrap();
-    });
-    env.mock_all_auths();
-    execute_in_contract(&env, &contract_id, |env| {
-        HuntyCore::register_player(env.clone(), hunt_id, player2.clone()).unwrap();
-    });
-    env.mock_all_auths();
-    execute_in_contract(&env, &contract_id, |env| {
-        HuntyCore::register_player(env.clone(), hunt_id, player3.clone()).unwrap();
-    });
-
-    // Player1 and Player2 solve the required clue
-    env.mock_all_auths();
-    execute_in_contract(&env, &contract_id, |env| {
-        HuntyCore::submit_answer(env.clone(), hunt_id, 1, player1.clone(), answer.clone()).unwrap();
-    });
-    env.mock_all_auths();
-    execute_in_contract(&env, &contract_id, |env| {
-        HuntyCore::submit_answer(env.clone(), hunt_id, 1, player2.clone(), answer.clone()).unwrap();
-    });
-
-    // Player3 remains incomplete (no submissions)
-
-    // Fetch statistics and validate exact invariants
-    let stats = execute_in_contract(&env, &contract_id, |env| {
-        HuntyCore::get_hunt_statistics(env.clone(), hunt_id).unwrap()
-    });
-
-    // 3 players total, 2 completed -> floor(2/3*100) == 66
-    assert_eq!(stats.total_players, 3);
-    assert_eq!(stats.completed_count, 2);
-    assert_eq!(stats.completion_rate_percent, 66);
-
-    // Two players solved the single 10-point required clue => total 20
-    // Average must be computed over all 3 participants: floor(20 / 3) == 6
-    assert_eq!(stats.total_score_sum, 20);
-    assert_eq!(stats.average_score, 6);
-}
+        // Creator cancels the hunt before the player claims their reward.
+        env.mock_all_auths();
+        as_core_contract(&env, &contract_id, |env| {
+            HuntyCore::cancel_hunt(env.clone(), hunt_id, creator.clone()).unwrap();
+        });
 
         // Try to complete the hunt — should fail with InvalidHuntStatus
         env.mock_all_auths();
@@ -5933,6 +5872,92 @@ fn test_get_hunt_statistics_mixed_completion_states() {
             HuntyCore::complete_hunt(env.clone(), hunt_id, player.clone())
         });
         assert_eq!(result, Err(HuntErrorCode::InvalidHuntStatus));
+    }
+
+    #[test]
+    fn test_get_hunt_statistics_mixed_completion_states() {
+        let env = Env::default();
+        env.ledger().set_timestamp(1_700_000_000);
+
+        let creator = Address::generate(&env);
+        let player1 = Address::generate(&env);
+        let player2 = Address::generate(&env);
+        let player3 = Address::generate(&env);
+        let question = String::from_str(&env, "Q");
+        let answer = String::from_str(&env, "a");
+
+        // Register contract and create hunt
+        let contract_id = env.register(super::HuntyCore, ());
+        let hunt_id = execute_in_contract(&env, &contract_id, |env| {
+            HuntyCore::create_hunt(
+                env.clone(),
+                creator.clone(),
+                String::from_str(env, "Mixed Hunt"),
+                String::from_str(env, "Desc"),
+                None,
+                None,
+            )
+            .unwrap()
+        });
+
+        // Add a single required clue worth 10 points and activate
+        env.mock_all_auths();
+        execute_in_contract(&env, &contract_id, |env| {
+            HuntyCore::add_clue(
+                env.clone(),
+                hunt_id,
+                question.clone(),
+                answer.clone(),
+                10,
+                true,
+                1,
+            )
+            .unwrap();
+            HuntyCore::activate_hunt(env.clone(), hunt_id, creator.clone()).unwrap();
+        });
+
+        // Register three players
+        env.mock_all_auths();
+        execute_in_contract(&env, &contract_id, |env| {
+            HuntyCore::register_player(env.clone(), hunt_id, player1.clone()).unwrap();
+        });
+        env.mock_all_auths();
+        execute_in_contract(&env, &contract_id, |env| {
+            HuntyCore::register_player(env.clone(), hunt_id, player2.clone()).unwrap();
+        });
+        env.mock_all_auths();
+        execute_in_contract(&env, &contract_id, |env| {
+            HuntyCore::register_player(env.clone(), hunt_id, player3.clone()).unwrap();
+        });
+
+        // Player1 and Player2 solve the required clue
+        env.mock_all_auths();
+        execute_in_contract(&env, &contract_id, |env| {
+            HuntyCore::submit_answer(env.clone(), hunt_id, 1, player1.clone(), answer.clone())
+                .unwrap();
+        });
+        env.mock_all_auths();
+        execute_in_contract(&env, &contract_id, |env| {
+            HuntyCore::submit_answer(env.clone(), hunt_id, 1, player2.clone(), answer.clone())
+                .unwrap();
+        });
+
+        // Player3 remains incomplete (no submissions)
+
+        // Fetch statistics and validate exact invariants
+        let stats = execute_in_contract(&env, &contract_id, |env| {
+            HuntyCore::get_hunt_statistics(env.clone(), hunt_id).unwrap()
+        });
+
+        // 3 players total, 2 completed -> floor(2/3*100) == 66
+        assert_eq!(stats.total_players, 3);
+        assert_eq!(stats.completed_count, 2);
+        assert_eq!(stats.completion_rate_percent, 66);
+
+        // Two players solved the single 10-point required clue => total 20
+        // Average must be computed over all 3 participants: floor(20 / 3) == 6
+        assert_eq!(stats.total_score_sum, 20);
+        assert_eq!(stats.average_score, 6);
     }
 
     #[test]

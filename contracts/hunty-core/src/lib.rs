@@ -1400,6 +1400,7 @@ impl HuntyCore {
     ///
     /// # Errors
     /// * `HuntNotFound` - Hunt does not exist
+    /// * `InvalidHuntStatus` - Hunt is not Active (e.g. already Completed or Cancelled)
     /// * `PlayerNotRegistered` - Player is not registered
     /// * `HuntNotCompleted` - Player hasn't completed all required clues
     /// * `RewardAlreadyClaimed` - Player already claimed their reward
@@ -1415,6 +1416,12 @@ impl HuntyCore {
 
         let mut hunt = Storage::get_hunt_or_error(&env, hunt_id).map_err(HuntErrorCode::from)?;
 
+        // Reward claims are only valid while the hunt is Active (a Cancelled hunt's
+        // pool has already been refunded; Draft/Paused/Archived hunts never had one claimed).
+        if hunt.status != HuntStatus::Active {
+            return Err(HuntErrorCode::InvalidHuntStatus);
+        }
+
         let mut progress = Storage::get_player_progress_or_error(&env, hunt_id, &player)
             .map_err(HuntErrorCode::from)?;
 
@@ -1426,6 +1433,10 @@ impl HuntyCore {
         // Prevent double-claiming
         if progress.reward_claimed {
             return Err(HuntErrorCode::RewardAlreadyClaimed);
+        }
+
+        if hunt.reward_config.max_winners == 0 {
+            return Err(HuntErrorCode::NoRewardsConfigured);
         }
 
         // Resolve the XLM reward amount
@@ -1512,6 +1523,13 @@ impl HuntyCore {
 
         // Update hunt reward config
         hunt.reward_config.claimed_count += 1;
+
+        // Once every reward slot has been claimed, the hunt itself is done.
+        let just_completed = hunt.reward_config.claimed_count >= hunt.reward_config.max_winners;
+        if just_completed {
+            hunt.status = HuntStatus::Completed;
+        }
+
         Storage::save_hunt(&env, &hunt);
 
         // Emit RewardClaimedEvent
@@ -1523,6 +1541,17 @@ impl HuntyCore {
         };
         env.events()
             .publish((Symbol::new(&env, "RewardClaimed"), hunt_id), event);
+
+        if just_completed {
+            let current_time = env.ledger().timestamp();
+            Self::emit_hunt_status_changed(
+                &env,
+                hunt_id,
+                HuntStatus::Active,
+                HuntStatus::Completed,
+                current_time,
+            );
+        }
 
         Ok(())
     }
