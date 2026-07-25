@@ -37,6 +37,16 @@ pub struct NftMetadata {
     pub extensions: Map<String, String>,
 }
 
+/// Collection-level metadata stored at initialization and exposed via a query.
+#[contracttype]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CollectionMetadata {
+    pub name: String,
+    pub description: String,
+    pub total_supply: u64,
+    pub creator: Option<Address>,
+}
+
 /// Collection-level statistics included in mint events for indexers.
 #[contracttype]
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -202,6 +212,7 @@ impl NftReward {
         admin: Address,
         minter: Address,
         max_supply: Option<u64>,
+        collection_metadata: CollectionMetadata,
     ) -> Result<(), crate::errors::NftErrorCode> {
         if Storage::is_initialized(&env) {
             return Err(crate::errors::NftErrorCode::AlreadyInitialized);
@@ -210,6 +221,7 @@ impl NftReward {
         Storage::save_admin(&env, &admin);
         Storage::add_minter(&env, &minter);
         Storage::set_max_supply(&env, max_supply);
+        Storage::save_collection_metadata(&env, &collection_metadata);
         Storage::set_contract_version(&env, CONTRACT_VERSION);
         Ok(())
     }
@@ -445,6 +457,7 @@ impl NftReward {
         Storage::add_nft_to_owner(&env, &player_address, nft_id);
         Storage::add_nft_to_hunt(&env, hunt_id, nft_id);
         Storage::mark_hunt_minted(&env, hunt_id);
+        Storage::update_collection_metadata_total_supply(&env, Storage::get_nft_counter(&env));
 
         let event = NftMintedEvent {
             nft_id,
@@ -464,6 +477,11 @@ impl NftReward {
     /// Retrieves NFT data by ID.
     pub fn get_nft(env: Env, nft_id: u64) -> Option<NftData> {
         Storage::get_nft(&env, nft_id)
+    }
+
+    /// Returns the collection-level metadata configured at initialization.
+    pub fn get_collection_metadata(env: Env) -> Option<CollectionMetadata> {
+        Storage::get_collection_metadata(&env)
     }
 
     /// Returns complete metadata for an NFT, including hunt info and completion details.
@@ -929,3 +947,6 @@ impl NftReward {
 
         env.events()
             .publish((Symbol::new(&env, "NftBurned"), nft_id), (nft_id, owner));
+
+        Ok(())
+    }

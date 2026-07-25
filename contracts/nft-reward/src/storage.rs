@@ -1,5 +1,5 @@
-use crate::{NftData, NftCore, NftMetadata};
-use soroban_sdk::{symbol_short, Address, Env, Vec, Symbol};
+use crate::{CollectionMetadata, NftData, NftCore, NftMetadata};
+use soroban_sdk::{symbol_short, Address, Env, String, Vec, Symbol};
 
 /// Storage layer for NFTs.
 pub struct Storage;
@@ -13,6 +13,7 @@ impl Storage {
     const OWNER_NFT_COUNT_KEY: soroban_sdk::Symbol = symbol_short!("ONFC");
     const MAX_SUPPLY_KEY: soroban_sdk::Symbol = symbol_short!("MAXS");
     const INITIALIZED_KEY: soroban_sdk::Symbol = symbol_short!("INIT");
+    const COLLECTION_METADATA_KEY: soroban_sdk::Symbol = symbol_short!("COLL");
     const ADMIN_KEY: soroban_sdk::Symbol = symbol_short!("ADMIN");
     const MINTER_KEY: soroban_sdk::Symbol = symbol_short!("MNTR");
     const REWARD_MGR_KEY: soroban_sdk::Symbol = symbol_short!("RWDMGR");
@@ -300,6 +301,23 @@ impl Storage {
         env.storage()
             .persistent()
             .set(&Self::INITIALIZED_KEY, &true);
+    }
+
+    pub fn save_collection_metadata(env: &Env, metadata: &CollectionMetadata) {
+        env.storage()
+            .instance()
+            .set(&Self::COLLECTION_METADATA_KEY, metadata);
+    }
+
+    pub fn get_collection_metadata(env: &Env) -> Option<CollectionMetadata> {
+        env.storage().instance().get(&Self::COLLECTION_METADATA_KEY)
+    }
+
+    pub fn update_collection_metadata_total_supply(env: &Env, total_supply: u64) {
+        if let Some(mut metadata) = Self::get_collection_metadata(env) {
+            metadata.total_supply = total_supply;
+            Self::save_collection_metadata(env, &metadata);
+        }
     }
 
     pub fn get_max_supply(env: &Env) -> Option<u64> {
