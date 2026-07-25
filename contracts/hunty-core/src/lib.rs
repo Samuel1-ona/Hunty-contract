@@ -4,7 +4,8 @@ use crate::storage::Storage;
 use crate::types::{
     AnswerIncorrectEvent, Clue, ClueAddedEvent, ClueAliasesAddedEvent, ClueCompletedEvent,
     ClueInfo, CreatorBlacklistedEvent, CreatorRemovedFromBlacklistEvent, Hunt, HuntActivatedEvent,
-    HuntArchivedEvent, HuntCache, HuntCancelledEvent, HuntCompletedEvent, HuntCreatedEvent,
+    HuntArchivedEvent, HuntCache, HuntCancelledEvent, HuntClosedEvent, HuntCompletedEvent,
+    HuntCreatedEvent,
     HuntDeactivatedEvent, HuntDescriptionUpdatedEvent, HuntReactivatedEvent, HuntStatistics,
     HuntStatus, HuntStatusChangedEvent, LeaderboardEntry, LeaderboardIndexEntry, PlayerProgress,
     PlayerRegisteredEvent, RewardClaimedEvent, RewardConfig, RewardManagerSetEvent,
@@ -1242,6 +1243,96 @@ impl HuntyCore {
         Ok(())
     }
 
+    /// Force-closes (ends early) an in-progress hunt on behalf of its creator.
+    ///
+    /// Unlike [`cancel_hunt`], closing preserves all player scores and any
+    /// rewards already collected: it marks the hunt `Completed` and triggers a
+    /// final reward distribution for every player who has completed the hunt but
+    /// not yet claimed. Players who have not completed the hunt keep their
+    /// progress and are simply not rewarded. Any unspent reward-pool balance is
+    /// left intact (a creator can refund it separately via [`cancel_hunt`] flows
+    /// only while a hunt is still cancellable — see project docs).
+    ///
+    /// Only the creator may close a hunt, and only while it is `Active` or
+    /// `Paused`. Closing a `Draft`, `Completed`, `Cancelled`, `EmergencyStopped`,
+    /// or `Archived` hunt is rejected with `InvalidHuntStatus`.
+    ///
+    /// # Arguments
+    /// * `env` - The Soroban environment
+    /// * `hunt_id` - The hunt to close
+    /// * `caller` - The creator (must authorize the call via require_auth)
+    ///
+    /// # Returns
+    /// `Ok(())` on success
+    ///
+    /// # Errors
+    /// * `HuntNotFound` - Hunt does not exist
+    /// * `Unauthorized` - Caller is not the hunt creator
+    /// * `InvalidHuntStatus` - Hunt is not in an early-closable status
+    /// * `RewardsPaused` - Reward distribution is globally paused
+    /// * `InvalidRarity` - The hunt's configured NFT rarity is out of range
+    /// * `RewardDistributionFailed` - A RewardManager cross-contract call failed
+    pub fn close_hunt(env: Env, hunt_id: u64, caller: Address) -> Result<(), HuntErrorCode> {
+        caller.require_auth();
+
+        // Fast validation using instance cache
+        let cache = Self::get_hunt_cache_or_load(&env, hunt_id)?;
+        if caller != cache.creator {
+            return Err(HuntErrorCode::Unauthorized);
+        }
+        // Only an in-progress hunt (Active or Paused) can be closed early.
+        if cache.status != HuntStatus::Active && cache.status != HuntStatus::Paused {
+            return Err(HuntErrorCode::InvalidHuntStatus);
+        }
+
+        // Closing distributes rewards, so honor the global rewards pause.
+        if Storage::is_pause_rewards(&env) {
+            return Err(HuntErrorCode::RewardsPaused);
+        }
+
+        let old_status = cache.status;
+
+        // Load full hunt from persistent for mutation
+        let mut hunt = Storage::get_hunt(&env, hunt_id).ok_or(HuntErrorCode::HuntNotFound)?;
+
+        // Trigger final reward distribution for every completed, unclaimed player.
+        // Scores and previously-claimed rewards are preserved untouched.
+        let players = Storage::get_hunt_players(&env, hunt_id);
+        let mut rewarded_players = 0u32;
+        for i in 0..players.len() {
+            let mut progress = players.get(i).unwrap();
+            if progress.is_completed && !progress.reward_claimed {
+                Self::distribute_player_reward(&env, &mut hunt, &mut progress)?;
+                rewarded_players = rewarded_players.saturating_add(1);
+            }
+        }
+
+        // Mark the hunt inactive (closed early == Completed) and persist once.
+        hunt.status = HuntStatus::Completed;
+        Storage::save_hunt(&env, &hunt);
+
+        let closed_at = env.ledger().timestamp();
+
+        // Emit a dedicated close event plus the generic status-change event.
+        let event = HuntClosedEvent {
+            hunt_id,
+            closed_at,
+            rewarded_players,
+        };
+        env.events()
+            .publish((Symbol::new(&env, "HuntClosed"), hunt_id), event);
+
+        Self::emit_hunt_status_changed(
+            &env,
+            hunt_id,
+            old_status,
+            HuntStatus::Completed,
+            closed_at,
+        );
+
+        Ok(())
+    }
+
     pub fn archive_hunt(env: Env, hunt_id: u64, caller: Address) -> Result<(), HuntErrorCode> {
         caller.require_auth();
 
@@ -1428,12 +1519,39 @@ impl HuntyCore {
             return Err(HuntErrorCode::RewardAlreadyClaimed);
         }
 
-        // Resolve the XLM reward amount
+        // Distribute the reward, mark the player as claimed, and emit the event.
+        Self::distribute_player_reward(&env, &mut hunt, &mut progress)?;
+
+        // Persist the hunt's updated claimed_count.
+        Storage::save_hunt(&env, &hunt);
+
+        Ok(())
+    }
+
+    /// Distributes the reward for a single completed, unclaimed player.
+    ///
+    /// Resolves the player's XLM amount (flat or tier-based), invokes the
+    /// RewardManager (if configured and there is at least one reward type),
+    /// marks the player's progress as claimed, increments the hunt's
+    /// `claimed_count` (in memory — the caller is responsible for persisting
+    /// the hunt), and emits a `RewardClaimed` event.
+    ///
+    /// The caller must ensure `progress.is_completed == true` and
+    /// `progress.reward_claimed == false` before invoking this.
+    ///
+    /// # Errors
+    /// * `InvalidRarity` - The hunt's configured NFT rarity is out of range
+    /// * `RewardDistributionFailed` - The RewardManager cross-contract call failed
+    fn distribute_player_reward(
+        env: &Env,
+        hunt: &mut Hunt,
+        progress: &mut PlayerProgress,
+    ) -> Result<(), HuntErrorCode> {
         // ===================== TIER-BASED AMOUNT RESOLUTION =====================
         // If the reward pool has a tier schedule configured, the appropriate
         // tier's xlm_amount replaces the flat `xlm_pool / max_winners` amount.
         // Tier resolution is `(max_completion_secs - registration_time)` based.
-        let reward_amount = Self::resolve_reward_amount(&env, &hunt, &progress);
+        let reward_amount = Self::resolve_reward_amount(env, hunt, progress);
         // =======================================================================
         let nft_awarded = hunt.reward_config.nft_enabled;
 
@@ -1442,7 +1560,7 @@ impl HuntyCore {
         }
 
         // Call RewardManager if configured and there are rewards to distribute
-        if let Some(reward_manager_addr) = Storage::get_reward_manager(&env) {
+        if let Some(reward_manager_addr) = Storage::get_reward_manager(env) {
             let xlm_amount = if reward_amount > 0 {
                 Some(reward_amount)
             } else {
@@ -1457,24 +1575,24 @@ impl HuntyCore {
                             Some(nft_contract),
                             hunt.title.clone(),
                             hunt.description.clone(),
-                            String::from_str(&env, ""),
+                            String::from_str(env, ""),
                             hunt.title.clone(),
                         )
                     })
                     .unwrap_or((
                         None,
-                        String::from_str(&env, ""),
-                        String::from_str(&env, ""),
-                        String::from_str(&env, ""),
-                        String::from_str(&env, ""),
+                        String::from_str(env, ""),
+                        String::from_str(env, ""),
+                        String::from_str(env, ""),
+                        String::from_str(env, ""),
                     ))
             } else {
                 (
                     None,
-                    String::from_str(&env, ""),
-                    String::from_str(&env, ""),
-                    String::from_str(&env, ""),
-                    String::from_str(&env, ""),
+                    String::from_str(env, ""),
+                    String::from_str(env, ""),
+                    String::from_str(env, ""),
+                    String::from_str(env, ""),
                 )
             };
             let rm_reward_config = reward_interface::RewardConfig {
@@ -1490,14 +1608,14 @@ impl HuntyCore {
 
             // Only call RewardManager when there is at least one reward type
             if rm_reward_config.is_valid() {
-                let mut args: Vec<Val> = Vec::new(&env);
-                args.push_back(hunt_id.into_val(&env));
-                args.push_back(player.clone().into_val(&env));
-                args.push_back(rm_reward_config.into_val(&env));
+                let mut args: Vec<Val> = Vec::new(env);
+                args.push_back(hunt.hunt_id.into_val(env));
+                args.push_back(progress.player.clone().into_val(env));
+                args.push_back(rm_reward_config.into_val(env));
 
                 let result = env.try_invoke_contract::<(), RewardErrorCode>(
                     &reward_manager_addr,
-                    &Symbol::new(&env, "distribute_rewards"),
+                    &Symbol::new(env, "distribute_rewards"),
                     args,
                 );
                 if !matches!(result, Ok(Ok(()))) {
@@ -1508,21 +1626,20 @@ impl HuntyCore {
 
         // Update player progress
         progress.reward_claimed = true;
-        Storage::save_player_progress(&env, &progress);
+        Storage::save_player_progress(env, progress);
 
-        // Update hunt reward config
+        // Update hunt reward config (persisted by the caller)
         hunt.reward_config.claimed_count += 1;
-        Storage::save_hunt(&env, &hunt);
 
         // Emit RewardClaimedEvent
         let event = RewardClaimedEvent {
-            hunt_id,
-            player: player.clone(),
+            hunt_id: hunt.hunt_id,
+            player: progress.player.clone(),
             xlm_amount: reward_amount,
             nft_awarded,
         };
         env.events()
-            .publish((Symbol::new(&env, "RewardClaimed"), hunt_id), event);
+            .publish((Symbol::new(env, "RewardClaimed"), hunt.hunt_id), event);
 
         Ok(())
     }
