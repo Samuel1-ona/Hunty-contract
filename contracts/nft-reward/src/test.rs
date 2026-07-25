@@ -138,9 +138,10 @@ fn mint_transferable(
 fn test_initialize_stores_admin() {
     let env = setup_env();
     let admin = Address::generate(&env);
+    let minter = Address::generate(&env);
     let contract_id = env.register(NftReward, ());
     let client = NftRewardClient::new(&env, &contract_id);
-    client.initialize(&admin, &None, &default_collection_metadata(&env));
+    client.initialize(&admin, &minter, &None, &default_collection_metadata(&env));
 
     assert_eq!(client.get_admin(), Some(admin));
 }
@@ -153,10 +154,11 @@ fn test_initialize_requires_auth() {
     env.ledger().set_timestamp(1000);
 
     let admin = Address::generate(&env);
+    let minter = Address::generate(&env);
     let contract_id = env.register(NftReward, ());
     let client = NftRewardClient::new(&env, &contract_id);
 
-    client.initialize(&admin, &None, &default_collection_metadata(&env));
+    client.initialize(&admin, &minter, &None, &default_collection_metadata(&env));
 }
 
 #[test]
@@ -164,10 +166,11 @@ fn test_initialize_requires_auth() {
 fn test_initialize_cannot_be_called_twice() {
     let env = setup_env();
     let admin = Address::generate(&env);
+    let minter = Address::generate(&env);
     let contract_id = env.register(NftReward, ());
     let client = NftRewardClient::new(&env, &contract_id);
-    client.initialize(&admin, &None, &default_collection_metadata(&env));
-    client.initialize(&admin, &None, &default_collection_metadata(&env));
+    client.initialize(&admin, &minter, &None, &default_collection_metadata(&env));
+    client.initialize(&admin, &minter, &None, &default_collection_metadata(&env));
 }
 
 #[test]
@@ -309,6 +312,35 @@ fn test_initial_ownership_set_correctly() {
 
     let nft = client.get_nft(&nft_id).unwrap();
     assert_eq!(nft.owner, player);
+}
+
+#[test]
+fn test_soulbound_nft_cannot_be_transferred() {
+    let env = setup_env();
+    let (client, minter) = setup_nft_reward(&env, None);
+
+    let owner = Address::generate(&env);
+    let recipient = Address::generate(&env);
+    let mut metadata_map: Map<Symbol, Val> = Map::new(&env);
+    metadata_map.set(
+        Symbol::new(&env, "title"),
+        String::from_str(&env, "Soulbound Trophy").into_val(&env),
+    );
+    metadata_map.set(
+        Symbol::new(&env, "description"),
+        String::from_str(&env, "Bound to the owner").into_val(&env),
+    );
+    metadata_map.set(
+        Symbol::new(&env, "image_uri"),
+        String::from_str(&env, "ipfs://soulbound").into_val(&env),
+    );
+    metadata_map.set(Symbol::new(&env, "transferable"), false.into_val(&env));
+
+    let nft_id = client.mint_reward_nft_from_map(&minter, &1, &owner, &metadata_map);
+    let err = client.transfer_nft(&nft_id, &owner, &recipient, &owner).unwrap_err();
+
+    assert_eq!(err, NftErrorCode::NftNotTransferable);
+    assert_eq!(client.owner_of(&nft_id).unwrap(), owner);
 }
 
 #[test]

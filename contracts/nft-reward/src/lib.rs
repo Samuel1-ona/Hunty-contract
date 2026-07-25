@@ -267,7 +267,7 @@ impl NftReward {
         metadata: NftMetadata,
     ) -> u64 {
         Self::require_authorized_caller(&env, &minter);
-        Self::mint_reward_nft_impl(env, hunt_id, player_address, metadata, false)
+        Self::mint_reward_nft_impl(env, hunt_id, player_address, metadata, true)
     }
 
     /// Mints a reward NFT from a generic metadata map. This is the entrypoint
@@ -835,6 +835,52 @@ impl NftReward {
         }
 
         result
+    }
+
+    /// Transfers an NFT to a new owner when the NFT is transferable.
+    /// Non-transferable (soulbound) NFTs remain bound to the minting recipient.
+    pub fn transfer_nft(
+        env: Env,
+        nft_id: u64,
+        from_address: Address,
+        to_address: Address,
+        caller: Address,
+    ) -> Result<(), crate::errors::NftErrorCode> {
+        caller.require_auth();
+
+        let mut nft = Storage::get_nft(&env, nft_id).ok_or(crate::errors::NftErrorCode::NftNotFound)?;
+
+        if nft.locked {
+            return Err(crate::errors::NftErrorCode::NftLocked);
+        }
+        if !nft.transferable {
+            return Err(crate::errors::NftErrorCode::NftNotTransferable);
+        }
+        if nft.owner != from_address {
+            return Err(crate::errors::NftErrorCode::NotOwner);
+        }
+        if to_address == from_address {
+            return Err(crate::errors::NftErrorCode::InvalidRecipient);
+        }
+        if caller != from_address && !Storage::is_operator(&env, &from_address, &caller) {
+            return Err(crate::errors::NftErrorCode::NotOperator);
+        }
+
+        Storage::remove_nft_from_owner(&env, &from_address, nft_id);
+        nft.owner = to_address.clone();
+        Storage::save_nft(&env, &nft);
+        Storage::add_nft_to_owner(&env, &to_address, nft_id);
+
+        env.events().publish(
+            (Symbol::new(&env, "NftTransferred"), nft_id),
+            NftTransferredEvent {
+                nft_id,
+                from: from_address,
+                to: to_address,
+            },
+        );
+
+        Ok(())
     }
 
     /// Returns the owner of an NFT.
