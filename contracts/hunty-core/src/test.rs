@@ -24,7 +24,7 @@ mod test {
     use crate::storage::Storage;
     use crate::types::{
         ClueAddedEvent, CreatorBlacklistedEvent, CreatorRemovedFromBlacklistEvent,
-        HuntCompletedEvent, HuntCreatedEvent, HuntStatus, HuntStatusChangedEvent,
+        HuntClosedEvent, HuntCompletedEvent, HuntCreatedEvent, HuntStatus, HuntStatusChangedEvent,
         PlayerRegisteredEvent, RewardClaimFailedEvent, TimeBonusConfig,
     };
     use crate::HuntyCore;
@@ -3025,6 +3025,239 @@ mod test {
             let err = HuntyCore::cancel_hunt(env.clone(), hunt_id, creator.clone()).unwrap_err();
             assert_eq!(err, HuntErrorCode::InvalidHuntStatus);
         });
+    }
+
+    // ========== close_hunt() Tests ==========
+
+    /// Closing an active hunt marks it Completed, distributes rewards to the
+    /// completed-but-unclaimed player, and preserves that player's score.
+    #[test]
+    fn test_close_hunt_success_distributes_and_completes() {
+        let env = Env::default();
+        env.ledger().set_timestamp(1_700_000_000);
+        let creator = Address::generate(&env);
+        let player = Address::generate(&env);
+
+        // Active hunt with one completed (unclaimed) player and no RewardManager.
+        let (hunt_id, contract_id) =
+            setup_completed_hunt_with_rewards(&env, &creator, &player, 5, 1000);
+
+        // Capture score before closing to prove it is preserved.
+        let score_before = as_core_contract(&env, &contract_id, |env| {
+            HuntyCore::get_player_progress(env.clone(), hunt_id, player.clone())
+                .unwrap()
+                .total_score
+        });
+        assert!(score_before > 0);
+
+        env.mock_all_auths();
+        as_core_contract(&env, &contract_id, |env| {
+            HuntyCore::close_hunt(env.clone(), hunt_id, creator.clone()).unwrap();
+        });
+
+        // Hunt is now Completed (inactive).
+        let hunt = as_core_contract(&env, &contract_id, |env| {
+            HuntyCore::get_hunt_info(env.clone(), hunt_id).unwrap()
+        });
+        assert_eq!(hunt.status, HuntStatus::Completed);
+        assert_eq!(hunt.reward_config.claimed_count, 1);
+
+        // Player reward distributed but score preserved.
+        let progress = as_core_contract(&env, &contract_id, |env| {
+            HuntyCore::get_player_progress(env.clone(), hunt_id, player.clone()).unwrap()
+        });
+        assert!(progress.reward_claimed);
+        assert!(progress.is_completed);
+        assert_eq!(progress.total_score, score_before);
+
+        // HuntClosed event reports one rewarded player.
+        let (_topics, closed) = as_core_contract(&env, &contract_id, |env| {
+            find_event::<HuntClosedEvent>(env, "HuntClosed").expect("expected HuntClosed event")
+        });
+        assert_eq!(closed.hunt_id, hunt_id);
+        assert_eq!(closed.rewarded_players, 1);
+        assert!(closed.closed_at > 0);
+
+        // Generic status-change event emitted Active -> Completed.
+        let status_event = as_core_contract(&env, &contract_id, |env| {
+            find_hunt_status_changed_event(env).expect("expected HuntStatusChanged event")
+        });
+        assert_eq!(status_event.old_status, HuntStatus::Active);
+        assert_eq!(status_event.new_status, HuntStatus::Completed);
+    }
+
+    /// A player who has not completed the hunt keeps their progress and is not
+    /// rewarded when the hunt is closed.
+    #[test]
+    fn test_close_hunt_preserves_incomplete_player() {
+        let env = Env::default();
+        env.ledger().set_timestamp(1_700_000_000);
+        let creator = Address::generate(&env);
+        let finisher = Address::generate(&env);
+        let laggard = Address::generate(&env);
+
+        // Sets up an active hunt where `finisher` has completed the single clue.
+        let (hunt_id, contract_id) =
+            setup_completed_hunt_with_rewards(&env, &creator, &finisher, 5, 1000);
+
+        // A second player registers but never submits an answer.
+        env.mock_all_auths();
+        as_core_contract(&env, &contract_id, |env| {
+            HuntyCore::register_player(env.clone(), hunt_id, laggard.clone()).unwrap();
+        });
+
+        env.mock_all_auths();
+        as_core_contract(&env, &contract_id, |env| {
+            HuntyCore::close_hunt(env.clone(), hunt_id, creator.clone()).unwrap();
+        });
+
+        // Only the finisher was rewarded.
+        let hunt = as_core_contract(&env, &contract_id, |env| {
+            HuntyCore::get_hunt_info(env.clone(), hunt_id).unwrap()
+        });
+        assert_eq!(hunt.reward_config.claimed_count, 1);
+
+        // Laggard keeps progress, unclaimed and incomplete.
+        let laggard_progress = as_core_contract(&env, &contract_id, |env| {
+            HuntyCore::get_player_progress(env.clone(), hunt_id, laggard.clone()).unwrap()
+        });
+        assert!(!laggard_progress.is_completed);
+        assert!(!laggard_progress.reward_claimed);
+    }
+
+    /// Closing may be triggered from a Paused hunt as well as an Active one.
+    #[test]
+    fn test_close_hunt_from_paused_status() {
+        let env = Env::default();
+        env.ledger().set_timestamp(1_700_000_000);
+        let creator = Address::generate(&env);
+        let player = Address::generate(&env);
+
+        let (hunt_id, contract_id) =
+            setup_completed_hunt_with_rewards(&env, &creator, &player, 5, 1000);
+
+        // Pause (deactivate) the hunt first.
+        env.mock_all_auths();
+        as_core_contract(&env, &contract_id, |env| {
+            HuntyCore::deactivate_hunt(env.clone(), hunt_id, creator.clone()).unwrap();
+        });
+
+        env.mock_all_auths();
+        as_core_contract(&env, &contract_id, |env| {
+            HuntyCore::close_hunt(env.clone(), hunt_id, creator.clone()).unwrap();
+        });
+
+        let hunt = as_core_contract(&env, &contract_id, |env| {
+            HuntyCore::get_hunt_info(env.clone(), hunt_id).unwrap()
+        });
+        assert_eq!(hunt.status, HuntStatus::Completed);
+        assert_eq!(hunt.reward_config.claimed_count, 1);
+    }
+
+    #[test]
+    fn test_close_hunt_unauthorized() {
+        let env = Env::default();
+        env.ledger().set_timestamp(1_700_000_000);
+        let creator = Address::generate(&env);
+        let player = Address::generate(&env);
+        let attacker = Address::generate(&env);
+
+        let (hunt_id, contract_id) =
+            setup_completed_hunt_with_rewards(&env, &creator, &player, 5, 1000);
+
+        env.mock_all_auths();
+        let err = as_core_contract(&env, &contract_id, |env| {
+            HuntyCore::close_hunt(env.clone(), hunt_id, attacker.clone()).unwrap_err()
+        });
+        assert_eq!(err, HuntErrorCode::Unauthorized);
+    }
+
+    #[test]
+    fn test_close_hunt_not_found() {
+        let env = Env::default();
+        let creator = Address::generate(&env);
+
+        with_core_contract(&env, |env, _cid| {
+            let err = HuntyCore::close_hunt(env.clone(), 999, creator.clone()).unwrap_err();
+            assert_eq!(err, HuntErrorCode::HuntNotFound);
+        });
+    }
+
+    /// A Draft hunt (never activated) cannot be closed early.
+    #[test]
+    fn test_close_hunt_invalid_status_draft() {
+        let env = Env::default();
+        env.ledger().set_timestamp(1_700_000_000);
+        env.mock_all_auths();
+        let creator = Address::generate(&env);
+
+        with_core_contract(&env, |env, _cid| {
+            let hunt_id = HuntyCore::create_hunt(
+                env.clone(),
+                creator.clone(),
+                String::from_str(env, "Draft Hunt"),
+                String::from_str(env, "Desc"),
+                None,
+                None,
+                0,
+                None,
+            )
+            .unwrap();
+
+            let err = HuntyCore::close_hunt(env.clone(), hunt_id, creator.clone()).unwrap_err();
+            assert_eq!(err, HuntErrorCode::InvalidHuntStatus);
+        });
+    }
+
+    /// A hunt that was already closed cannot be closed again.
+    #[test]
+    fn test_close_hunt_already_closed() {
+        let env = Env::default();
+        env.ledger().set_timestamp(1_700_000_000);
+        let creator = Address::generate(&env);
+        let player = Address::generate(&env);
+
+        let (hunt_id, contract_id) =
+            setup_completed_hunt_with_rewards(&env, &creator, &player, 5, 1000);
+
+        env.mock_all_auths();
+        as_core_contract(&env, &contract_id, |env| {
+            HuntyCore::close_hunt(env.clone(), hunt_id, creator.clone()).unwrap();
+        });
+
+        env.mock_all_auths();
+        let err = as_core_contract(&env, &contract_id, |env| {
+            HuntyCore::close_hunt(env.clone(), hunt_id, creator.clone()).unwrap_err()
+        });
+        assert_eq!(err, HuntErrorCode::InvalidHuntStatus);
+    }
+
+    /// Closing is blocked while reward distribution is globally paused.
+    #[test]
+    fn test_close_hunt_rewards_paused() {
+        let env = Env::default();
+        env.ledger().set_timestamp(1_700_000_000);
+        let creator = Address::generate(&env);
+        let player = Address::generate(&env);
+
+        let (hunt_id, contract_id) =
+            setup_completed_hunt_with_rewards(&env, &creator, &player, 5, 1000);
+
+        as_core_contract(&env, &contract_id, |env| {
+            Storage::set_pause_rewards(env, true);
+        });
+
+        env.mock_all_auths();
+        let err = as_core_contract(&env, &contract_id, |env| {
+            HuntyCore::close_hunt(env.clone(), hunt_id, creator.clone()).unwrap_err()
+        });
+        assert_eq!(err, HuntErrorCode::RewardsPaused);
+
+        // Hunt remains active — closing had no effect.
+        let hunt = as_core_contract(&env, &contract_id, |env| {
+            HuntyCore::get_hunt_info(env.clone(), hunt_id).unwrap()
+        });
+        assert_eq!(hunt.status, HuntStatus::Active);
     }
 
     #[test]
