@@ -507,6 +507,45 @@ pub fn cancel_hunt(env: Env, hunt_id: u64, caller: Address) -> Result<(), HuntEr
 
 ---
 
+#### `close_hunt`
+
+Force-ends an in-progress hunt early on behalf of its creator. Unlike `cancel_hunt`,
+closing **preserves all player scores and previously collected rewards**: it marks the
+hunt `Completed` and triggers a final reward distribution for every player who has
+completed the hunt but not yet claimed. Players who have not completed keep their
+progress and are not rewarded. Only the creator may close a hunt, and only while it is
+`Active` or `Paused`.
+
+**Signature:**
+
+```rust
+pub fn close_hunt(env: Env, hunt_id: u64, caller: Address) -> Result<(), HuntErrorCode>
+```
+
+**Parameters:**
+
+- `env: Env`
+- `hunt_id: u64`
+- `caller: Address` — the hunt creator (must authorize the call)
+
+**Returns:** `Result<(), HuntErrorCode>`
+
+**Error type:** `HuntErrorCode`
+
+**Key error codes:**
+
+- `HuntNotFound` = 1 — hunt does not exist
+- `InvalidHuntStatus` = 3 — hunt is not `Active` or `Paused`
+- `Unauthorized` = 8 — caller is not the creator
+- `RewardDistributionFailed` = 20 — a RewardManager call failed
+- `InvalidRarity` = 34 — configured NFT rarity is out of range
+- `RewardsPaused` = 30 — reward distribution is globally paused
+
+**Events:** emits `HuntClosed { hunt_id, closed_at, rewarded_players }`, one
+`RewardClaimed` per rewarded player, and `HuntStatusChanged`.
+
+---
+
 #### `get_hunt_info`
 
 **Signature:**
