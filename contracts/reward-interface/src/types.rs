@@ -14,6 +14,12 @@ pub struct RewardConfig {
     pub nft_tier: u32,
 }
 
+#[contracttype]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RewardPoolConfig {
+    pub time_based_tiers: Vec<TimeBasedRewardTier>,
+}
+
 impl RewardConfig {
     pub fn has_xlm(&self) -> bool {
         self.xlm_amount.map(|a| a > 0).unwrap_or(false)

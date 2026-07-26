@@ -50,6 +50,9 @@ pub struct Hunt {
     pub creator: Address,
     pub title: String,
     pub description: String,
+    pub categories: Vec<String>,
+    pub difficulty_rating: u32,
+    pub difficulty_override: Option<u32>,
     pub status: HuntStatus,
     pub created_at: u64,
     pub activated_at: u64,
@@ -72,6 +75,32 @@ pub struct Hunt {
     pub team_mode: bool,
 }
 
+#[contracttype]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct HuntCache {
+    pub hunt_id: u64,
+    pub creator: Address,
+    pub status: HuntStatus,
+    pub end_time: u64,
+    pub total_clues: u32,
+    pub required_clues: u32,
+    pub max_winners: u32,
+}
+
+impl HuntCache {
+    pub fn from_hunt(hunt: &Hunt) -> Self {
+        Self {
+            hunt_id: hunt.hunt_id,
+            creator: hunt.creator.clone(),
+            status: hunt.status.clone(),
+            end_time: hunt.end_time,
+            total_clues: hunt.total_clues,
+            required_clues: hunt.required_clues,
+            max_winners: hunt.reward_config.max_winners,
+        }
+    }
+}
+
 /// Stored clue with SHA256 answer hash. The hash is never exposed via get_clue/list_clues or events.
 #[contracttype]
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -83,6 +112,8 @@ pub struct Clue {
     pub is_required: bool,
     pub difficulty: u32,
     pub weight: u32,
+    pub hint: Option<String>,
+    pub hint_penalty_points: u32,
 }
 
 /// Clue info returned by get_clue/list_clues. Excludes answer hash.
@@ -95,6 +126,8 @@ pub struct ClueInfo {
     pub is_required: bool,
     pub difficulty: u32,
     pub weight: u32,
+    pub hint_available: bool,
+    pub hint_penalty_points: u32,
 }
 
 #[contracttype]
@@ -137,13 +170,13 @@ pub struct Location {
     pub radius: u32,
 }
 
-
 /// Internal storage representation of player progress.
 /// Does not store `player` or `hunt_id` — those are already the storage key.
 #[contracttype]
 #[derive(Clone, Debug)]
 pub struct StoredPlayerProgress {
     pub completed_clues: Vec<u32>,
+    pub hinted_clues: Vec<u32>,
     pub total_score: u32,
     pub started_at: u64,
     pub completed_at: u64,
@@ -159,6 +192,7 @@ pub struct PlayerProgress {
     pub player: Address,
     pub hunt_id: u64,
     pub completed_clues: Vec<u32>,
+    pub hinted_clues: Vec<u32>,
     pub total_score: u32,
     pub started_at: u64,
     pub completed_at: u64,
@@ -173,6 +207,7 @@ impl PlayerProgress {
             player,
             hunt_id,
             completed_clues: Vec::new(env),
+            hinted_clues: Vec::new(env),
             total_score: 0,
             started_at: current_time,
             completed_at: 0,
@@ -208,6 +243,7 @@ impl PlayerProgress {
     pub fn to_stored(&self) -> StoredPlayerProgress {
         StoredPlayerProgress {
             completed_clues: self.completed_clues.clone(),
+            hinted_clues: self.hinted_clues.clone(),
             total_score: self.total_score,
             started_at: self.started_at,
             completed_at: self.completed_at,
@@ -222,6 +258,7 @@ impl PlayerProgress {
             player,
             hunt_id,
             completed_clues: stored.completed_clues,
+            hinted_clues: stored.hinted_clues,
             total_score: stored.total_score,
             started_at: stored.started_at,
             completed_at: stored.completed_at,
@@ -240,15 +277,46 @@ impl PlayerProgress {
         false
     }
 
-    pub fn complete_clue(&mut self, _env: &Env, clue_id: u32, points: u32) -> Result<(), crate::errors::HuntErrorCode> {
+    pub fn has_requested_hint(&self, clue_id: u32) -> bool {
+        for i in 0..self.hinted_clues.len() {
+            if self.hinted_clues.get(i).unwrap() == clue_id {
+                return true;
+            }
+        }
+        false
+    }
+
+    pub fn request_hint(
+        &mut self,
+        clue_id: u32,
+        penalty: u32,
+    ) -> Result<(), crate::errors::HuntErrorCode> {
+        if self.has_requested_hint(clue_id) {
+            return Err(crate::errors::HuntErrorCode::HintAlreadyUnlocked);
+        }
+        if self.total_score < penalty {
+            return Err(crate::errors::HuntErrorCode::InsufficientScore);
+        }
+        self.total_score = self.total_score.saturating_sub(penalty);
+        self.hinted_clues.push_back(clue_id);
+        Ok(())
+    }
+
+    pub fn complete_clue(
+        &mut self,
+        _env: &Env,
+        clue_id: u32,
+        points: u32,
+    ) -> Result<(), crate::errors::HuntErrorCode> {
         if !self.has_completed_clue(clue_id) {
             self.completed_clues.push_back(clue_id);
-            self.total_score = self.total_score.checked_add(points)
+            self.total_score = self
+                .total_score
+                .checked_add(points)
                 .ok_or(crate::errors::HuntErrorCode::ScoreOverflow)?;
         }
         Ok(())
     }
-
 }
 
 impl Hunt {

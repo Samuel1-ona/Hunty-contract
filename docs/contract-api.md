@@ -101,6 +101,8 @@ Answers are hashed with SHA256 before storage; the hash is never exposed.
 * `answer` - Plain-text answer; normalized (trimmed, lowercased) then hashed
 * `points` - Points awarded for solving this clue
 * `is_required` - Whether this clue must be solved to complete the hunt
+* `difficulty` - Optional clue difficulty multiplier
+* `weight` - Optional clue weight multiplier
 
 # Returns
 The sequential clue ID assigned within the hunt
@@ -116,7 +118,7 @@ The sequential clue ID assigned within the hunt
 **Signature:**
 
 ```rust
-pub fn add_clue(env: Env, hunt_id: u64, question: String, answer: String, points: u32, is_required: bool, difficulty: Option<u32>) -> Result<u32, HuntErrorCode>
+pub fn add_clue(env: Env, hunt_id: u64, question: String, answer: String, points: u32, is_required: bool, difficulty: Option<u32>, weight: Option<u32>) -> Result<u32, HuntErrorCode>
 ```
 
 **Parameters:**
@@ -128,6 +130,7 @@ pub fn add_clue(env: Env, hunt_id: u64, question: String, answer: String, points
 - `points: u32`
 - `is_required: bool`
 - `difficulty: Option<u32>`
+- `weight: Option<u32>`
 
 **Returns:** `Result<u32, HuntErrorCode>`
 
@@ -172,6 +175,8 @@ pub fn add_clue(env: Env, hunt_id: u64, question: String, answer: String, points
 #### `get_clue`
 
 Returns clue information for a hunt/clue. Does not expose the answer hash.
+`ClueInfo` exposes `hint_available` and `hint_penalty_points`, but not the
+hint text. Players must call `request_hint` to unlock the hint.
 
 **Signature:**
 
@@ -266,6 +271,73 @@ pub fn list_clues_paginated(env: Env, hunt_id: u64, page: u32, page_size: u32) -
 - `page_size: u32`
 
 **Returns:** `Vec<ClueInfo>`
+
+---
+
+#### `search_hunts`
+
+Searches hunts by partial title substring across a bounded hunt-id window.
+`limit` is capped by `MAX_BATCH_SIZE`; `scan_limit` is capped by
+`MAX_HUNT_SEARCH_SCAN_SIZE` to bound gas.
+
+```rust
+pub fn search_hunts(env: Env, title_substring: String, offset: u32, limit: u32, scan_limit: u32) -> Vec<Hunt>
+```
+
+---
+
+#### `set_hunt_categories`
+
+Sets up to five categories for a draft hunt. Only the creator may update them.
+
+```rust
+pub fn set_hunt_categories(env: Env, hunt_id: u64, caller: Address, categories: Vec<String>) -> Result<(), HuntErrorCode>
+```
+
+---
+
+#### `get_hunts_by_category`
+
+Returns non-archived hunts whose category list contains the requested category.
+The query is paginated by hunt-id offset and bounded by `scan_limit`.
+
+```rust
+pub fn get_hunts_by_category(env: Env, category: String, offset: u32, limit: u32, scan_limit: u32) -> Vec<Hunt>
+```
+
+---
+
+#### `set_hunt_difficulty_override`
+
+Sets or clears the creator's manual difficulty override. Without an override,
+`difficulty_rating` in `Hunt` is recalculated from the average clue difficulty.
+
+```rust
+pub fn set_hunt_difficulty_override(env: Env, hunt_id: u64, caller: Address, difficulty_override: Option<u32>) -> Result<(), HuntErrorCode>
+```
+
+---
+
+#### `set_clue_hint`
+
+Sets or clears an optional hint for a draft clue and stores the point penalty
+charged when a player unlocks it.
+
+```rust
+pub fn set_clue_hint(env: Env, hunt_id: u64, clue_id: u32, caller: Address, hint: Option<String>, hint_penalty_points: u32) -> Result<(), HuntErrorCode>
+```
+
+---
+
+#### `request_hint`
+
+Unlocks a clue hint for a registered player, deducts the configured penalty
+from `PlayerProgress.total_score`, tracks the clue id in
+`PlayerProgress.hinted_clues`, and returns the hint text.
+
+```rust
+pub fn request_hint(env: Env, hunt_id: u64, clue_id: u32, player: Address) -> Result<String, HuntErrorCode>
+```
 
 ---
 
