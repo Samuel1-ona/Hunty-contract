@@ -1,6 +1,6 @@
 #![cfg_attr(not(test), no_std)]
 use soroban_sdk::{
-    contract, contractimpl, contracttype, Address, Env, Map, String, Symbol, Val, Vec,
+    contract, contractimpl, contracttype, Address, BytesN, Env, Map, String, Symbol, Val, Vec,
 };
 
 /// Core display metadata for an NFT (title, description, image URI).
@@ -34,6 +34,10 @@ pub struct NftMetadataResponse {
     pub image_uri: String,
     pub rarity: u32,
     pub tier: u32,
+    /// Auto-generated or creator-provided display name: "{HuntTitle} #{CompletionRank}".
+    pub display_name: String,
+    /// The rank at which the player completed the hunt (1-indexed). 0 if not ranked.
+    pub completion_rank: u64,
 }
 
 /// NFT data structure stored on-chain.
@@ -48,6 +52,8 @@ pub struct NftData {
     pub metadata: NftMetadata,
     pub transferable: bool,
     pub minted_at: u64,
+    /// Completion rank within the hunt (1-indexed). 0 if not tracked.
+    pub completion_rank: u64,
 }
 
 /// Event emitted when an NFT is minted.
@@ -78,6 +84,25 @@ pub struct NftMetadataUpdatedEvent {
     pub updater: Address,
 }
 
+/// Event emitted when an NFT is revoked by an admin.
+#[contracttype]
+#[derive(Clone, Debug)]
+pub struct NftRevokedEvent {
+    pub nft_id: u64,
+    pub admin: Address,
+    pub previous_owner: Address,
+    pub reason: String,
+}
+
+/// Event emitted when the contract is upgraded.
+#[contracttype]
+#[derive(Clone, Debug)]
+pub struct ContractUpgradedEvent {
+    pub admin: Address,
+    pub old_version: u32,
+    pub new_version: u32,
+}
+
 mod errors;
 mod storage;
 use storage::Storage;
@@ -87,13 +112,246 @@ pub struct NftReward;
 
 #[contractimpl]
 impl NftReward {
-    /// Mints a unique NFT as a reward for hunt completion.
+    // ============================================================
+    //  Admin / Initialization
+    // ============================================================
+
+    /// Initializes the contract, setting the admin address and contract version.
+    /// Can only be called once; subsequent calls are no-ops if admin is already set.
     ///
     /// # Arguments
-    /// * `env` - The Soroban environment
-    /// * `hunt_id` - The hunt this NFT commemorates
-    /// * `player_address` - The address of the player completing the hunt (initial owner)
-    /// * `metadata` - NFT metadata (title, description, image URI, hunt_title, rarity, tier)
+    /// * `env`   - The Soroban environment
+    /// * `admin` - The address that will have administrative privileges
+    pub fn initialize(env: Env, admin: Address) {
+        if Storage::get_admin(&env).is_some() {
+            // Already initialized; silently return to avoid replay issues.
+            return;
+        }
+        admin.require_auth();
+        Storage::set_admin(&env, &admin);
+        // Initialize contract version to 1
+        Storage::set_version(&env, 1u32);
+    }
+
+    /// Returns the current admin address, if set.
+    pub fn get_admin(env: Env) -> Option<Address> {
+        Storage::get_admin(&env)
+    }
+
+    /// Returns the current contract version.
+    pub fn get_version(env: Env) -> u32 {
+        Storage::get_version(&env)
+    }
+
+    // ============================================================
+    //  Issue #384: Contract Upgrade Mechanism
+    // ============================================================
+
+    /// Upgrades the contract WASM to the provided hash.
+    ///
+    /// Admin-only. All storage keys are preserved because Soroban's
+    /// `update_current_contract_wasm` only replaces the executable, not storage.
+    /// The contract version counter is incremented and a `ContractUpgraded` event
+    /// is emitted so off-chain observers can detect the upgrade.
+    ///
+    /// # Arguments
+    /// * `env`       - The Soroban environment
+    /// * `admin`     - Must be the stored admin address (requires auth)
+    /// * `wasm_hash` - SHA-256 hash of the new WASM blob, previously uploaded via
+    ///                 `install_contract_code` / `stellar contract install`
+    ///
+    /// # Errors
+    /// * Panics with `Unauthorized` (NftErrorCode::Unauthorized) if caller is not admin
+    pub fn upgrade(
+        env: Env,
+        admin: Address,
+        wasm_hash: BytesN<32>,
+    ) -> Result<(), crate::errors::NftErrorCode> {
+        admin.require_auth();
+
+        // Verify admin
+        let stored_admin =
+            Storage::get_admin(&env).ok_or(crate::errors::NftErrorCode::Unauthorized)?;
+        if admin != stored_admin {
+            return Err(crate::errors::NftErrorCode::Unauthorized);
+        }
+
+        let old_version = Storage::get_version(&env);
+        let new_version = old_version + 1;
+
+        // Perform the upgrade — replaces the contract executable in-place.
+        // All existing storage entries (NFTs, ownership index, counter, admin, version)
+        // are preserved across the upgrade.
+        env.deployer().update_current_contract_wasm(wasm_hash);
+
+        // Persist the incremented version number so it survives into the new WASM.
+        Storage::set_version(&env, new_version);
+
+        // Emit upgrade event
+        env.events().publish(
+            (Symbol::new(&env, "ContractUpgraded"),),
+            ContractUpgradedEvent {
+                admin,
+                old_version,
+                new_version,
+            },
+        );
+
+        Ok(())
+    }
+
+    // ============================================================
+    //  Issue #388: Admin NFT Revocation
+    // ============================================================
+
+    /// Revokes (burns) an NFT as an administrative action.
+    ///
+    /// Admin-only. The NFT is permanently deleted from storage and removed
+    /// from the owner's index. A revocation record (owner + reason) is kept
+    /// in persistent storage so the event can be reconstructed off-chain.
+    /// Emits a `NftRevoked` event.
+    ///
+    /// # Arguments
+    /// * `env`    - The Soroban environment
+    /// * `admin`  - Must be the stored admin address (requires auth)
+    /// * `nft_id` - The NFT to revoke
+    /// * `reason` - Human-readable explanation (fraud, error, legal request, etc.)
+    ///
+    /// # Errors
+    /// * `Unauthorized` - Caller is not the admin
+    /// * `NftNotFound`  - No NFT with the given ID exists
+    pub fn admin_revoke_nft(
+        env: Env,
+        admin: Address,
+        nft_id: u64,
+        reason: String,
+    ) -> Result<(), crate::errors::NftErrorCode> {
+        admin.require_auth();
+
+        // Verify admin privileges
+        let stored_admin =
+            Storage::get_admin(&env).ok_or(crate::errors::NftErrorCode::Unauthorized)?;
+        if admin != stored_admin {
+            return Err(crate::errors::NftErrorCode::Unauthorized);
+        }
+
+        // Fetch the NFT before deletion so we can capture the owner for the event
+        let nft =
+            Storage::get_nft(&env, nft_id).ok_or(crate::errors::NftErrorCode::NftNotFound)?;
+
+        let previous_owner = nft.owner.clone();
+
+        // Remove NFT from persistent storage and from the owner index
+        Storage::remove_nft(&env, nft_id);
+        Storage::remove_nft_from_owner(&env, &previous_owner, nft_id);
+
+        // Persist revocation record for auditability
+        Storage::save_revocation_record(&env, nft_id, &previous_owner, &reason);
+
+        // Emit NftRevoked event
+        env.events().publish(
+            (Symbol::new(&env, "NftRevoked"), nft_id),
+            NftRevokedEvent {
+                nft_id,
+                admin,
+                previous_owner,
+                reason,
+            },
+        );
+
+        Ok(())
+    }
+
+    /// Returns the revocation record for a previously revoked NFT, if any.
+    /// Returns `None` if the NFT was never revoked.
+    pub fn get_revocation_record(env: Env, nft_id: u64) -> Option<(Address, String)> {
+        Storage::get_revocation_record(&env, nft_id)
+    }
+
+    // ============================================================
+    //  Issue #383: NFT Display Name Generation
+    // ============================================================
+
+    /// Generates the display name for an NFT following the
+    /// "{HuntTitle} #{CompletionRank}" format.
+    ///
+    /// This is a pure helper exposed so callers can preview the generated name
+    /// without minting. The actual name is stored in `NftData` at mint time.
+    ///
+    /// # Arguments
+    /// * `hunt_title`       - The title of the hunt
+    /// * `completion_rank`  - The rank of the player within the hunt (1-indexed)
+    pub fn generate_display_name(env: Env, hunt_title: String, completion_rank: u64) -> String {
+        Self::build_display_name(&env, &hunt_title, completion_rank)
+    }
+
+    /// Internal helper that builds the "{HuntTitle} #{CompletionRank}" string.
+    fn build_display_name(env: &Env, hunt_title: &String, completion_rank: u64) -> String {
+        // Convert completion_rank to ASCII bytes manually (no std format!)
+        let rank_bytes = Self::u64_to_bytes(completion_rank);
+        let rank_len = rank_bytes.1;
+
+        // Allocate a buffer large enough for: title + " #" + digits
+        // Max title = 100, " #" = 2, max u64 digits = 20  => 122 bytes max
+        let title_len = hunt_title.len() as usize;
+        let total = title_len + 2 + rank_len; // " #" is 2 chars
+
+        let mut buf = [0u8; 200];
+        if total > 200 {
+            // Fallback: return hunt_title unchanged (safety guard)
+            return hunt_title.clone();
+        }
+
+        hunt_title.copy_into_slice(&mut buf[..title_len]);
+        buf[title_len] = b' ';
+        buf[title_len + 1] = b'#';
+        buf[title_len + 2..title_len + 2 + rank_len].copy_from_slice(&rank_bytes.0[..rank_len]);
+
+        String::from_bytes(env, &buf[..total])
+    }
+
+    /// Converts a u64 to its ASCII decimal bytes. Returns (buffer, length).
+    fn u64_to_bytes(mut n: u64) -> ([u8; 20], usize) {
+        if n == 0 {
+            let mut buf = [0u8; 20];
+            buf[0] = b'0';
+            return (buf, 1);
+        }
+        let mut tmp = [0u8; 20];
+        let mut len = 0usize;
+        while n > 0 {
+            tmp[len] = b'0' + (n % 10) as u8;
+            n /= 10;
+            len += 1;
+        }
+        // tmp is in reverse order; reverse in place
+        let mut i = 0;
+        let mut j = len - 1;
+        while i < j {
+            tmp.swap(i, j);
+            i += 1;
+            j -= 1;
+        }
+        (tmp, len)
+    }
+
+    // ============================================================
+    //  Core NFT Minting
+    // ============================================================
+
+    /// Mints a unique NFT as a reward for hunt completion.
+    ///
+    /// If the provided `metadata.title` is empty, an auto-generated display name
+    /// of the form "{HuntTitle} #{CompletionRank}" is used as the title.
+    /// The same display name is always stored in `NftData.metadata.title` for
+    /// easy rendering, and is also included in `NftMetadataResponse.display_name`.
+    ///
+    /// # Arguments
+    /// * `env`              - The Soroban environment
+    /// * `hunt_id`          - The hunt this NFT commemorates
+    /// * `player_address`   - The address of the player completing the hunt (initial owner)
+    /// * `metadata`         - NFT metadata (title, description, image URI, hunt_title, rarity, tier)
+    /// * `completion_rank`  - Completion rank of the player within the hunt (1-indexed, 0 = unknown)
     ///
     /// # Returns
     /// The unique NFT ID of the minted NFT
@@ -102,11 +360,32 @@ impl NftReward {
         hunt_id: u64,
         player_address: Address,
         metadata: NftMetadata,
+        completion_rank: u64,
     ) -> u64 {
         if metadata.rarity > 5 {
             panic!("InvalidRarity");
         }
         let minted_at = env.ledger().timestamp();
+
+        // Issue #383: Auto-generate title if none provided
+        let final_title = if metadata.title.len() == 0 {
+            Self::build_display_name(&env, &metadata.hunt_title, completion_rank)
+        } else {
+            metadata.title.clone()
+        };
+
+        // Build the display name regardless (stored separately for easy access)
+        let display_name =
+            Self::build_display_name(&env, &metadata.hunt_title, completion_rank);
+
+        let final_metadata = NftMetadata {
+            title: final_title,
+            description: metadata.description.clone(),
+            image_uri: metadata.image_uri.clone(),
+            hunt_title: metadata.hunt_title.clone(),
+            rarity: metadata.rarity,
+            tier: metadata.tier,
+        };
 
         let nft_id = Storage::next_nft_id(&env);
 
@@ -115,19 +394,22 @@ impl NftReward {
             hunt_id,
             owner: player_address.clone(),
             completion_player: player_address.clone(),
-            metadata: metadata.clone(),
+            metadata: final_metadata.clone(),
             transferable: false,
             minted_at,
+            completion_rank,
         };
 
         Storage::save_nft(&env, &nft_data);
         Storage::add_nft_to_owner(&env, &player_address, nft_id);
+        // Store the display name for fast retrieval
+        Storage::save_display_name(&env, nft_id, &display_name);
 
         let event = NftMintedEvent {
             nft_id,
             hunt_id,
             owner: player_address,
-            metadata,
+            metadata: final_metadata,
             minted_at,
         };
         env.events()
@@ -141,13 +423,14 @@ impl NftReward {
     /// on this crate's `NftMetadata` type directly.
     ///
     /// Expected keys in `metadata` (all optional, with sensible defaults):
-    /// - "title": String
+    /// - "title": String  — if absent or empty, auto-generated as "{hunt_title} #{completion_rank}"
     /// - "description": String
     /// - "image_uri": String
     /// - "hunt_title": String (defaults to title when omitted/empty)
     /// - "rarity": u32
     /// - "tier": u32
     /// - "transferable": bool
+    /// - "completion_rank": u64  — defaults to 0
     pub fn mint_reward_nft_from_map(
         env: Env,
         hunt_id: u64,
@@ -195,8 +478,22 @@ impl NftReward {
             .and_then(|v| bool::try_from_val(&env, &v).ok())
             .unwrap_or(false);
 
+        let completion_rank = metadata
+            .get(Symbol::new(&env, "completion_rank"))
+            .and_then(|v| u64::try_from_val(&env, &v).ok())
+            .unwrap_or(0u64);
+
+        // Issue #383: auto-generate title if empty
+        let final_title = if title.len() == 0 {
+            Self::build_display_name(&env, &hunt_title, completion_rank)
+        } else {
+            title
+        };
+
+        let display_name = Self::build_display_name(&env, &hunt_title, completion_rank);
+
         let meta = NftMetadata {
-            title,
+            title: final_title,
             description,
             image_uri,
             hunt_title,
@@ -215,10 +512,12 @@ impl NftReward {
             metadata: meta.clone(),
             transferable,
             minted_at,
+            completion_rank,
         };
 
         Storage::save_nft(&env, &nft_data);
         Storage::add_nft_to_owner(&env, &player_address, nft_id);
+        Storage::save_display_name(&env, nft_id, &display_name);
 
         let event = NftMintedEvent {
             nft_id,
@@ -233,14 +532,25 @@ impl NftReward {
         nft_id
     }
 
+    // ============================================================
+    //  Query Functions
+    // ============================================================
+
     /// Retrieves NFT data by ID.
     pub fn get_nft(env: Env, nft_id: u64) -> Option<NftData> {
         Storage::get_nft(&env, nft_id)
     }
 
-    /// Returns complete metadata for an NFT, including hunt info and completion details.
+    /// Returns complete metadata for an NFT, including hunt info, completion details,
+    /// and the auto-generated display name (issue #383).
     pub fn get_nft_metadata(env: Env, nft_id: u64) -> Option<NftMetadataResponse> {
         let nft = Storage::get_nft(&env, nft_id)?;
+
+        // Retrieve stored display name or re-generate it on the fly
+        let display_name = Storage::get_display_name(&env, nft_id).unwrap_or_else(|| {
+            Self::build_display_name(&env, &nft.metadata.hunt_title, nft.completion_rank)
+        });
+
         Some(NftMetadataResponse {
             nft_id: nft.nft_id,
             hunt_id: nft.hunt_id,
@@ -253,6 +563,8 @@ impl NftReward {
             image_uri: nft.metadata.image_uri.clone(),
             rarity: nft.metadata.rarity,
             tier: nft.metadata.tier,
+            display_name,
+            completion_rank: nft.completion_rank,
         })
     }
 
@@ -267,7 +579,8 @@ impl NftReward {
     ) -> Result<(), crate::errors::NftErrorCode> {
         updater.require_auth();
 
-        let mut nft = Storage::get_nft(&env, nft_id).ok_or(crate::errors::NftErrorCode::NftNotFound)?;
+        let mut nft =
+            Storage::get_nft(&env, nft_id).ok_or(crate::errors::NftErrorCode::NftNotFound)?;
 
         if nft.owner != updater {
             return Err(crate::errors::NftErrorCode::NotOwner);
@@ -279,10 +592,7 @@ impl NftReward {
 
         env.events().publish(
             (Symbol::new(&env, "NftMetadataUpdated"), nft_id),
-            NftMetadataUpdatedEvent {
-                nft_id,
-                updater,
-            },
+            NftMetadataUpdatedEvent { nft_id, updater },
         );
 
         Ok(())
@@ -307,6 +617,10 @@ impl NftReward {
     pub fn get_player_nfts(env: Env, owner: Address) -> Vec<u64> {
         Storage::get_owner_nfts(&env, &owner)
     }
+
+    // ============================================================
+    //  Transfer & Burn
+    // ============================================================
 
     /// Burns (permanently destroys) an NFT, removing it from storage and the owner's list.
     ///
@@ -338,14 +652,12 @@ impl NftReward {
     /// Transfers an NFT from one address to another.
     ///
     /// # Arguments
-    /// * `nft_id` - The NFT to transfer
-    /// * `from_address` - Current owner (must authorize the call)
-    /// * `to_address` - New owner
+    /// * `nft_id`        - The NFT to transfer
+    /// * `from_address`  - Current owner (must authorize the call)
+    /// * `to_address`    - New owner
     ///
     /// # Authorization
     /// The `from_address` must authorize this call via `require_auth`.
-    /// For automatic transfers during reward distribution, the contract may be
-    /// the `from_address` when invoked by an authorized party.
     pub fn transfer_nft(
         env: Env,
         nft_id: u64,
