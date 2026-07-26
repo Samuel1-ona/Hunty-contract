@@ -298,6 +298,10 @@ impl Storage {
         env.storage()
             .persistent()
             .set(&Self::MAX_SUPPLY_KEY, &max_supply);
+    }
+
+    /// Marks the contract as initialized. Called once during `initialize()`.
+    pub fn mark_initialized(env: &Env) {
         env.storage()
             .persistent()
             .set(&Self::INITIALIZED_KEY, &true);
