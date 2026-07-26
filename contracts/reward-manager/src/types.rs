@@ -1,8 +1,7 @@
 use soroban_sdk::{contracttype, Address, Vec};
 
 pub use reward_interface::{
-    resolve_tier_amount, tiers_are_strictly_ascending, RewardConfig, TierError,
-    TimeBasedRewardTier,
+    resolve_tier_amount, tiers_are_strictly_ascending, RewardConfig, TierError, TimeBasedRewardTier,
 };
 
 /// Semantic versioning struct.
@@ -43,6 +42,18 @@ pub struct DistributionStatus {
 pub struct DistributionRecord {
     pub xlm_amount: i128,
     pub nft_id: Option<u64>,
+}
+
+/// Outcome recorded when an admin manually resolves a distribution that
+/// could not complete automatically (e.g. XLM was sent but the NFT mint
+/// failed). This is bookkeeping only and does not move funds.
+#[contracttype]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ResolutionStatus {
+    /// The distribution is considered fully completed.
+    Completed,
+    /// The distribution is considered refunded / rolled back.
+    Refunded,
 }
 
 /// Configuration for a reward pool, set at creation time.
@@ -130,6 +141,8 @@ pub enum PoolOperation {
     Withdraw,
     Freeze,
     Unfreeze,
+    /// Unused balance was migrated out to (or into) another hunt's pool.
+    Migrate,
 }
 
 /// A single entry in the pool audit log.

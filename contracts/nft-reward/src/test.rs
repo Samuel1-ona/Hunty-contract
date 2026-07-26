@@ -2,7 +2,7 @@
 extern crate std;
 
 use crate::{
-    NftMetadata, NftMintedEvent, NftReward, NftRewardClient, NftErrorCode,
+    CollectionMetadata, NftMetadata, NftMintedEvent, NftReward, NftRewardClient, NftErrorCode,
     METADATA_SCHEMA_VERSION,
 };
 use soroban_sdk::{
@@ -17,12 +17,21 @@ fn setup_env() -> Env {
     env
 }
 
+fn default_collection_metadata(env: &Env) -> CollectionMetadata {
+    CollectionMetadata {
+        name: String::from_str(env, "Hunty Rewards"),
+        description: String::from_str(env, "Reward NFTs for completed hunts"),
+        total_supply: 0,
+        creator: None,
+    }
+}
+
 fn setup_nft_reward(env: &Env, max_supply: Option<u64>) -> (NftRewardClient<'_>, Address) {
     let contract_id = env.register_contract(None, NftReward);
     let client = NftRewardClient::new(env, &contract_id);
     let admin = Address::generate(env);
     let minter = Address::generate(env);
-    client.initialize(&admin, &minter, &max_supply);
+    client.initialize(&admin, &minter, &max_supply, &default_collection_metadata(env));
     (client, minter)
 }
 
@@ -32,7 +41,7 @@ fn setup_initialized() -> (Env, Address, Address, Address) {
     let admin = Address::generate(&env);
     let minter = Address::generate(&env);
     let client = NftRewardClient::new(&env, &contract_id);
-    client.initialize(&admin, &minter, &None);
+    client.initialize(&admin, &minter, &None, &default_collection_metadata(&env));
     (env, contract_id, admin, minter)
 }
 
@@ -129,9 +138,10 @@ fn mint_transferable(
 fn test_initialize_stores_admin() {
     let env = setup_env();
     let admin = Address::generate(&env);
+    let minter = Address::generate(&env);
     let contract_id = env.register(NftReward, ());
     let client = NftRewardClient::new(&env, &contract_id);
-    client.initialize(&admin, &None);
+    client.initialize(&admin, &minter, &None, &default_collection_metadata(&env));
 
     assert_eq!(client.get_admin(), Some(admin));
 }
@@ -144,10 +154,11 @@ fn test_initialize_requires_auth() {
     env.ledger().set_timestamp(1000);
 
     let admin = Address::generate(&env);
+    let minter = Address::generate(&env);
     let contract_id = env.register(NftReward, ());
     let client = NftRewardClient::new(&env, &contract_id);
 
-    client.initialize(&admin, &None);
+    client.initialize(&admin, &minter, &None, &default_collection_metadata(&env));
 }
 
 #[test]
@@ -155,10 +166,51 @@ fn test_initialize_requires_auth() {
 fn test_initialize_cannot_be_called_twice() {
     let env = setup_env();
     let admin = Address::generate(&env);
+    let minter = Address::generate(&env);
     let contract_id = env.register(NftReward, ());
     let client = NftRewardClient::new(&env, &contract_id);
-    client.initialize(&admin, &None);
-    client.initialize(&admin, &None);
+    client.initialize(&admin, &minter, &None, &default_collection_metadata(&env));
+    client.initialize(&admin, &minter, &None, &default_collection_metadata(&env));
+}
+
+#[test]
+fn test_collection_metadata_is_set_during_initialization_and_updates_supply() {
+    let env = setup_env();
+    let contract_id = env.register_contract(None, NftReward);
+    let client = NftRewardClient::new(&env, &contract_id);
+    let admin = Address::generate(&env);
+    let minter = Address::generate(&env);
+    let creator = Address::generate(&env);
+
+    let collection_metadata = CollectionMetadata {
+        name: String::from_str(&env, "Hunty Rewards"),
+        description: String::from_str(&env, "Reward NFTs for completed hunts"),
+        total_supply: 0,
+        creator: Some(creator.clone()),
+    };
+
+    client.initialize(&admin, &minter, &None, &collection_metadata);
+
+    let initial = client.get_collection_metadata().unwrap();
+    assert_eq!(initial.name, String::from_str(&env, "Hunty Rewards"));
+    assert_eq!(
+        initial.description,
+        String::from_str(&env, "Reward NFTs for completed hunts")
+    );
+    assert_eq!(initial.creator, Some(creator));
+    assert_eq!(initial.total_supply, 0);
+
+    let player = Address::generate(&env);
+    let metadata = create_metadata(
+        &env,
+        "Hunt Champion",
+        "Completed the City Hunt",
+        "ipfs://QmExample123",
+    );
+    client.mint_reward_nft(&minter, &1, &player, &metadata);
+
+    let updated = client.get_collection_metadata().unwrap();
+    assert_eq!(updated.total_supply, 1);
 }
 
 #[test]
@@ -260,6 +312,35 @@ fn test_initial_ownership_set_correctly() {
 
     let nft = client.get_nft(&nft_id).unwrap();
     assert_eq!(nft.owner, player);
+}
+
+#[test]
+fn test_soulbound_nft_cannot_be_transferred() {
+    let env = setup_env();
+    let (client, minter) = setup_nft_reward(&env, None);
+
+    let owner = Address::generate(&env);
+    let recipient = Address::generate(&env);
+    let mut metadata_map: Map<Symbol, Val> = Map::new(&env);
+    metadata_map.set(
+        Symbol::new(&env, "title"),
+        String::from_str(&env, "Soulbound Trophy").into_val(&env),
+    );
+    metadata_map.set(
+        Symbol::new(&env, "description"),
+        String::from_str(&env, "Bound to the owner").into_val(&env),
+    );
+    metadata_map.set(
+        Symbol::new(&env, "image_uri"),
+        String::from_str(&env, "ipfs://soulbound").into_val(&env),
+    );
+    metadata_map.set(Symbol::new(&env, "transferable"), false.into_val(&env));
+
+    let nft_id = client.mint_reward_nft_from_map(&minter, &1, &owner, &metadata_map);
+    let err = client.transfer_nft(&nft_id, &owner, &recipient, &owner).unwrap_err();
+
+    assert_eq!(err, NftErrorCode::NftNotTransferable);
+    assert_eq!(client.owner_of(&nft_id).unwrap(), owner);
 }
 
 #[test]

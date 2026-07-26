@@ -1,21 +1,4 @@
-use soroban_sdk::{contracttype, Address, BytesN, Env, Map, String, Vec};
-
-/// Semantic version (major.minor.patch). Compatible if major matches and self >= required.
-#[contracttype]
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct SemVer {
-    pub major: u32,
-    pub minor: u32,
-    pub patch: u32,
-}
-
-impl SemVer {
-    pub fn is_compatible_with(&self, required: &SemVer) -> bool {
-        self.major == required.major
-            && (self.minor > required.minor
-                || (self.minor == required.minor && self.patch >= required.patch))
-    }
-}
+use soroban_sdk::{contracttype, Address, BytesN, Env, String, Vec};
 
 /// Semantic version (major.minor.patch). Compatible if major matches and self >= required.
 #[contracttype]
@@ -67,6 +50,9 @@ pub struct Hunt {
     pub creator: Address,
     pub title: String,
     pub description: String,
+    pub categories: Vec<String>,
+    pub difficulty_rating: u32,
+    pub difficulty_override: Option<u32>,
     pub status: HuntStatus,
     pub created_at: u64,
     pub activated_at: u64,
@@ -81,6 +67,38 @@ pub struct Hunt {
     pub max_submissions_per_minute: u32,
     pub max_attempts_per_clue: u32,
     pub start_multiplier_bps: u32,
+    /// Registration cutoff timestamp. 0 = no deadline (registration open while active).
+    pub registration_deadline: u64,
+    /// When true, players may claim their partial score after the hunt ends.
+    pub allow_partial_scoring: bool,
+    /// When true, players may form teams and share clue progress.
+    pub team_mode: bool,
+}
+
+#[contracttype]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct HuntCache {
+    pub hunt_id: u64,
+    pub creator: Address,
+    pub status: HuntStatus,
+    pub end_time: u64,
+    pub total_clues: u32,
+    pub required_clues: u32,
+    pub max_winners: u32,
+}
+
+impl HuntCache {
+    pub fn from_hunt(hunt: &Hunt) -> Self {
+        Self {
+            hunt_id: hunt.hunt_id,
+            creator: hunt.creator.clone(),
+            status: hunt.status.clone(),
+            end_time: hunt.end_time,
+            total_clues: hunt.total_clues,
+            required_clues: hunt.required_clues,
+            max_winners: hunt.reward_config.max_winners,
+        }
+    }
 }
 
 /// Stored clue with SHA256 answer hash. The hash is never exposed via get_clue/list_clues or events.
@@ -94,6 +112,8 @@ pub struct Clue {
     pub is_required: bool,
     pub difficulty: u32,
     pub weight: u32,
+    pub hint: Option<String>,
+    pub hint_penalty_points: u32,
 }
 
 /// Clue info returned by get_clue/list_clues. Excludes answer hash.
@@ -106,12 +126,25 @@ pub struct ClueInfo {
     pub is_required: bool,
     pub difficulty: u32,
     pub weight: u32,
+    pub hint_available: bool,
+    pub hint_penalty_points: u32,
 }
 
 #[contracttype]
 #[derive(Clone)]
 pub struct HuntCancelledEvent {
     pub hunt_id: u64,
+}
+
+/// Emitted when a creator force-closes a hunt early (marks it Completed) while
+/// preserving player scores and any already-distributed rewards. `rewarded_players`
+/// is the number of completed players who received a final reward as part of closing.
+#[contracttype]
+#[derive(Clone)]
+pub struct HuntClosedEvent {
+    pub hunt_id: u64,
+    pub closed_at: u64,
+    pub rewarded_players: u32,
 }
 
 #[contracttype]
@@ -148,13 +181,13 @@ pub struct Location {
     pub radius: u32,
 }
 
-
 /// Internal storage representation of player progress.
 /// Does not store `player` or `hunt_id` — those are already the storage key.
 #[contracttype]
 #[derive(Clone, Debug)]
 pub struct StoredPlayerProgress {
     pub completed_clues: Vec<u32>,
+    pub hinted_clues: Vec<u32>,
     pub total_score: u32,
     pub started_at: u64,
     pub completed_at: u64,
@@ -170,6 +203,7 @@ pub struct PlayerProgress {
     pub player: Address,
     pub hunt_id: u64,
     pub completed_clues: Vec<u32>,
+    pub hinted_clues: Vec<u32>,
     pub total_score: u32,
     pub started_at: u64,
     pub completed_at: u64,
@@ -184,6 +218,7 @@ impl PlayerProgress {
             player,
             hunt_id,
             completed_clues: Vec::new(env),
+            hinted_clues: Vec::new(env),
             total_score: 0,
             started_at: current_time,
             completed_at: 0,
@@ -219,6 +254,7 @@ impl PlayerProgress {
     pub fn to_stored(&self) -> StoredPlayerProgress {
         StoredPlayerProgress {
             completed_clues: self.completed_clues.clone(),
+            hinted_clues: self.hinted_clues.clone(),
             total_score: self.total_score,
             started_at: self.started_at,
             completed_at: self.completed_at,
@@ -233,6 +269,7 @@ impl PlayerProgress {
             player,
             hunt_id,
             completed_clues: stored.completed_clues,
+            hinted_clues: stored.hinted_clues,
             total_score: stored.total_score,
             started_at: stored.started_at,
             completed_at: stored.completed_at,
@@ -251,15 +288,46 @@ impl PlayerProgress {
         false
     }
 
-    pub fn complete_clue(&mut self, _env: &Env, clue_id: u32, points: u32) -> Result<(), crate::errors::HuntErrorCode> {
+    pub fn has_requested_hint(&self, clue_id: u32) -> bool {
+        for i in 0..self.hinted_clues.len() {
+            if self.hinted_clues.get(i).unwrap() == clue_id {
+                return true;
+            }
+        }
+        false
+    }
+
+    pub fn request_hint(
+        &mut self,
+        clue_id: u32,
+        penalty: u32,
+    ) -> Result<(), crate::errors::HuntErrorCode> {
+        if self.has_requested_hint(clue_id) {
+            return Err(crate::errors::HuntErrorCode::HintAlreadyUnlocked);
+        }
+        if self.total_score < penalty {
+            return Err(crate::errors::HuntErrorCode::InsufficientScore);
+        }
+        self.total_score = self.total_score.saturating_sub(penalty);
+        self.hinted_clues.push_back(clue_id);
+        Ok(())
+    }
+
+    pub fn complete_clue(
+        &mut self,
+        _env: &Env,
+        clue_id: u32,
+        points: u32,
+    ) -> Result<(), crate::errors::HuntErrorCode> {
         if !self.has_completed_clue(clue_id) {
             self.completed_clues.push_back(clue_id);
-            self.total_score = self.total_score.checked_add(points)
+            self.total_score = self
+                .total_score
+                .checked_add(points)
                 .ok_or(crate::errors::HuntErrorCode::ScoreOverflow)?;
         }
         Ok(())
     }
-
 }
 
 impl Hunt {
@@ -530,4 +598,67 @@ pub struct RewardClaimFailedEvent {
     pub hunt_id: u64,
     pub player: Address,
     pub error_code: u32,
+}
+
+/// A team competing in a team-mode hunt.
+#[contracttype]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Team {
+    pub team_id: u32,
+    pub hunt_id: u64,
+    pub name: String,
+    pub leader: Address,
+    pub members: Vec<Address>,
+}
+
+/// Shared progress for a team: clues completed by any member and the combined score.
+#[contracttype]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TeamProgress {
+    pub completed_clues: Vec<u32>,
+    pub total_score: u32,
+}
+
+/// Team leaderboard entry (read-only query result), ranked by shared team score.
+#[contracttype]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TeamLeaderboardEntry {
+    pub rank: u32,
+    pub team_id: u32,
+    pub name: String,
+    pub score: u32,
+    pub member_count: u32,
+}
+
+#[contracttype]
+#[derive(Clone, Debug)]
+pub struct TeamCreatedEvent {
+    pub hunt_id: u64,
+    pub team_id: u32,
+    pub leader: Address,
+    pub name: String,
+}
+
+#[contracttype]
+#[derive(Clone, Debug)]
+pub struct TeamMemberJoinedEvent {
+    pub hunt_id: u64,
+    pub team_id: u32,
+    pub player: Address,
+}
+
+#[contracttype]
+#[derive(Clone, Debug)]
+pub struct RegistrationDeadlineSetEvent {
+    pub hunt_id: u64,
+    pub registration_deadline: u64,
+}
+
+#[contracttype]
+#[derive(Clone, Debug)]
+pub struct PartialScoreClaimedEvent {
+    pub hunt_id: u64,
+    pub player: Address,
+    pub partial_score: u32,
+    pub clues_completed: u32,
 }

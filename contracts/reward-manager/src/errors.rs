@@ -61,6 +61,20 @@ pub enum RewardErrorCode {
     /// No pending failed NFT mint found for retry.
     NftMintPendingNotFound = 23,
 
+    /// No distribution record exists for the given hunt/player.
+    DistributionNotFound = 24,
+
+    /// The source pool is not eligible for migration: its hunt is neither
+    /// expired nor cancelled.
+    SourcePoolNotEligible = 25,
+
+    /// The destination pool does not exist (must be created first).
+    DestinationPoolNotFound = 26,
+
+    /// Source and destination refer to the same hunt, or there is no balance
+    /// to migrate.
+    InvalidMigration = 27,
+
     /// Pool is frozen and distributions have been temporarily disabled.
-    PoolFrozen = 24,
+    PoolFrozen = 28,
 }

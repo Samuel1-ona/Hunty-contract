@@ -37,6 +37,16 @@ pub struct NftMetadata {
     pub extensions: Map<String, String>,
 }
 
+/// Collection-level metadata stored at initialization and exposed via a query.
+#[contracttype]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CollectionMetadata {
+    pub name: String,
+    pub description: String,
+    pub total_supply: u64,
+    pub creator: Option<Address>,
+}
+
 /// Collection-level statistics included in mint events for indexers.
 #[contracttype]
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -202,6 +212,7 @@ impl NftReward {
         admin: Address,
         minter: Address,
         max_supply: Option<u64>,
+        collection_metadata: CollectionMetadata,
     ) -> Result<(), crate::errors::NftErrorCode> {
         if Storage::is_initialized(&env) {
             return Err(crate::errors::NftErrorCode::AlreadyInitialized);
@@ -210,6 +221,8 @@ impl NftReward {
         Storage::save_admin(&env, &admin);
         Storage::add_minter(&env, &minter);
         Storage::set_max_supply(&env, max_supply);
+        Storage::save_collection_metadata(&env, &collection_metadata);
+        Storage::mark_initialized(&env);
         Storage::set_contract_version(&env, CONTRACT_VERSION);
         Ok(())
     }
@@ -255,7 +268,7 @@ impl NftReward {
         metadata: NftMetadata,
     ) -> u64 {
         Self::require_authorized_caller(&env, &minter);
-        Self::mint_reward_nft_impl(env, hunt_id, player_address, metadata, false)
+        Self::mint_reward_nft_impl(env, hunt_id, player_address, metadata, true)
     }
 
     /// Mints a reward NFT from a generic metadata map. This is the entrypoint
@@ -419,10 +432,13 @@ impl NftReward {
         metadata.hunt_title =
             Self::sanitize_metadata_field(&env, &metadata.hunt_title, MAX_NFT_TITLE_BYTES, true);
 
+        // 0 is treated as "unlimited" — only enforce if max_supply is Some(n) with n > 0.
         if let Some(max_supply) = Storage::get_max_supply(&env) {
-            let current_supply = Storage::get_nft_counter(&env);
-            if current_supply >= max_supply {
-                panic_with_error!(&env, crate::errors::NftErrorCode::MaxSupplyReached);
+            if max_supply > 0 {
+                let current_supply = Storage::get_nft_counter(&env);
+                if current_supply >= max_supply {
+                    panic_with_error!(&env, crate::errors::NftErrorCode::MaxSupplyReached);
+                }
             }
         }
 
@@ -445,6 +461,7 @@ impl NftReward {
         Storage::add_nft_to_owner(&env, &player_address, nft_id);
         Storage::add_nft_to_hunt(&env, hunt_id, nft_id);
         Storage::mark_hunt_minted(&env, hunt_id);
+        Storage::update_collection_metadata_total_supply(&env, Storage::get_nft_counter(&env));
 
         let event = NftMintedEvent {
             nft_id,
@@ -464,6 +481,11 @@ impl NftReward {
     /// Retrieves NFT data by ID.
     pub fn get_nft(env: Env, nft_id: u64) -> Option<NftData> {
         Storage::get_nft(&env, nft_id)
+    }
+
+    /// Returns the collection-level metadata configured at initialization.
+    pub fn get_collection_metadata(env: Env) -> Option<CollectionMetadata> {
+        Storage::get_collection_metadata(&env)
     }
 
     /// Returns complete metadata for an NFT, including hunt info and completion details.
@@ -783,6 +805,64 @@ impl NftReward {
         Storage::get_nft_counter(&env)
     }
 
+    /// Returns the configured maximum total supply of NFTs.
+    ///
+    /// - `None`  → no cap was set (unlimited minting)
+    /// - `Some(0)` → unlimited (explicit zero treated as unlimited)
+    /// - `Some(n)` → at most `n` NFTs may ever be minted
+    pub fn get_max_supply(env: Env) -> Option<u64> {
+        Storage::get_max_supply(&env)
+    }
+
+    /// Updates the maximum total supply cap. Admin only.
+    ///
+    /// - Pass `None` or `Some(0)` to remove the cap (unlimited).
+    /// - Pass `Some(n)` where `n >= current total_supply` to set a new cap.
+    ///   Attempting to set a cap lower than the already-minted count is
+    ///   rejected with `Unauthorized` to prevent bricking the contract.
+    ///
+    /// # Errors
+    /// * `NotInitialized` - Contract has not been initialized yet
+    /// * `Unauthorized`   - Caller is not the admin, or new cap < minted supply
+    pub fn set_max_supply(
+        env: Env,
+        admin: Address,
+        new_max: Option<u64>,
+    ) -> Result<(), crate::errors::NftErrorCode> {
+        Self::require_admin(&env, &admin)?;
+
+        // Guard: never allow setting a cap below what's already minted.
+        if let Some(cap) = new_max {
+            if cap > 0 {
+                let minted = Storage::get_nft_counter(&env);
+                if cap < minted {
+                    return Err(crate::errors::NftErrorCode::Unauthorized);
+                }
+            }
+        }
+
+        Storage::set_max_supply(&env, new_max);
+        Ok(())
+    }
+
+    /// Returns the number of NFTs that can still be minted.
+    ///
+    /// - `None`  → unlimited (no cap configured, or cap was set to 0)
+    /// - `Some(n)` → exactly `n` more NFTs may be minted before the cap is hit
+    ///
+    /// Once the cap is reached this returns `Some(0)`, and any subsequent mint
+    /// will panic with `MaxSupplyReached`.
+    pub fn get_remaining_supply(env: Env) -> Option<u64> {
+        match Storage::get_max_supply(&env) {
+            None => None,
+            Some(max) if max == 0 => None, // explicit 0 ⟹ unlimited
+            Some(max) => {
+                let minted = Storage::get_nft_counter(&env);
+                Some(max.saturating_sub(minted))
+            }
+        }
+    }
+
     /// Lists all NFTs minted by the contract with pagination support.
     ///
     /// Returns a vector of NftData structs, paginated by offset and limit.
@@ -817,6 +897,52 @@ impl NftReward {
         }
 
         result
+    }
+
+    /// Transfers an NFT to a new owner when the NFT is transferable.
+    /// Non-transferable (soulbound) NFTs remain bound to the minting recipient.
+    pub fn transfer_nft(
+        env: Env,
+        nft_id: u64,
+        from_address: Address,
+        to_address: Address,
+        caller: Address,
+    ) -> Result<(), crate::errors::NftErrorCode> {
+        caller.require_auth();
+
+        let mut nft = Storage::get_nft(&env, nft_id).ok_or(crate::errors::NftErrorCode::NftNotFound)?;
+
+        if nft.locked {
+            return Err(crate::errors::NftErrorCode::NftLocked);
+        }
+        if !nft.transferable {
+            return Err(crate::errors::NftErrorCode::NftNotTransferable);
+        }
+        if nft.owner != from_address {
+            return Err(crate::errors::NftErrorCode::NotOwner);
+        }
+        if to_address == from_address {
+            return Err(crate::errors::NftErrorCode::InvalidRecipient);
+        }
+        if caller != from_address && !Storage::is_operator(&env, &from_address, &caller) {
+            return Err(crate::errors::NftErrorCode::NotOperator);
+        }
+
+        Storage::remove_nft_from_owner(&env, &from_address, nft_id);
+        nft.owner = to_address.clone();
+        Storage::save_nft(&env, &nft);
+        Storage::add_nft_to_owner(&env, &to_address, nft_id);
+
+        env.events().publish(
+            (Symbol::new(&env, "NftTransferred"), nft_id),
+            NftTransferredEvent {
+                nft_id,
+                from: from_address,
+                to: to_address,
+            },
+        );
+
+        Ok(())
     }
 
     /// Returns the owner of an NFT.
@@ -929,3 +1055,7 @@ impl NftReward {
 
         env.events()
             .publish((Symbol::new(&env, "NftBurned"), nft_id), (nft_id, owner));
+
+        Ok(())
+    }
+}

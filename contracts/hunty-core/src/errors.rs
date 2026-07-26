@@ -44,47 +44,118 @@ pub enum HuntErrorCode {
     ContractPaused = 37,
     InvalidMaxAttempts = 38,
     InvalidWeight = 39,
+    HintNotAvailable = 40,
+    HintAlreadyUnlocked = 41,
+    InsufficientScore = 42,
+    TooManyCategories = 43,
+    InvalidCategory = 44,
+    InvalidDifficulty = 45,
 }
 
 #[derive(Debug)]
 pub enum HuntError {
-    HuntNotFound { hunt_id: u64 },
-    ClueNotFound { hunt_id: u64 },
+    HuntNotFound {
+        hunt_id: u64,
+    },
+    ClueNotFound {
+        hunt_id: u64,
+    },
     InvalidHuntStatus,
-    PlayerNotRegistered { hunt_id: u64 },
-    ClueAlreadyCompleted { hunt_id: u64 },
+    PlayerNotRegistered {
+        hunt_id: u64,
+    },
+    ClueAlreadyCompleted {
+        hunt_id: u64,
+    },
     InvalidAnswer,
-    HuntNotActive { hunt_id: u64 },
+    HuntNotActive {
+        hunt_id: u64,
+    },
     Unauthorized,
-    InsufficientRewardPool { required: i128, available: i128 },
-    DuplicateRegistration { hunt_id: u64 },
-    InvalidTitle { reason: String },
-    InvalidDescription { reason: String },
+    InsufficientRewardPool {
+        required: i128,
+        available: i128,
+    },
+    DuplicateRegistration {
+        hunt_id: u64,
+    },
+    InvalidTitle {
+        reason: String,
+    },
+    InvalidDescription {
+        reason: String,
+    },
     InvalidAddress,
-    TooManyClues { hunt_id: u64, limit: u32 },
+    TooManyClues {
+        hunt_id: u64,
+        limit: u32,
+    },
     InvalidQuestion,
-    HuntNotCompleted { hunt_id: u64 },
-    RewardAlreadyClaimed { hunt_id: u64 },
-    RewardDistributionFailed { hunt_id: u64 },
-    NoRewardsConfigured { hunt_id: u64 },
-    DuplicateSubmission { hunt_id: u64, clue_id: u32 },
-    SubmissionExpired { submitted_at: u64, current_time: u64 },
-    BannedPlayer { hunt_id: u64, player: soroban_sdk::Address },
-    NoRequiredClues { hunt_id: u64 },
-    RateLimitExceeded { cooldown_remaining: u64 },
+    HuntNotCompleted {
+        hunt_id: u64,
+    },
+    RewardAlreadyClaimed {
+        hunt_id: u64,
+    },
+    RewardDistributionFailed {
+        hunt_id: u64,
+    },
+    NoRewardsConfigured {
+        hunt_id: u64,
+    },
+    DuplicateSubmission {
+        hunt_id: u64,
+        clue_id: u32,
+    },
+    SubmissionExpired {
+        submitted_at: u64,
+        current_time: u64,
+    },
+    BannedPlayer {
+        hunt_id: u64,
+        player: soroban_sdk::Address,
+    },
+    NoRequiredClues {
+        hunt_id: u64,
+    },
+    RateLimitExceeded {
+        cooldown_remaining: u64,
+    },
     ScoreOverflow,
     RegistrationsPaused,
     AnswersPaused,
     RewardsPaused,
-    HuntEndTimeInPast { end_time: u64, current_time: u64 },
+    HuntEndTimeInPast {
+        end_time: u64,
+        current_time: u64,
+    },
     NoPendingAdmin,
-    PendingAdminMismatch { expected: soroban_sdk::Address, actual: soroban_sdk::Address },
-    AdminAlreadyProposed { pending: soroban_sdk::Address },
-    InvalidRarity { value: u32 },
+    PendingAdminMismatch {
+        expected: soroban_sdk::Address,
+        actual: soroban_sdk::Address,
+    },
+    AdminAlreadyProposed {
+        pending: soroban_sdk::Address,
+    },
+    InvalidRarity {
+        value: u32,
+    },
     InvalidTimeBonusConfig,
     AddressBlacklisted,
     ContractPaused,
-    InvalidWeight { value: u32 },
+    InvalidWeight {
+        value: u32,
+    },
+    HintNotAvailable,
+    HintAlreadyUnlocked,
+    InsufficientScore,
+    TooManyCategories {
+        limit: u32,
+    },
+    InvalidCategory,
+    InvalidDifficulty {
+        value: u32,
+    },
 }
 
 impl fmt::Display for HuntError {
@@ -178,7 +249,11 @@ impl fmt::Display for HuntError {
                 write!(f, "Hunt {} has no required clues; at least one required clue must exist before activation", hunt_id)
             }
             HuntError::RateLimitExceeded { cooldown_remaining } => {
-                write!(f, "Rate limit exceeded. Try again in {} seconds", cooldown_remaining)
+                write!(
+                    f,
+                    "Rate limit exceeded. Try again in {} seconds",
+                    cooldown_remaining
+                )
             }
             HuntError::ScoreOverflow => {
                 write!(f, "Score calculation overflow")
@@ -192,8 +267,15 @@ impl fmt::Display for HuntError {
             HuntError::RewardsPaused => {
                 write!(f, "Reward claims are currently paused")
             }
-            HuntError::HuntEndTimeInPast { end_time, current_time } => {
-                write!(f, "Hunt end_time {} is in the past (current time: {})", end_time, current_time)
+            HuntError::HuntEndTimeInPast {
+                end_time,
+                current_time,
+            } => {
+                write!(
+                    f,
+                    "Hunt end_time {} is in the past (current time: {})",
+                    end_time, current_time
+                )
             }
             HuntError::NoPendingAdmin => {
                 write!(f, "No pending admin rotation to accept")
@@ -222,6 +304,24 @@ impl fmt::Display for HuntError {
             }
             HuntError::InvalidWeight { value } => {
                 write!(f, "Invalid weight value: {} (must be > 0)", value)
+            }
+            HuntError::HintNotAvailable => {
+                write!(f, "Hint not available for clue")
+            }
+            HuntError::HintAlreadyUnlocked => {
+                write!(f, "Hint already unlocked for clue")
+            }
+            HuntError::InsufficientScore => {
+                write!(f, "Insufficient score to unlock hint")
+            }
+            HuntError::TooManyCategories { limit } => {
+                write!(f, "Too many hunt categories (limit {})", limit)
+            }
+            HuntError::InvalidCategory => {
+                write!(f, "Invalid hunt category")
+            }
+            HuntError::InvalidDifficulty { value } => {
+                write!(f, "Invalid difficulty value: {}", value)
             }
         }
     }
@@ -267,6 +367,12 @@ impl From<HuntError> for HuntErrorCode {
             HuntError::AddressBlacklisted => HuntErrorCode::AddressBlacklisted,
             HuntError::ContractPaused => HuntErrorCode::ContractPaused,
             HuntError::InvalidWeight { .. } => HuntErrorCode::InvalidWeight,
+            HuntError::HintNotAvailable => HuntErrorCode::HintNotAvailable,
+            HuntError::HintAlreadyUnlocked => HuntErrorCode::HintAlreadyUnlocked,
+            HuntError::InsufficientScore => HuntErrorCode::InsufficientScore,
+            HuntError::TooManyCategories { .. } => HuntErrorCode::TooManyCategories,
+            HuntError::InvalidCategory => HuntErrorCode::InvalidCategory,
+            HuntError::InvalidDifficulty { .. } => HuntErrorCode::InvalidDifficulty,
         }
     }
 }

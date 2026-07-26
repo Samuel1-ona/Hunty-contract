@@ -1,5 +1,5 @@
-use crate::{NftData, NftCore, NftMetadata};
-use soroban_sdk::{symbol_short, Address, Env, Vec, Symbol};
+use crate::{CollectionMetadata, NftData, NftCore, NftMetadata};
+use soroban_sdk::{symbol_short, Address, Env, String, Vec, Symbol};
 
 /// Storage layer for NFTs.
 pub struct Storage;
@@ -13,6 +13,7 @@ impl Storage {
     const OWNER_NFT_COUNT_KEY: soroban_sdk::Symbol = symbol_short!("ONFC");
     const MAX_SUPPLY_KEY: soroban_sdk::Symbol = symbol_short!("MAXS");
     const INITIALIZED_KEY: soroban_sdk::Symbol = symbol_short!("INIT");
+    const COLLECTION_METADATA_KEY: soroban_sdk::Symbol = symbol_short!("COLL");
     const ADMIN_KEY: soroban_sdk::Symbol = symbol_short!("ADMIN");
     const MINTER_KEY: soroban_sdk::Symbol = symbol_short!("MNTR");
     const REWARD_MGR_KEY: soroban_sdk::Symbol = symbol_short!("RWDMGR");
@@ -297,9 +298,30 @@ impl Storage {
         env.storage()
             .persistent()
             .set(&Self::MAX_SUPPLY_KEY, &max_supply);
+    }
+
+    /// Marks the contract as initialized. Called once during `initialize()`.
+    pub fn mark_initialized(env: &Env) {
         env.storage()
             .persistent()
             .set(&Self::INITIALIZED_KEY, &true);
+    }
+
+    pub fn save_collection_metadata(env: &Env, metadata: &CollectionMetadata) {
+        env.storage()
+            .instance()
+            .set(&Self::COLLECTION_METADATA_KEY, metadata);
+    }
+
+    pub fn get_collection_metadata(env: &Env) -> Option<CollectionMetadata> {
+        env.storage().instance().get(&Self::COLLECTION_METADATA_KEY)
+    }
+
+    pub fn update_collection_metadata_total_supply(env: &Env, total_supply: u64) {
+        if let Some(mut metadata) = Self::get_collection_metadata(env) {
+            metadata.total_supply = total_supply;
+            Self::save_collection_metadata(env, &metadata);
+        }
     }
 
     pub fn get_max_supply(env: &Env) -> Option<u64> {
@@ -340,6 +362,41 @@ impl Storage {
             env.storage()
                 .persistent()
                 .set(&Self::TOTAL_OWNERS_KEY, &(current_total + 1));
+        }
+    }
+
+    pub fn remove_nft_from_owner(env: &Env, owner: &Address, nft_id: u64) {
+        let count_key = Self::owner_nft_count_key(owner);
+        let count: u32 = env.storage().persistent().get(&count_key).unwrap_or(0);
+        let exist_key = Self::owner_nft_exist_key(owner, nft_id);
+        if !env.storage().persistent().has(&exist_key) {
+            return;
+        }
+
+        let mut found = false;
+        for i in 0..count {
+            let entry_key = Self::owner_nft_entry_key(owner, i);
+            if let Some(stored_id) = env.storage().persistent().get::<_, u64>(&entry_key) {
+                if stored_id == nft_id {
+                    let last_idx = count - 1;
+                    if i != last_idx {
+                        let last_key = Self::owner_nft_entry_key(owner, last_idx);
+                        if let Some(last_id) = env.storage().persistent().get::<_, u64>(&last_key) {
+                            env.storage().persistent().set(&entry_key, &last_id);
+                        }
+                        env.storage().persistent().remove(&last_key);
+                    } else {
+                        env.storage().persistent().remove(&entry_key);
+                    }
+                    found = true;
+                    break;
+                }
+            }
+        }
+
+        if found {
+            env.storage().persistent().set(&count_key, &(count - 1));
+            env.storage().persistent().remove(&exist_key);
         }
     }
 
