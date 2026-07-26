@@ -163,6 +163,8 @@ impl Storage {
             _ => TtlPolicy::Default,
         };
         extend_ttl(env, &key, policy);
+        // Keep the instance-storage cache coherent with persistent state.
+        Self::save_hunt_cache(env, hunt);
     }
 
     /// Retrieves a hunt by ID, returning an Option.
@@ -453,7 +455,8 @@ impl Storage {
     /// * `env` - The Soroban environment
     /// * `progress` - The PlayerProgress struct to store
     pub fn save_player_progress(env: &Env, progress: &PlayerProgress) {
-        // Store the progress with composite key (hunt_id + player address)
+        // Store the progress with composite key (hunt_id + player address),
+        // in compact form (key fields player/hunt_id are not duplicated).
         let key = Self::progress_key(progress.hunt_id, &progress.player);
         env.storage().persistent().set(&key, &progress.to_stored());
         let policy = if progress.is_completed || progress.reward_claimed {
@@ -759,6 +762,105 @@ impl Storage {
             PERSISTENT_TTL_THRESHOLD,
             PERSISTENT_TTL_EXTEND_TO,
         );
+    }
+
+    /// Returns the number of registered players for a hunt.
+    pub fn get_player_count(env: &Env, hunt_id: u64) -> u32 {
+        let count_key = Self::player_count_key(hunt_id);
+        env.storage().persistent().get(&count_key).unwrap_or(0)
+    }
+
+    // ========== Global Player Statistics ==========
+
+    fn player_completed_count_key(player: &Address) -> (soroban_sdk::Symbol, Address) {
+        (Self::PLAYER_HUNTS_KEY, player.clone())
+    }
+
+    /// Returns the total number of hunts this player has completed across all hunts.
+    pub fn get_player_completed_hunt_count(env: &Env, player: &Address) -> u32 {
+        let key = Self::player_completed_count_key(player);
+        env.storage().persistent().get(&key).unwrap_or(0)
+    }
+
+    /// Increments the player's global completed-hunt counter.
+    pub fn increment_player_completed_hunt_count(env: &Env, player: &Address) {
+        let key = Self::player_completed_count_key(player);
+        let count: u32 = env.storage().persistent().get(&key).unwrap_or(0);
+        env.storage().persistent().set(&key, &count.saturating_add(1));
+        extend_ttl(env, &key, TtlPolicy::Default);
+    }
+
+    // ========== Team Storage Functions ==========
+
+    fn team_key(hunt_id: u64, team_id: u32) -> (soroban_sdk::Symbol, u64, u32) {
+        (Self::TEAM_KEY, hunt_id, team_id)
+    }
+
+    fn team_count_key(hunt_id: u64) -> (soroban_sdk::Symbol, u64) {
+        (Self::TEAM_COUNT_KEY, hunt_id)
+    }
+
+    fn player_team_key(hunt_id: u64, player: &Address) -> (soroban_sdk::Symbol, u64, Address) {
+        (Self::PLAYER_TEAM_KEY, hunt_id, player.clone())
+    }
+
+    fn team_progress_key(hunt_id: u64, team_id: u32) -> (soroban_sdk::Symbol, u64, u32) {
+        (Self::TEAM_PROGRESS_KEY, hunt_id, team_id)
+    }
+
+    /// Increments and returns the next team ID for a hunt (sequential from 1).
+    pub fn next_team_id(env: &Env, hunt_id: u64) -> u32 {
+        let key = Self::team_count_key(hunt_id);
+        let current: u32 = env.storage().persistent().get(&key).unwrap_or(0);
+        let next = current + 1;
+        env.storage().persistent().set(&key, &next);
+        extend_ttl(env, &key, TtlPolicy::Active);
+        next
+    }
+
+    /// Returns the number of teams created for a hunt.
+    pub fn get_team_count(env: &Env, hunt_id: u64) -> u32 {
+        let key = Self::team_count_key(hunt_id);
+        env.storage().persistent().get(&key).unwrap_or(0)
+    }
+
+    pub fn save_team(env: &Env, team: &Team) {
+        let key = Self::team_key(team.hunt_id, team.team_id);
+        env.storage().persistent().set(&key, team);
+        extend_ttl(env, &key, TtlPolicy::Active);
+    }
+
+    pub fn get_team(env: &Env, hunt_id: u64, team_id: u32) -> Option<Team> {
+        let key = Self::team_key(hunt_id, team_id);
+        env.storage().persistent().get(&key)
+    }
+
+    /// Records which team a player belongs to within a hunt.
+    pub fn set_player_team(env: &Env, hunt_id: u64, player: &Address, team_id: u32) {
+        let key = Self::player_team_key(hunt_id, player);
+        env.storage().persistent().set(&key, &team_id);
+        extend_ttl(env, &key, TtlPolicy::Active);
+    }
+
+    /// Returns the team ID a player belongs to within a hunt, if any.
+    pub fn get_player_team(env: &Env, hunt_id: u64, player: &Address) -> Option<u32> {
+        let key = Self::player_team_key(hunt_id, player);
+        env.storage().persistent().get(&key)
+    }
+
+    pub fn save_team_progress(env: &Env, hunt_id: u64, team_id: u32, progress: &TeamProgress) {
+        let key = Self::team_progress_key(hunt_id, team_id);
+        env.storage().persistent().set(&key, progress);
+        extend_ttl(env, &key, TtlPolicy::Active);
+    }
+
+    /// Returns team progress, defaulting to empty when never written.
+    pub fn get_team_progress(env: &Env, hunt_id: u64, team_id: u32) -> TeamProgress {
+        let key = Self::team_progress_key(hunt_id, team_id);
+        env.storage().persistent().get(&key).unwrap_or_else(|| TeamProgress {
+            completed_clues: Vec::new(env),
+            total_score: 0,
+        })
     }
 
     pub fn get_player_addresses_for_hunt(env: &Env, hunt_id: u64) -> Vec<Address> {
