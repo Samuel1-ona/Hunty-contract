@@ -1,19 +1,19 @@
 #![no_std]
 use crate::errors::{HuntError, HuntErrorCode};
-use crate::storage::Storage;
+use crate::storage::{HuntCache, Storage};
 use crate::types::{
     AnswerIncorrectEvent, Clue, ClueAddedEvent, ClueAliasesAddedEvent, ClueCompletedEvent,
     ClueInfo, CreatorBlacklistedEvent, CreatorRemovedFromBlacklistEvent, Hunt, HuntActivatedEvent,
     HuntArchivedEvent, HuntCancelledEvent, HuntCompletedEvent, HuntCreatedEvent, HuntDeactivatedEvent,
-    HuntDescriptionUpdatedEvent, HuntReactivatedEvent, HuntStatusChangedEvent, HuntStatistics, HuntStatus, LeaderboardEntry, LeaderboardIndexEntry, PlayerProgress,
-    PlayerRegisteredEvent, RateLimitStatus, RewardClaimFailedEvent, RewardClaimedEvent,
-    RewardConfig, RewardManagerSetEvent, TimeBonusConfig,
+    HuntDescriptionUpdatedEvent, HuntReactivatedEvent, HuntStatusChangedEvent, HuntStatistics, HuntStatus, LeaderboardEntry, LeaderboardIndexEntry, PartialScoreClaimedEvent, PlayerProgress,
+    PlayerRegisteredEvent, RegistrationDeadlineSetEvent, RewardClaimedEvent,
+    RewardConfig, RewardManagerSetEvent, Team, TeamCreatedEvent, TeamLeaderboardEntry,
+    TeamMemberJoinedEvent, TeamProgress, TimeBonusConfig,
 };
 use reward_interface::RewardErrorCode;
 use soroban_sdk::{
-    contract, contractimpl, Address, Bytes, BytesN, Env, IntoVal, String, Symbol, Val, Vec, TryFromVal,
+    contract, contractimpl, Address, Bytes, BytesN, Env, IntoVal, String, Symbol, Val, Vec,
 };
-use soroban_sdk::xdr::ToXdr; 
 
 const MAX_TITLE_BYTES: u32 = 200;
 const MAX_DESCRIPTION_BYTES: u32 = 2000;
@@ -32,6 +32,8 @@ const DEFAULT_PAGE_SIZE: u32 = 20;
 const ANSWER_SUBMISSION_WINDOW_SECS: u64 = 300;
 /// Small forward-skew allowance so near-simultaneous signing and inclusion does not fail.
 const ANSWER_SUBMISSION_FUTURE_SKEW_SECS: u64 = 30;
+/// Maximum number of members allowed in a team.
+const MAX_TEAM_SIZE: u32 = 10;
 
 #[contract]
 pub struct HuntyCore;
@@ -87,6 +89,82 @@ impl HuntyCore {
             return Err(HuntErrorCode::ContractPaused);
         }
         Ok(())
+    }
+
+    /// Returns the instance-storage HuntCache, loading (and caching) the full
+    /// Hunt from persistent storage on a cache miss.
+    fn get_hunt_cache_or_load(env: &Env, hunt_id: u64) -> Result<HuntCache, HuntErrorCode> {
+        if let Some(cache) = Storage::get_hunt_cache(env, hunt_id) {
+            return Ok(cache);
+        }
+        let hunt = Storage::get_hunt(env, hunt_id).ok_or(HuntErrorCode::HuntNotFound)?;
+        Storage::save_hunt_cache(env, &hunt);
+        Ok(HuntCache::from_hunt(&hunt))
+    }
+
+    /// Validates via the cache that the hunt is Active and not past end_time.
+    fn validate_hunt_active_cached(env: &Env, hunt_id: u64) -> Result<HuntCache, HuntErrorCode> {
+        let cache = Self::get_hunt_cache_or_load(env, hunt_id)?;
+        let current_time = env.ledger().timestamp();
+        if cache.status != HuntStatus::Active
+            || (cache.end_time != 0 && current_time >= cache.end_time)
+        {
+            return Err(HuntErrorCode::HuntNotActive);
+        }
+        Ok(cache)
+    }
+
+    fn emit_hunt_status_changed(
+        env: &Env,
+        hunt_id: u64,
+        old_status: HuntStatus,
+        new_status: HuntStatus,
+        changed_at: u64,
+    ) {
+        let event = HuntStatusChangedEvent {
+            hunt_id,
+            old_status,
+            new_status,
+            changed_at,
+        };
+        env.events()
+            .publish((Symbol::new(env, "HuntStatusChanged"), hunt_id), event);
+    }
+
+    /// Returns true when the hunt is in team mode, the player belongs to a team,
+    /// and that team has already completed the clue.
+    fn team_has_completed_clue(env: &Env, hunt: &Hunt, player: &Address, clue_id: u32) -> bool {
+        if !hunt.team_mode {
+            return false;
+        }
+        match Storage::get_player_team(env, hunt.hunt_id, player) {
+            Some(team_id) => Storage::get_team_progress(env, hunt.hunt_id, team_id)
+                .completed_clues
+                .first_index_of(clue_id)
+                .is_some(),
+            None => false,
+        }
+    }
+
+    /// Records a completed clue and its score against the player's team (if any).
+    fn record_team_clue_completion(
+        env: &Env,
+        hunt: &Hunt,
+        player: &Address,
+        clue_id: u32,
+        score: u32,
+    ) {
+        if !hunt.team_mode {
+            return;
+        }
+        if let Some(team_id) = Storage::get_player_team(env, hunt.hunt_id, player) {
+            let mut team_progress = Storage::get_team_progress(env, hunt.hunt_id, team_id);
+            if team_progress.completed_clues.first_index_of(clue_id).is_none() {
+                team_progress.completed_clues.push_back(clue_id);
+                team_progress.total_score = team_progress.total_score.saturating_add(score);
+                Storage::save_team_progress(env, hunt.hunt_id, team_id, &team_progress);
+            }
+        }
     }
 
 
@@ -176,6 +254,9 @@ impl HuntyCore {
             max_submissions_per_minute,
             max_attempts_per_clue: 5,
             start_multiplier_bps: start_multiplier_bps.unwrap_or(20000),
+            registration_deadline: 0,
+            allow_partial_scoring: false,
+            team_mode: false,
         };
 
         // Store the hunt
@@ -682,7 +763,8 @@ impl HuntyCore {
                 args,
             )
             .ok()
-            .and_then(|r| r.ok());
+            .and_then(|r| r.ok())
+            .flatten();
 
         let tiers = match pool_config.as_ref() {
             Some(cfg) => &cfg.time_based_tiers,
@@ -857,10 +939,6 @@ impl HuntyCore {
 
     pub fn cancel_hunt(env: Env, hunt_id: u64, caller: Address) -> Result<(), HuntErrorCode> {
         caller.require_auth();
-
-        // Load hunt
-        let mut hunt = Storage::get_hunt(&env, hunt_id).ok_or(HuntErrorCode::HuntNotFound)?;
-        let old_status = hunt.status.clone();
 
         // Fast validation using instance cache
         let cache = Self::get_hunt_cache_or_load(&env, hunt_id)?;
@@ -1105,15 +1183,6 @@ impl HuntyCore {
             return Err(HuntErrorCode::RewardAlreadyClaimed);
         }
 
-        // Example migration logic - extend this for future schema changes
-        let mut steps = 0u32;
-
-        if current < 2 && target_version >= 2 {
-            // Example: Migrate old player progress structure
-            Self::migrate_v1_to_v2(&env, dry_run)?;
-            steps += 1;
-        }
-
         // Resolve the XLM reward amount
         // ===================== TIER-BASED AMOUNT RESOLUTION =====================
         // If the reward pool has a tier schedule configured, the appropriate
@@ -1249,8 +1318,9 @@ impl HuntyCore {
         // Cache read: cheaper than loading full Hunt from persistent storage
         let _cache = Self::validate_hunt_active_cached(&env, hunt_id)?;
 
-        if Storage::get_player_progress(&env, hunt_id, &player).is_some() {
-            return Err(HuntErrorCode::DuplicateRegistration);
+        // Enforce the registration deadline if the creator configured one
+        if hunt.registration_deadline != 0 && current_time >= hunt.registration_deadline {
+            return Err(HuntErrorCode::RegistrationClosed);
         }
 
         if Storage::get_player_progress(&env, hunt_id, &player).is_some() {
@@ -1377,11 +1447,7 @@ impl HuntyCore {
         let current_time = env.ledger().timestamp();
 
         // Fast validation using instance cache (cheaper than persistent read)
-        let cache = Self::validate_hunt_active_cached(&env, hunt_id)?;
-
-        if Storage::is_banned(&env, hunt_id, &player) {
-            return Err(HuntErrorCode::BannedPlayer);
-        }
+        let _cache = Self::validate_hunt_active_cached(&env, hunt_id)?;
 
         if Storage::is_banned(&env, hunt_id, &player) {
             return Err(HuntErrorCode::BannedPlayer);
@@ -1416,6 +1482,11 @@ impl HuntyCore {
         let clue = Storage::get_clue(&env, hunt_id, clue_id).ok_or(HuntErrorCode::ClueNotFound)?;
 
         if progress.has_completed_clue(clue_id) {
+            return Err(HuntErrorCode::ClueAlreadyCompleted);
+        }
+
+        // In team mode, a clue solved by any teammate counts as completed for the team
+        if Self::team_has_completed_clue(&env, &hunt, &player, clue_id) {
             return Err(HuntErrorCode::ClueAlreadyCompleted);
         }
 
@@ -1467,6 +1538,7 @@ impl HuntyCore {
 
         let score = Self::calculate_score(&hunt, &clue, progress.started_at, current_time);
         progress.complete_clue(&env, clue_id, score)?;
+        Self::record_team_clue_completion(&env, &hunt, &player, clue_id, score);
 
         if hunt.max_submissions_per_minute > 0 {
             progress.recent_submissions = Vec::new(&env);
@@ -1486,6 +1558,7 @@ impl HuntyCore {
             hunt_mut.completed_count += 1;
             let rank = hunt_mut.completed_count;
             Storage::save_hunt(&env, &hunt_mut);
+            Storage::increment_player_completed_hunt_count(&env, &player);
             let hunt_completed_event = HuntCompletedEvent {
                 hunt_id,
                 player: player.clone(),
@@ -1580,6 +1653,11 @@ impl HuntyCore {
             return Err(HuntErrorCode::ClueAlreadyCompleted);
         }
 
+        // In team mode, a clue solved by any teammate counts as completed for the team
+        if Self::team_has_completed_clue(&env, &hunt, &player, clue_id) {
+            return Err(HuntErrorCode::ClueAlreadyCompleted);
+        }
+
         if hunt.max_submissions_per_minute > 0 {
             let mut updated_submissions = Vec::new(&env);
             for i in 0..progress.recent_submissions.len() {
@@ -1620,6 +1698,7 @@ impl HuntyCore {
 
         let score = Self::calculate_score(&hunt, &clue, progress.started_at, current_time);
         progress.complete_clue(&env, clue_id, score)?;
+        Self::record_team_clue_completion(&env, &hunt, &player, clue_id, score);
 
         if hunt.max_submissions_per_minute > 0 {
             progress.recent_submissions = Vec::new(&env);
@@ -1637,6 +1716,7 @@ impl HuntyCore {
             hunt_mut.completed_count += 1;
             let rank = hunt_mut.completed_count;
             Storage::save_hunt(&env, &hunt_mut);
+            Storage::increment_player_completed_hunt_count(&env, &player);
             let hunt_completed_event = HuntCompletedEvent {
                 hunt_id,
                 player: player.clone(),
@@ -1745,16 +1825,16 @@ impl HuntyCore {
         hunt_id: u64,
         progress: &PlayerProgress,
     ) -> bool {
-        // Get all clues for the hunt
-        let clue_count = Storage::get_clue_counter(env, hunt_id);
-        let all_clues = Storage::list_clues_for_hunt(env, hunt_id, 0, clue_count);
+        let Some(hunt) = Storage::get_hunt(env, hunt_id) else {
+            return false;
+        };
 
         if hunt.required_clues == 0 {
             return true;
         }
 
         // Quick early exit: player hasn't completed enough clues total
-        if progress.completed_clues.len() < hunt.required_clues as u32 {
+        if progress.completed_clues.len() < hunt.required_clues {
             return false;
         }
 
@@ -2033,6 +2113,341 @@ impl HuntyCore {
             total_score_sum,
             average_score,
         })
+    }
+
+    // -------------------------------------------------------------------------
+    // Registration Deadline (issue #328)
+    // -------------------------------------------------------------------------
+
+    /// Sets (or clears with 0) the registration cutoff for a hunt.
+    /// Only the creator may set it, while the hunt is in Draft or Active status.
+    /// A non-zero deadline must be in the future and not after end_time (if set).
+    pub fn set_registration_deadline(
+        env: Env,
+        hunt_id: u64,
+        caller: Address,
+        registration_deadline: u64,
+    ) -> Result<(), HuntErrorCode> {
+        caller.require_auth();
+
+        let mut hunt = Storage::get_hunt(&env, hunt_id).ok_or(HuntErrorCode::HuntNotFound)?;
+        if hunt.creator != caller {
+            return Err(HuntErrorCode::Unauthorized);
+        }
+        if hunt.status != HuntStatus::Draft && hunt.status != HuntStatus::Active {
+            return Err(HuntErrorCode::InvalidHuntStatus);
+        }
+
+        if registration_deadline != 0 {
+            let current_time = env.ledger().timestamp();
+            if registration_deadline <= current_time {
+                return Err(HuntErrorCode::InvalidRegistrationDeadline);
+            }
+            if hunt.end_time != 0 && registration_deadline > hunt.end_time {
+                return Err(HuntErrorCode::InvalidRegistrationDeadline);
+            }
+        }
+
+        hunt.registration_deadline = registration_deadline;
+        Storage::save_hunt(&env, &hunt);
+
+        let event = RegistrationDeadlineSetEvent {
+            hunt_id,
+            registration_deadline,
+        };
+        env.events()
+            .publish((Symbol::new(&env, "RegistrationDeadlineSet"), hunt_id), event);
+
+        Ok(())
+    }
+
+    // -------------------------------------------------------------------------
+    // Completion Percentage Tracking (issue #332)
+    // -------------------------------------------------------------------------
+
+    /// Returns the percentage (0-100) of registered players who completed the hunt.
+    /// Uses the O(1) `completed_count` maintained on the Hunt struct.
+    pub fn get_hunt_completion_rate(env: Env, hunt_id: u64) -> Result<u32, HuntErrorCode> {
+        let hunt = Storage::get_hunt(&env, hunt_id).ok_or(HuntErrorCode::HuntNotFound)?;
+        let total_players = Storage::get_player_count(&env, hunt_id);
+        if total_players == 0 {
+            return Ok(0);
+        }
+        Ok(hunt.completed_count.saturating_mul(100) / total_players)
+    }
+
+    // -------------------------------------------------------------------------
+    // Partial Scoring (issue #333)
+    // -------------------------------------------------------------------------
+
+    /// Enables or disables partial score claims for a draft hunt.
+    /// Only the creator may change this, before the hunt is activated.
+    pub fn set_allow_partial_scoring(
+        env: Env,
+        hunt_id: u64,
+        caller: Address,
+        allow: bool,
+    ) -> Result<(), HuntErrorCode> {
+        caller.require_auth();
+
+        let mut hunt = Storage::get_hunt(&env, hunt_id).ok_or(HuntErrorCode::HuntNotFound)?;
+        if hunt.creator != caller {
+            return Err(HuntErrorCode::Unauthorized);
+        }
+        if hunt.status != HuntStatus::Draft {
+            return Err(HuntErrorCode::InvalidHuntStatus);
+        }
+
+        hunt.allow_partial_scoring = allow;
+        Storage::save_hunt(&env, &hunt);
+        Ok(())
+    }
+
+    /// Claims the partial score accumulated from completed clues after the hunt
+    /// has ended, for players who did not finish all required clues.
+    ///
+    /// Requirements: `allow_partial_scoring` is enabled, the hunt has a non-zero
+    /// `end_time` that has passed, the player is registered, has not fully
+    /// completed the hunt, and has not already claimed.
+    ///
+    /// Returns the claimed partial score.
+    pub fn claim_partial_score(
+        env: Env,
+        hunt_id: u64,
+        player: Address,
+    ) -> Result<u32, HuntErrorCode> {
+        player.require_auth();
+
+        if Storage::is_pause_rewards(&env) {
+            return Err(HuntErrorCode::RewardsPaused);
+        }
+
+        let hunt = Storage::get_hunt(&env, hunt_id).ok_or(HuntErrorCode::HuntNotFound)?;
+        if !hunt.allow_partial_scoring {
+            return Err(HuntErrorCode::PartialScoringNotAllowed);
+        }
+
+        let current_time = env.ledger().timestamp();
+        if hunt.end_time == 0 || current_time < hunt.end_time {
+            return Err(HuntErrorCode::HuntNotEnded);
+        }
+
+        let mut progress = Storage::get_player_progress(&env, hunt_id, &player)
+            .ok_or(HuntErrorCode::PlayerNotRegistered)?;
+        if progress.is_completed {
+            // Fully-completed players claim through complete_hunt instead.
+            return Err(HuntErrorCode::PlayerAlreadyCompleted);
+        }
+        if progress.reward_claimed {
+            return Err(HuntErrorCode::RewardAlreadyClaimed);
+        }
+
+        progress.reward_claimed = true;
+        Storage::save_player_progress(&env, &progress);
+
+        let partial_score = progress.total_score;
+        let event = PartialScoreClaimedEvent {
+            hunt_id,
+            player: player.clone(),
+            partial_score,
+            clues_completed: progress.completed_clues.len(),
+        };
+        env.events()
+            .publish((Symbol::new(&env, "PartialScoreClaimed"), hunt_id), event);
+
+        Ok(partial_score)
+    }
+
+    // -------------------------------------------------------------------------
+    // Team-Based Hunts (issue #334)
+    // -------------------------------------------------------------------------
+
+    /// Enables or disables team mode for a draft hunt.
+    /// Only the creator may change this, before the hunt is activated.
+    pub fn set_team_mode(
+        env: Env,
+        hunt_id: u64,
+        caller: Address,
+        enabled: bool,
+    ) -> Result<(), HuntErrorCode> {
+        caller.require_auth();
+
+        let mut hunt = Storage::get_hunt(&env, hunt_id).ok_or(HuntErrorCode::HuntNotFound)?;
+        if hunt.creator != caller {
+            return Err(HuntErrorCode::Unauthorized);
+        }
+        if hunt.status != HuntStatus::Draft {
+            return Err(HuntErrorCode::InvalidHuntStatus);
+        }
+
+        hunt.team_mode = enabled;
+        Storage::save_hunt(&env, &hunt);
+        Ok(())
+    }
+
+    /// Creates a new team for a team-mode hunt. The creating player becomes the
+    /// team leader and first member. Returns the new team ID.
+    pub fn create_team(
+        env: Env,
+        hunt_id: u64,
+        player: Address,
+        name: String,
+    ) -> Result<u32, HuntErrorCode> {
+        player.require_auth();
+
+        let hunt = Storage::get_hunt(&env, hunt_id).ok_or(HuntErrorCode::HuntNotFound)?;
+        if !hunt.team_mode {
+            return Err(HuntErrorCode::TeamModeNotEnabled);
+        }
+        Storage::get_player_progress(&env, hunt_id, &player)
+            .ok_or(HuntErrorCode::PlayerNotRegistered)?;
+        if Storage::get_player_team(&env, hunt_id, &player).is_some() {
+            return Err(HuntErrorCode::AlreadyInTeam);
+        }
+
+        let name =
+            crate::sanitization::StringSanitizer::sanitize(&env, &name, MAX_TITLE_BYTES, false)
+                .map_err(|_| HuntErrorCode::InvalidTeamName)?;
+
+        let team_id = Storage::next_team_id(&env, hunt_id);
+        let mut members = Vec::new(&env);
+        members.push_back(player.clone());
+        let team = Team {
+            team_id,
+            hunt_id,
+            name: name.clone(),
+            leader: player.clone(),
+            members,
+        };
+        Storage::save_team(&env, &team);
+        Storage::set_player_team(&env, hunt_id, &player, team_id);
+
+        let event = TeamCreatedEvent {
+            hunt_id,
+            team_id,
+            leader: player,
+            name,
+        };
+        env.events()
+            .publish((Symbol::new(&env, "TeamCreated"), hunt_id, team_id), event);
+
+        Ok(team_id)
+    }
+
+    /// Joins an existing team in a team-mode hunt.
+    pub fn join_team(
+        env: Env,
+        hunt_id: u64,
+        team_id: u32,
+        player: Address,
+    ) -> Result<(), HuntErrorCode> {
+        player.require_auth();
+
+        let hunt = Storage::get_hunt(&env, hunt_id).ok_or(HuntErrorCode::HuntNotFound)?;
+        if !hunt.team_mode {
+            return Err(HuntErrorCode::TeamModeNotEnabled);
+        }
+        Storage::get_player_progress(&env, hunt_id, &player)
+            .ok_or(HuntErrorCode::PlayerNotRegistered)?;
+        if Storage::get_player_team(&env, hunt_id, &player).is_some() {
+            return Err(HuntErrorCode::AlreadyInTeam);
+        }
+
+        let mut team =
+            Storage::get_team(&env, hunt_id, team_id).ok_or(HuntErrorCode::TeamNotFound)?;
+        if team.members.len() >= MAX_TEAM_SIZE {
+            return Err(HuntErrorCode::TeamFull);
+        }
+
+        team.members.push_back(player.clone());
+        Storage::save_team(&env, &team);
+        Storage::set_player_team(&env, hunt_id, &player, team_id);
+
+        let event = TeamMemberJoinedEvent {
+            hunt_id,
+            team_id,
+            player,
+        };
+        env.events()
+            .publish((Symbol::new(&env, "TeamMemberJoined"), hunt_id, team_id), event);
+
+        Ok(())
+    }
+
+    /// Returns a team by ID.
+    pub fn get_team(env: Env, hunt_id: u64, team_id: u32) -> Result<Team, HuntErrorCode> {
+        Storage::get_team(&env, hunt_id, team_id).ok_or(HuntErrorCode::TeamNotFound)
+    }
+
+    /// Returns the team ID a player belongs to for a hunt, if any.
+    pub fn get_player_team(env: Env, hunt_id: u64, player: Address) -> Option<u32> {
+        Storage::get_player_team(&env, hunt_id, &player)
+    }
+
+    /// Returns the shared progress for a team.
+    pub fn get_team_progress(
+        env: Env,
+        hunt_id: u64,
+        team_id: u32,
+    ) -> Result<TeamProgress, HuntErrorCode> {
+        Storage::get_team(&env, hunt_id, team_id).ok_or(HuntErrorCode::TeamNotFound)?;
+        Ok(Storage::get_team_progress(&env, hunt_id, team_id))
+    }
+
+    /// Returns teams ranked by shared team score (descending). For team-mode
+    /// hunts this replaces the individual leaderboard.
+    pub fn get_team_leaderboard(
+        env: Env,
+        hunt_id: u64,
+        limit: u32,
+    ) -> Result<Vec<TeamLeaderboardEntry>, HuntErrorCode> {
+        Storage::get_hunt(&env, hunt_id).ok_or(HuntErrorCode::HuntNotFound)?;
+
+        let team_count = core::cmp::min(
+            Storage::get_team_count(&env, hunt_id),
+            MAX_LEADERBOARD_SCAN_SIZE,
+        );
+        let effective_limit = core::cmp::min(limit, MAX_LEADERBOARD_SIZE);
+
+        // Collect (team_id, score) pairs
+        let mut scores: Vec<(u32, u32)> = Vec::new(&env);
+        for team_id in 1..=team_count {
+            if Storage::get_team(&env, hunt_id, team_id).is_some() {
+                let progress = Storage::get_team_progress(&env, hunt_id, team_id);
+                scores.push_back((team_id, progress.total_score));
+            }
+        }
+
+        // Selection of top-N by score descending (team count is bounded)
+        let mut result = Vec::new(&env);
+        let mut selected: Vec<u32> = Vec::new(&env);
+        while result.len() < effective_limit && selected.len() < scores.len() {
+            let mut best_idx: Option<u32> = None;
+            let mut best_score = 0u32;
+            for i in 0..scores.len() {
+                if selected.first_index_of(i).is_some() {
+                    continue;
+                }
+                let (_, score) = scores.get(i).unwrap();
+                if best_idx.is_none() || score > best_score {
+                    best_idx = Some(i);
+                    best_score = score;
+                }
+            }
+            let Some(i) = best_idx else { break };
+            selected.push_back(i);
+            let (team_id, score) = scores.get(i).unwrap();
+            let team = Storage::get_team(&env, hunt_id, team_id).unwrap();
+            result.push_back(TeamLeaderboardEntry {
+                rank: result.len() + 1,
+                team_id,
+                name: team.name,
+                score,
+                member_count: team.members.len(),
+            });
+        }
+
+        Ok(result)
     }
 
 // -----------------------------------------------------------------------------
@@ -2338,11 +2753,6 @@ pub fn get_health_dashboard(env: Env) -> monitoring::ContractHealth {
     }
 }
 
-// -----------------------------------------------------------------------------
-// View-Only Access Management
-// -----------------------------------------------------------------------------
-
-pub fn add_view_only_access(
 mod admin;
 mod errors;
 mod migration;

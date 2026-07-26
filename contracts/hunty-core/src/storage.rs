@@ -1,7 +1,39 @@
 use crate::errors::HuntError;
-use crate::types::{Clue, Hunt, LeaderboardIndexEntry, PlayerProgress, StoredPlayerProgress};
-use soroban_sdk::{symbol_short, Address, Env, IntoVal, Map, Vec, TryFromVal};
+use crate::types::{
+    Clue, Hunt, HuntStatus, LeaderboardIndexEntry, PlayerProgress, StoredPlayerProgress, Team,
+    TeamProgress,
+};
+use soroban_sdk::{contracttype, symbol_short, Address, Env, IntoVal, Map, Vec, TryFromVal};
 use soroban_sdk::xdr::FromXdr;
+
+/// Compact instance-storage cache of frequently-read Hunt fields.
+/// Avoids loading the full Hunt (with title/description strings) from
+/// persistent storage for hot-path validation.
+#[contracttype]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct HuntCache {
+    pub creator: Address,
+    pub status: HuntStatus,
+    pub end_time: u64,
+    pub total_clues: u32,
+    pub required_clues: u32,
+    pub max_winners: u32,
+    pub registration_deadline: u64,
+}
+
+impl HuntCache {
+    pub fn from_hunt(hunt: &Hunt) -> Self {
+        Self {
+            creator: hunt.creator.clone(),
+            status: hunt.status.clone(),
+            end_time: hunt.end_time,
+            total_clues: hunt.total_clues,
+            required_clues: hunt.required_clues,
+            max_winners: hunt.reward_config.max_winners,
+            registration_deadline: hunt.registration_deadline,
+        }
+    }
+}
 // Instance TTL constants used by blacklist and contract-pause storage.
 const INSTANCE_TTL_THRESHOLD: u32 = 518_400;
 const INSTANCE_TTL_EXTEND_TO: u32 = 518_400;
@@ -78,6 +110,15 @@ impl Storage {
     const PAUSE_REWARDS_KEY: soroban_sdk::Symbol = symbol_short!("PAUSE_RW");
     const CONTRACT_PAUSED_KEY: soroban_sdk::Symbol = symbol_short!("CPAUSED");
     const BLACKLIST_KEY: soroban_sdk::Symbol = symbol_short!("BLKLST");
+    const HUNT_CACHE_KEY: soroban_sdk::Symbol = symbol_short!("HC");
+    const CACHE_HIT_KEY: soroban_sdk::Symbol = symbol_short!("CHIT");
+    const CACHE_MISS_KEY: soroban_sdk::Symbol = symbol_short!("CMISS");
+    const REQUIRED_CLUES_KEY: soroban_sdk::Symbol = symbol_short!("RQCL");
+    const PLAYER_HUNTS_KEY: soroban_sdk::Symbol = symbol_short!("PHCT");
+    const TEAM_KEY: soroban_sdk::Symbol = symbol_short!("TM");
+    const TEAM_COUNT_KEY: soroban_sdk::Symbol = symbol_short!("TMCT");
+    const PLAYER_TEAM_KEY: soroban_sdk::Symbol = symbol_short!("PLTM");
+    const TEAM_PROGRESS_KEY: soroban_sdk::Symbol = symbol_short!("TMPR");
 
     // Pause functions (granular: registrations, answers, rewards)
     pub fn set_pause_registrations(env: &Env, paused: bool) {
@@ -133,6 +174,8 @@ impl Storage {
             _ => TtlPolicy::Default,
         };
         extend_ttl(env, &key, policy);
+        // Keep the instance-storage cache coherent with persistent state.
+        Self::save_hunt_cache(env, hunt);
     }
 
     /// Retrieves a hunt by ID, returning an Option.
@@ -221,6 +264,16 @@ impl Storage {
         env.storage().instance().remove(&Self::CACHE_MISS_KEY);
     }
 
+    fn record_cache_hit(env: &Env) {
+        let hits: u64 = env.storage().instance().get(&Self::CACHE_HIT_KEY).unwrap_or(0);
+        env.storage().instance().set(&Self::CACHE_HIT_KEY, &(hits + 1));
+    }
+
+    fn record_cache_miss(env: &Env) {
+        let misses: u64 = env.storage().instance().get(&Self::CACHE_MISS_KEY).unwrap_or(0);
+        env.storage().instance().set(&Self::CACHE_MISS_KEY, &(misses + 1));
+    }
+
     /// Checks whether a HuntCache exists in instance storage.
     /// Useful for cheap existence checks without loading the full Hunt struct.
     pub fn has_hunt_cache(env: &Env, hunt_id: u64) -> bool {
@@ -245,6 +298,37 @@ impl Storage {
 
         // Update the list of clue IDs for this hunt
         Self::add_clue_to_list(env, hunt_id, clue.clue_id);
+
+        // Maintain the required-clue-ID index used for fast completion checks
+        if clue.is_required {
+            let mut required = Self::get_required_clues(env, hunt_id);
+            if required.first_index_of(clue.clue_id).is_none() {
+                required.push_back(clue.clue_id);
+                Self::set_required_clues(env, hunt_id, &required);
+            }
+        }
+    }
+
+    // ========== Required Clue Index Functions ==========
+
+    fn required_clues_key(hunt_id: u64) -> (soroban_sdk::Symbol, u64) {
+        (Self::REQUIRED_CLUES_KEY, hunt_id)
+    }
+
+    /// Stores the list of required clue IDs for a hunt.
+    pub fn set_required_clues(env: &Env, hunt_id: u64, clue_ids: &Vec<u32>) {
+        let key = Self::required_clues_key(hunt_id);
+        env.storage().persistent().set(&key, clue_ids);
+        extend_ttl(env, &key, TtlPolicy::Active);
+    }
+
+    /// Returns the list of required clue IDs for a hunt (empty if never populated).
+    pub fn get_required_clues(env: &Env, hunt_id: u64) -> Vec<u32> {
+        let key = Self::required_clues_key(hunt_id);
+        env.storage()
+            .persistent()
+            .get(&key)
+            .unwrap_or_else(|| Vec::new(env))
     }
 
     /// Retrieves an individual clue by hunt_id and clue_id.
@@ -257,7 +341,7 @@ impl Storage {
     /// # Returns
     /// * `Some(Clue)` if the clue exists, `None` otherwise
     pub fn get_clue(env: &Env, hunt_id: u64, clue_id: u32) -> Option<Clue> {
-        use soroban_sdk::{Val, IntoVal, TryFromVal};
+        use soroban_sdk::{Val, TryFromVal};
 
         let key = Self::clue_key(hunt_id, clue_id);
         let val: Option<Val> = env.storage().persistent().get(&key);
@@ -338,9 +422,10 @@ impl Storage {
     /// * `env` - The Soroban environment
     /// * `progress` - The PlayerProgress struct to store
     pub fn save_player_progress(env: &Env, progress: &PlayerProgress) {
-        // Store the progress with composite key (hunt_id + player address)
+        // Store the progress with composite key (hunt_id + player address),
+        // in compact form (key fields player/hunt_id are not duplicated).
         let key = Self::progress_key(progress.hunt_id, &progress.player);
-        env.storage().persistent().set(&key, progress);
+        env.storage().persistent().set(&key, &progress.to_stored());
         let policy = if progress.is_completed || progress.reward_claimed {
             TtlPolicy::Short
         } else {
@@ -591,6 +676,105 @@ impl Storage {
             PERSISTENT_TTL_THRESHOLD,
             PERSISTENT_TTL_EXTEND_TO,
         );
+    }
+
+    /// Returns the number of registered players for a hunt.
+    pub fn get_player_count(env: &Env, hunt_id: u64) -> u32 {
+        let count_key = Self::player_count_key(hunt_id);
+        env.storage().persistent().get(&count_key).unwrap_or(0)
+    }
+
+    // ========== Global Player Statistics ==========
+
+    fn player_completed_count_key(player: &Address) -> (soroban_sdk::Symbol, Address) {
+        (Self::PLAYER_HUNTS_KEY, player.clone())
+    }
+
+    /// Returns the total number of hunts this player has completed across all hunts.
+    pub fn get_player_completed_hunt_count(env: &Env, player: &Address) -> u32 {
+        let key = Self::player_completed_count_key(player);
+        env.storage().persistent().get(&key).unwrap_or(0)
+    }
+
+    /// Increments the player's global completed-hunt counter.
+    pub fn increment_player_completed_hunt_count(env: &Env, player: &Address) {
+        let key = Self::player_completed_count_key(player);
+        let count: u32 = env.storage().persistent().get(&key).unwrap_or(0);
+        env.storage().persistent().set(&key, &count.saturating_add(1));
+        extend_ttl(env, &key, TtlPolicy::Default);
+    }
+
+    // ========== Team Storage Functions ==========
+
+    fn team_key(hunt_id: u64, team_id: u32) -> (soroban_sdk::Symbol, u64, u32) {
+        (Self::TEAM_KEY, hunt_id, team_id)
+    }
+
+    fn team_count_key(hunt_id: u64) -> (soroban_sdk::Symbol, u64) {
+        (Self::TEAM_COUNT_KEY, hunt_id)
+    }
+
+    fn player_team_key(hunt_id: u64, player: &Address) -> (soroban_sdk::Symbol, u64, Address) {
+        (Self::PLAYER_TEAM_KEY, hunt_id, player.clone())
+    }
+
+    fn team_progress_key(hunt_id: u64, team_id: u32) -> (soroban_sdk::Symbol, u64, u32) {
+        (Self::TEAM_PROGRESS_KEY, hunt_id, team_id)
+    }
+
+    /// Increments and returns the next team ID for a hunt (sequential from 1).
+    pub fn next_team_id(env: &Env, hunt_id: u64) -> u32 {
+        let key = Self::team_count_key(hunt_id);
+        let current: u32 = env.storage().persistent().get(&key).unwrap_or(0);
+        let next = current + 1;
+        env.storage().persistent().set(&key, &next);
+        extend_ttl(env, &key, TtlPolicy::Active);
+        next
+    }
+
+    /// Returns the number of teams created for a hunt.
+    pub fn get_team_count(env: &Env, hunt_id: u64) -> u32 {
+        let key = Self::team_count_key(hunt_id);
+        env.storage().persistent().get(&key).unwrap_or(0)
+    }
+
+    pub fn save_team(env: &Env, team: &Team) {
+        let key = Self::team_key(team.hunt_id, team.team_id);
+        env.storage().persistent().set(&key, team);
+        extend_ttl(env, &key, TtlPolicy::Active);
+    }
+
+    pub fn get_team(env: &Env, hunt_id: u64, team_id: u32) -> Option<Team> {
+        let key = Self::team_key(hunt_id, team_id);
+        env.storage().persistent().get(&key)
+    }
+
+    /// Records which team a player belongs to within a hunt.
+    pub fn set_player_team(env: &Env, hunt_id: u64, player: &Address, team_id: u32) {
+        let key = Self::player_team_key(hunt_id, player);
+        env.storage().persistent().set(&key, &team_id);
+        extend_ttl(env, &key, TtlPolicy::Active);
+    }
+
+    /// Returns the team ID a player belongs to within a hunt, if any.
+    pub fn get_player_team(env: &Env, hunt_id: u64, player: &Address) -> Option<u32> {
+        let key = Self::player_team_key(hunt_id, player);
+        env.storage().persistent().get(&key)
+    }
+
+    pub fn save_team_progress(env: &Env, hunt_id: u64, team_id: u32, progress: &TeamProgress) {
+        let key = Self::team_progress_key(hunt_id, team_id);
+        env.storage().persistent().set(&key, progress);
+        extend_ttl(env, &key, TtlPolicy::Active);
+    }
+
+    /// Returns team progress, defaulting to empty when never written.
+    pub fn get_team_progress(env: &Env, hunt_id: u64, team_id: u32) -> TeamProgress {
+        let key = Self::team_progress_key(hunt_id, team_id);
+        env.storage().persistent().get(&key).unwrap_or_else(|| TeamProgress {
+            completed_clues: Vec::new(env),
+            total_score: 0,
+        })
     }
 
     pub fn get_player_addresses_for_hunt(env: &Env, hunt_id: u64) -> Vec<Address> {

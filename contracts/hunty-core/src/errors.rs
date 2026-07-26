@@ -44,6 +44,16 @@ pub enum HuntErrorCode {
     ContractPaused = 37,
     InvalidMaxAttempts = 38,
     InvalidWeight = 39,
+    RegistrationClosed = 40,
+    InvalidRegistrationDeadline = 41,
+    PartialScoringNotAllowed = 42,
+    HuntNotEnded = 43,
+    PlayerAlreadyCompleted = 44,
+    TeamModeNotEnabled = 45,
+    TeamNotFound = 46,
+    AlreadyInTeam = 47,
+    TeamFull = 48,
+    InvalidTeamName = 49,
 }
 
 #[derive(Debug)]

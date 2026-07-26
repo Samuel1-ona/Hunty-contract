@@ -1,21 +1,4 @@
-use soroban_sdk::{contracttype, Address, BytesN, Env, Map, String, Vec};
-
-/// Semantic version (major.minor.patch). Compatible if major matches and self >= required.
-#[contracttype]
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct SemVer {
-    pub major: u32,
-    pub minor: u32,
-    pub patch: u32,
-}
-
-impl SemVer {
-    pub fn is_compatible_with(&self, required: &SemVer) -> bool {
-        self.major == required.major
-            && (self.minor > required.minor
-                || (self.minor == required.minor && self.patch >= required.patch))
-    }
-}
+use soroban_sdk::{contracttype, Address, BytesN, Env, String, Vec};
 
 /// Semantic version (major.minor.patch). Compatible if major matches and self >= required.
 #[contracttype]
@@ -81,6 +64,12 @@ pub struct Hunt {
     pub max_submissions_per_minute: u32,
     pub max_attempts_per_clue: u32,
     pub start_multiplier_bps: u32,
+    /// Registration cutoff timestamp. 0 = no deadline (registration open while active).
+    pub registration_deadline: u64,
+    /// When true, players may claim their partial score after the hunt ends.
+    pub allow_partial_scoring: bool,
+    /// When true, players may form teams and share clue progress.
+    pub team_mode: bool,
 }
 
 /// Stored clue with SHA256 answer hash. The hash is never exposed via get_clue/list_clues or events.
@@ -530,4 +519,67 @@ pub struct RewardClaimFailedEvent {
     pub hunt_id: u64,
     pub player: Address,
     pub error_code: u32,
+}
+
+/// A team competing in a team-mode hunt.
+#[contracttype]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Team {
+    pub team_id: u32,
+    pub hunt_id: u64,
+    pub name: String,
+    pub leader: Address,
+    pub members: Vec<Address>,
+}
+
+/// Shared progress for a team: clues completed by any member and the combined score.
+#[contracttype]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TeamProgress {
+    pub completed_clues: Vec<u32>,
+    pub total_score: u32,
+}
+
+/// Team leaderboard entry (read-only query result), ranked by shared team score.
+#[contracttype]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TeamLeaderboardEntry {
+    pub rank: u32,
+    pub team_id: u32,
+    pub name: String,
+    pub score: u32,
+    pub member_count: u32,
+}
+
+#[contracttype]
+#[derive(Clone, Debug)]
+pub struct TeamCreatedEvent {
+    pub hunt_id: u64,
+    pub team_id: u32,
+    pub leader: Address,
+    pub name: String,
+}
+
+#[contracttype]
+#[derive(Clone, Debug)]
+pub struct TeamMemberJoinedEvent {
+    pub hunt_id: u64,
+    pub team_id: u32,
+    pub player: Address,
+}
+
+#[contracttype]
+#[derive(Clone, Debug)]
+pub struct RegistrationDeadlineSetEvent {
+    pub hunt_id: u64,
+    pub registration_deadline: u64,
+}
+
+#[contracttype]
+#[derive(Clone, Debug)]
+pub struct PartialScoreClaimedEvent {
+    pub hunt_id: u64,
+    pub player: Address,
+    pub partial_score: u32,
+    pub clues_completed: u32,
 }

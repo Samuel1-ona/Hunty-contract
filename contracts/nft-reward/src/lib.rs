@@ -929,3 +929,7 @@ impl NftReward {
 
         env.events()
             .publish((Symbol::new(&env, "NftBurned"), nft_id), (nft_id, owner));
+
+        Ok(())
+    }
+}

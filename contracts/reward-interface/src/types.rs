@@ -28,6 +28,22 @@ impl RewardConfig {
     }
 }
 
+/// Mirror of the RewardManager's per-hunt pool configuration. Callers such as
+/// HuntyCore use this to deserialize `get_pool_config` cross-contract results.
+/// Field names and order must stay in sync with the RewardManager's struct so
+/// the XDR encodings match.
+#[contracttype]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RewardPoolConfig {
+    /// Address of the hunt creator who owns this pool.
+    pub creator: Address,
+    /// Minimum XLM amount per distribution. 0 means no minimum enforced.
+    pub min_distribution_amount: i128,
+    /// Optional time-based reward tiers. When empty, the per-winner amount
+    /// is computed from `xlm_pool / max_winners`.
+    pub time_based_tiers: Vec<TimeBasedRewardTier>,
+}
+
 /// One tier of a time-based reward schedule configured on a reward pool.
 ///
 /// A tier defines an XLM amount that is granted to a player who completes the
