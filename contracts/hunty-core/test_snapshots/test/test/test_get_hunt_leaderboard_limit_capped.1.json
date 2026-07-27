@@ -719,6 +719,14 @@
                   "map": [
                     {
                       "key": {
+                        "symbol": "clue_attempts"
+                      },
+                      "val": {
+                        "map": []
+                      }
+                    },
+                    {
+                      "key": {
                         "symbol": "completed_at"
                       },
                       "val": {
@@ -735,14 +743,6 @@
                     },
                     {
                       "key": {
-                        "symbol": "hunt_id"
-                      },
-                      "val": {
-                        "u64": 1
-                      }
-                    },
-                    {
-                      "key": {
                         "symbol": "is_completed"
                       },
                       "val": {
@@ -751,10 +751,10 @@
                     },
                     {
                       "key": {
-                        "symbol": "player"
+                        "symbol": "required_completed_count"
                       },
                       "val": {
-                        "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHK3M"
+                        "u32": 0
                       }
                     },
                     {
@@ -835,6 +835,14 @@
                   "map": [
                     {
                       "key": {
+                        "symbol": "clue_attempts"
+                      },
+                      "val": {
+                        "map": []
+                      }
+                    },
+                    {
+                      "key": {
                         "symbol": "completed_at"
                       },
                       "val": {
@@ -851,14 +859,6 @@
                     },
                     {
                       "key": {
-                        "symbol": "hunt_id"
-                      },
-                      "val": {
-                        "u64": 1
-                      }
-                    },
-                    {
-                      "key": {
                         "symbol": "is_completed"
                       },
                       "val": {
@@ -867,10 +867,10 @@
                     },
                     {
                       "key": {
-                        "symbol": "player"
+                        "symbol": "required_completed_count"
                       },
                       "val": {
-                        "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAITA4"
+                        "u32": 0
                       }
                     },
                     {
@@ -951,6 +951,14 @@
                   "map": [
                     {
                       "key": {
+                        "symbol": "clue_attempts"
+                      },
+                      "val": {
+                        "map": []
+                      }
+                    },
+                    {
+                      "key": {
                         "symbol": "completed_at"
                       },
                       "val": {
@@ -967,14 +975,6 @@
                     },
                     {
                       "key": {
-                        "symbol": "hunt_id"
-                      },
-                      "val": {
-                        "u64": 1
-                      }
-                    },
-                    {
-                      "key": {
                         "symbol": "is_completed"
                       },
                       "val": {
@@ -983,10 +983,10 @@
                     },
                     {
                       "key": {
-                        "symbol": "player"
+                        "symbol": "required_completed_count"
                       },
                       "val": {
-                        "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAK3IM"
+                        "u32": 0
                       }
                     },
                     {
@@ -1067,6 +1067,14 @@
                   "map": [
                     {
                       "key": {
+                        "symbol": "clue_attempts"
+                      },
+                      "val": {
+                        "map": []
+                      }
+                    },
+                    {
+                      "key": {
                         "symbol": "completed_at"
                       },
                       "val": {
@@ -1083,14 +1091,6 @@
                     },
                     {
                       "key": {
-                        "symbol": "hunt_id"
-                      },
-                      "val": {
-                        "u64": 1
-                      }
-                    },
-                    {
-                      "key": {
                         "symbol": "is_completed"
                       },
                       "val": {
@@ -1099,10 +1099,10 @@
                     },
                     {
                       "key": {
-                        "symbol": "player"
+                        "symbol": "required_completed_count"
                       },
                       "val": {
-                        "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAMDR4"
+                        "u32": 0
                       }
                     },
                     {
@@ -1183,6 +1183,14 @@
                   "map": [
                     {
                       "key": {
+                        "symbol": "clue_attempts"
+                      },
+                      "val": {
+                        "map": []
+                      }
+                    },
+                    {
+                      "key": {
                         "symbol": "completed_at"
                       },
                       "val": {
@@ -1199,14 +1207,6 @@
                     },
                     {
                       "key": {
-                        "symbol": "hunt_id"
-                      },
-                      "val": {
-                        "u64": 1
-                      }
-                    },
-                    {
-                      "key": {
                         "symbol": "is_completed"
                       },
                       "val": {
@@ -1215,10 +1215,10 @@
                     },
                     {
                       "key": {
-                        "symbol": "player"
+                        "symbol": "required_completed_count"
                       },
                       "val": {
-                        "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAOLZM"
+                        "u32": 0
                       }
                     },
                     {
@@ -1541,6 +1541,14 @@
                                     }
                                   }
                                 ]
+                              }
+                            },
+                            {
+                              "key": {
+                                "symbol": "start_time"
+                              },
+                              "val": {
+                                "u64": 0
                               }
                             },
                             {
@@ -1883,10 +1891,10 @@
                 },
                 {
                   "key": {
-                    "symbol": "question"
+                    "symbol": "public_question"
                   },
                   "val": {
-                    "string": "Q"
+                    "bool": true
                   }
                 }
               ]

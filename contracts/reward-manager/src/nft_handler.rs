@@ -55,7 +55,7 @@ impl NftHandler {
         args.push_back(player.clone().into_val(env));
         args.push_back(metadata.into_val(env));
 
-        env.try_invoke_contract(
+        env.try_invoke_contract::<u64, RewardErrorCode>(
             nft_contract,
             &Symbol::new(env, "mint_reward_nft_from_map"),
             args,

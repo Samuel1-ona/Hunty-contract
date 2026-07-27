@@ -401,6 +401,14 @@
                   "map": [
                     {
                       "key": {
+                        "symbol": "clue_attempts"
+                      },
+                      "val": {
+                        "map": []
+                      }
+                    },
+                    {
+                      "key": {
                         "symbol": "completed_at"
                       },
                       "val": {
@@ -421,14 +429,6 @@
                     },
                     {
                       "key": {
-                        "symbol": "hunt_id"
-                      },
-                      "val": {
-                        "u64": 1
-                      }
-                    },
-                    {
-                      "key": {
                         "symbol": "is_completed"
                       },
                       "val": {
@@ -437,10 +437,10 @@
                     },
                     {
                       "key": {
-                        "symbol": "player"
+                        "symbol": "required_completed_count"
                       },
                       "val": {
-                        "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4"
+                        "u32": 1
                       }
                     },
                     {
@@ -763,6 +763,14 @@
                                     }
                                   }
                                 ]
+                              }
+                            },
+                            {
+                              "key": {
+                                "symbol": "start_time"
+                              },
+                              "val": {
+                                "u64": 0
                               }
                             },
                             {

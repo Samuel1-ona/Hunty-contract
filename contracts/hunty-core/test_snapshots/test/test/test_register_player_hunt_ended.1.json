@@ -401,6 +401,14 @@
                             },
                             {
                               "key": {
+                                "symbol": "start_time"
+                              },
+                              "val": {
+                                "u64": 0
+                              }
+                            },
+                            {
+                              "key": {
                                 "symbol": "status"
                               },
                               "val": {
@@ -574,10 +582,10 @@
                 },
                 {
                   "key": {
-                    "symbol": "question"
+                    "symbol": "public_question"
                   },
                   "val": {
-                    "string": "Q"
+                    "bool": true
                   }
                 }
               ]

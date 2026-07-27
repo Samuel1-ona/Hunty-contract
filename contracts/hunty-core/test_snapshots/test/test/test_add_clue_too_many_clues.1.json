@@ -215,10 +215,10 @@
                 },
                 {
                   "key": {
-                    "symbol": "question"
+                    "symbol": "public_question"
                   },
                   "val": {
-                    "string": "Q"
+                    "bool": true
                   }
                 }
               ]

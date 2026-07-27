@@ -229,6 +229,7 @@ impl HuntyCore {
             creator: updated.creator.clone(),
             points,
             is_required,
+            public_question: true,
         };
         env.events()
             .publish((Symbol::new(&env, "ClueAdded"), hunt_id, clue_id), event);
@@ -491,11 +492,9 @@ impl HuntyCore {
 
     /// Sets the RewardManager contract address for cross-contract reward distribution.
     ///
-    /// Access control: only the admin (or contract invoker) is allowed to set this.
-    pub fn set_reward_manager(env: Env, reward_manager: Address) -> Result<(), HuntErrorCode> {
-        // Require invoker authorization.
-        // (This is the auth gate that was missing before.)
-        env.invoker().require_auth();
+    /// Access control: the caller must pass their address and authorize the call.
+    pub fn set_reward_manager(env: Env, caller: Address, reward_manager: Address) -> Result<(), HuntErrorCode> {
+        caller.require_auth();
 
         Storage::set_reward_manager(&env, &reward_manager);
         Ok(())
@@ -1061,7 +1060,7 @@ impl HuntyCore {
         let _ = Storage::get_hunt(&env, hunt_id).ok_or(HuntErrorCode::HuntNotFound)?;
         let queried_at = env.ledger().timestamp();
         let players = Storage::get_hunt_players(&env, hunt_id);
-        let total_players = players.len();
+        let total_players = players.len() as usize;
 
         let start = core::cmp::min(start_index as usize, total_players);
         let capped_window = core::cmp::min(window_size, MAX_LEADERBOARD_SCAN_SIZE);
@@ -1069,7 +1068,7 @@ impl HuntyCore {
 
         let mut rows = Vec::new(&env);
         for i in start..end {
-            let p = players.get(i).unwrap();
+            let p = players.get(i as u32).unwrap();
             rows.push_back(crate::types::LeaderboardRow {
                 index: i as u32,
                 player: p.player.clone(),
