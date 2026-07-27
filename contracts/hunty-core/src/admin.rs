@@ -94,7 +94,9 @@ pub fn emergency_stop_all(env: &Env, admin: &Address, reason: &str) {
             val /= 10;
         }
     }
-    let len_str = core::str::from_utf8(&buf[idx..]).unwrap();
+    // SAFETY: the buffer only ever contains ASCII digit bytes (b'0'..=b'9')
+    // produced by the integer-to-string loop above, so the slice is valid UTF-8.
+    let len_str = unsafe { core::str::from_utf8_unchecked(&buf[idx..]) };
     let count_str = String::from_str(env, len_str);
     details.push_back((symbol_short!("affected"), count_str));
 
