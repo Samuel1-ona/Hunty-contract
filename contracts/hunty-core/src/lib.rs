@@ -1,4 +1,61 @@
 #![no_std]
+
+//! # Hunty Core Contract
+//!
+//! `hunty-core` is the primary Soroban contract for the Hunty scavenger-hunt
+//! platform. It owns the full lifecycle of a "hunt" — a collection of clues
+//! that players register for, solve, and earn scores and rewards from — as
+//! well as the platform-wide administrative controls that govern it.
+//!
+//! ## Responsibilities
+//!
+//! - **Hunt lifecycle**: creation, cloning, metadata updates, and status
+//!   transitions (`Draft` → `Active` ⇄ `Paused` → `Completed` / `Cancelled` →
+//!   `Archived`), driven by [`HuntyCore::create_hunt`],
+//!   [`HuntyCore::activate_hunt`], [`HuntyCore::deactivate_hunt`],
+//!   [`HuntyCore::close_hunt`], [`HuntyCore::cancel_hunt`], and
+//!   [`HuntyCore::archive_hunt`].
+//! - **Clue management**: adding, aliasing, and hinting clues
+//!   ([`HuntyCore::add_clue`], [`HuntyCore::add_clues`],
+//!   [`HuntyCore::add_clue_aliases`], [`HuntyCore::set_clue_hint`]) and
+//!   discovering them ([`HuntyCore::list_clues`],
+//!   [`HuntyCore::list_clues_paginated`]).
+//! - **Player participation**: registration (including invite-code and
+//!   privacy-gated flows), answer submission with replay protection
+//!   ([`HuntyCore::submit_answer`], [`HuntyCore::submit_answer_with_hash`]),
+//!   scoring, and leaderboards.
+//! - **Rewards**: linking an external reward-manager contract and
+//!   distributing rewards to players who complete a hunt.
+//! - **Access control**: a single contract admin (with two-step key
+//!   rotation via [`HuntyCore::propose_new_admin`] /
+//!   [`HuntyCore::accept_admin`]), per-hunt creators and co-creators, and
+//!   view-only observer roles (per-hunt and global).
+//! - **Operational safety**: independent global pause switches for
+//!   registrations, answers, and rewards, plus creator blacklisting and
+//!   player banning.
+//! - **Schema migrations & monitoring**: versioned storage migrations (see
+//!   the [`migration`] module) and a health dashboard (see the
+//!   [`monitoring`] module) for operational visibility.
+//!
+//! ## Module layout
+//!
+//! The bulk of the public contract interface lives in this file, in the
+//! `#[contractimpl] impl HuntyCore` block. Supporting concerns are split into
+//! sibling modules: persisted state access lives in [`storage`], typed
+//! errors in [`errors`], shared data structures and events in [`types`],
+//! input validation helpers in [`sanitization`], per-caller throttling in
+//! [`rate_limit`], schema upgrades in [`migration`], and operational metrics
+//! in [`monitoring`].
+//!
+//! ## Access control model
+//!
+//! Every state-mutating entry point requires the relevant caller to
+//! authorize via [`Address::require_auth`], and most additionally verify
+//! that the authorizing address matches the expected role (contract admin,
+//! hunt creator/co-creator, or a specific player) before applying any
+//! change. Read-only queries generally have no such gating, since they do
+//! not alter chain state.
+
 use crate::errors::{HuntError, HuntErrorCode};
 use crate::storage::Storage;
 use crate::types::{
@@ -17,12 +74,19 @@ use soroban_sdk::{
     contract, contractimpl, Address, Bytes, BytesN, Env, IntoVal, String, Symbol, Val, Vec,
 };
 
+/// Maximum byte length of a hunt title.
 const MAX_TITLE_BYTES: u32 = 200;
+/// Maximum byte length of a hunt description.
 const MAX_DESCRIPTION_BYTES: u32 = 2000;
+/// Maximum character length of a clue's question text.
 const MAX_QUESTION_LENGTH: u32 = 2000;
+/// Maximum character length of a submitted or stored answer.
 const MAX_ANSWER_LENGTH: u32 = 256;
+/// Maximum byte length of a single hunt category label.
 const MAX_CATEGORY_BYTES: u32 = 64;
+/// Maximum number of categories that may be attached to one hunt.
 const MAX_CATEGORIES_PER_HUNT: u32 = 5;
+/// Maximum number of clues allowed in a single hunt.
 const MAX_CLUES_PER_HUNT: u32 = 100;
 /// Maximum number of leaderboard entries returned (gas and UX limit).
 const MAX_LEADERBOARD_SIZE: u32 = 20;
@@ -41,9 +105,21 @@ const ANSWER_SUBMISSION_FUTURE_SKEW_SECS: u64 = 30;
 /// Maximum number of members allowed in a team.
 const MAX_TEAM_SIZE: u32 = 10;
 
+/// Entry point type for the Hunty core contract.
+///
+/// This is a zero-sized marker type; all contract state lives in Soroban
+/// storage rather than on the struct itself. All public behavior is exposed
+/// through the `#[contractimpl]` block below, which Soroban uses to generate
+/// the contract's on-chain interface.
 #[contract]
 pub struct HuntyCore;
 
+/// Implementation of the Hunty core contract's public interface.
+///
+/// Every `pub fn` here becomes an invokable contract function once compiled
+/// to a Soroban Wasm target, thanks to the `#[contractimpl]` attribute.
+/// Private (non-`pub`) functions are internal helpers shared across the
+/// public entry points and are not part of the on-chain interface.
 #[contractimpl]
 impl HuntyCore {
     /// Sets the contract admin once. Subsequent calls require current admin auth via set_admin.
@@ -299,6 +375,18 @@ impl HuntyCore {
         Ok(hunt_id)
     }
 
+    /// Sets or clears the time-bonus multiplier configuration for a draft hunt.
+    ///
+    /// When `time_bonus_config` is `Some`, players who answer clues quickly earn
+    /// a scaled bonus that decays from `start_multiplier_bps` down to
+    /// `min_multiplier_bps` over `decay_duration_secs`. Passing `None` removes
+    /// any existing time-bonus configuration from the hunt.
+    ///
+    /// # Errors
+    /// * [`HuntErrorCode::HuntNotFound`] if `hunt_id` does not exist.
+    /// * [`HuntErrorCode::Unauthorized`] if `caller` is not the hunt's creator or a co-creator.
+    /// * [`HuntErrorCode::InvalidHuntStatus`] if the hunt is not in [`HuntStatus::Draft`].
+    /// * [`HuntErrorCode::InvalidTimeBonusConfig`] if the provided config fails validation.
     pub fn set_time_bonus_config(
         env: Env,
         hunt_id: u64,
@@ -1197,6 +1285,22 @@ impl HuntyCore {
         }
     }
 
+    /// Activates a hunt, moving it from `Draft` to `Active` (or from `Paused`
+    /// back to `Active` when reactivating).
+    ///
+    /// On the initial `Draft` → `Active` transition this validates that the
+    /// hunt has at least one clue and one required clue, that its `end_time`
+    /// (if set) is not already in the past, and — when a reward manager is
+    /// configured — that the linked reward pool is funded with enough balance
+    /// to cover the configured winners. Reactivating from `Paused` skips these
+    /// setup checks since they already passed on the original activation.
+    ///
+    /// # Errors
+    /// * [`HuntErrorCode::Unauthorized`] if `caller` is not the hunt's creator.
+    /// * [`HuntErrorCode::NoCluesAdded`] / [`HuntErrorCode::NoRequiredClues`] if the hunt has no (required) clues.
+    /// * [`HuntErrorCode::NoRewardsConfigured`] / [`HuntErrorCode::InsufficientRewardPool`] if reward setup is incomplete.
+    /// * [`HuntErrorCode::HuntEndTimeInPast`] if `end_time` has already elapsed.
+    /// * [`HuntErrorCode::InvalidHuntStatus`] if the hunt is not `Draft` or `Paused`.
     pub fn activate_hunt(env: Env, hunt_id: u64, caller: Address) -> Result<(), HuntErrorCode> {
         // Fast validation using instance cache
         let cache = Self::get_hunt_cache_or_load(&env, hunt_id)?;
@@ -1309,6 +1413,14 @@ impl HuntyCore {
         Ok(())
     }
 
+    /// Pauses an `Active` hunt on behalf of its creator, moving it to `Paused`.
+    ///
+    /// Player progress and clue completions are preserved; a paused hunt can
+    /// later be resumed via [`Self::activate_hunt`].
+    ///
+    /// # Errors
+    /// * [`HuntErrorCode::Unauthorized`] if `caller` is not the hunt's creator.
+    /// * [`HuntErrorCode::InvalidHuntStatus`] if the hunt is not currently `Active`.
     pub fn deactivate_hunt(env: Env, hunt_id: u64, caller: Address) -> Result<(), HuntErrorCode> {
         // Fast validation using instance cache
         caller.require_auth();
@@ -1342,6 +1454,19 @@ impl HuntyCore {
         Ok(())
     }
 
+    /// Cancels a hunt on behalf of its creator, marking it `Cancelled` and
+    /// refunding any remaining reward-pool balance.
+    ///
+    /// Unlike [`Self::close_hunt`], cancelling does not distribute rewards to
+    /// players — it is intended for hunts that should be shut down without
+    /// paying out. If a reward manager is configured and its pool holds a
+    /// positive balance, the full balance is refunded to `caller` via a
+    /// cross-contract call before the hunt is marked cancelled.
+    ///
+    /// # Errors
+    /// * [`HuntErrorCode::Unauthorized`] if `caller` is not the hunt's creator.
+    /// * [`HuntErrorCode::InvalidHuntStatus`] if the hunt is already `Completed` or `Cancelled`.
+    /// * [`HuntErrorCode::RefundFailed`] if querying or refunding the reward pool fails.
     pub fn cancel_hunt(env: Env, hunt_id: u64, caller: Address) -> Result<(), HuntErrorCode> {
         // Require the caller to authorize. Without this, an attacker could spoof `caller`
         // and cancel hunts by passing the creator address.
@@ -1510,6 +1635,14 @@ impl HuntyCore {
         Ok(())
     }
 
+    /// Archives a finished hunt, moving it to the terminal `Archived` status.
+    ///
+    /// Only hunts already in `Completed` or `Cancelled` status may be archived.
+    /// Both the hunt's creator and the contract admin are authorized to archive.
+    ///
+    /// # Errors
+    /// * [`HuntErrorCode::Unauthorized`] if `caller` is neither the creator nor the admin.
+    /// * [`HuntErrorCode::InvalidHuntStatus`] if the hunt is not `Completed` or `Cancelled`.
     pub fn archive_hunt(env: Env, hunt_id: u64, caller: Address) -> Result<(), HuntErrorCode> {
         caller.require_auth();
 
@@ -1555,6 +1688,14 @@ impl HuntyCore {
         Ok(())
     }
 
+    /// Returns the full [`Hunt`] record for `hunt_id`.
+    ///
+    /// This is a read-only getter available regardless of the hunt's current
+    /// status (`Draft`, `Active`, `Completed`, `Cancelled`, `Paused`,
+    /// `EmergencyStopped`, or `Archived`).
+    ///
+    /// # Errors
+    /// * [`HuntErrorCode::HuntNotFound`] if `hunt_id` does not exist.
     pub fn get_hunt_info(env: Env, hunt_id: u64) -> Result<Hunt, HuntErrorCode> {
         let hunt = Storage::get_hunt(&env, hunt_id).ok_or(HuntErrorCode::HuntNotFound)?;
 
@@ -2404,6 +2545,28 @@ impl HuntyCore {
         Ok(())
     }
 
+    /// Submits a plaintext `answer` for `clue_id` in `hunt_id` on behalf of
+    /// `player`, normalizing and hashing it on-chain before comparing it
+    /// against the clue's stored answer hashes.
+    ///
+    /// `submission_nonce` and `submitted_at` form a replay-protection window:
+    /// `submitted_at` must be within [`ANSWER_SUBMISSION_WINDOW_SECS`] of the
+    /// ledger time (allowing up to [`ANSWER_SUBMISSION_FUTURE_SKEW_SECS`] of
+    /// clock skew), and the `(hunt_id, clue_id, player, submission_nonce)`
+    /// tuple may only be processed once. On success, the player's progress,
+    /// score, and (if this was the last required clue) hunt completion are
+    /// updated and the corresponding events are emitted. For a variant that
+    /// accepts a precomputed answer hash instead, see
+    /// [`Self::submit_answer_with_hash`].
+    ///
+    /// # Errors
+    /// * [`HuntErrorCode::AnswersPaused`] if answer submission is globally paused.
+    /// * [`HuntErrorCode::HuntNotFound`] / [`HuntErrorCode::ClueNotFound`] if the hunt or clue does not exist.
+    /// * [`HuntErrorCode::BannedPlayer`] if `player` is banned from this hunt.
+    /// * [`HuntErrorCode::PlayerNotRegistered`] if `player` has not registered for the hunt.
+    /// * [`HuntErrorCode::ClueAlreadyCompleted`] if the clue (or, in team mode, a teammate's copy) is already solved.
+    /// * [`HuntErrorCode::InvalidAnswer`] if the submitted answer does not match.
+    /// * A rate-limit or replay-related error if the submission window, cooldown, or nonce checks fail.
     pub fn submit_answer(
         env: Env,
         hunt_id: u64,
@@ -3028,6 +3191,12 @@ impl HuntyCore {
     // View-Only Access Management
     // -----------------------------------------------------------------------------
 
+    /// Grants `viewer` read-only visibility into a specific hunt's
+    /// otherwise-restricted data, without making them a co-creator.
+    ///
+    /// # Errors
+    /// * [`HuntErrorCode::HuntNotFound`] if `hunt_id` does not exist.
+    /// * [`HuntErrorCode::Unauthorized`] if `creator` is not the hunt's creator.
     pub fn add_view_only_access(
         env: Env,
         hunt_id: u64,
@@ -3046,6 +3215,11 @@ impl HuntyCore {
         Ok(())
     }
 
+    /// Revokes a previously granted per-hunt view-only access for `viewer`.
+    ///
+    /// # Errors
+    /// * [`HuntErrorCode::HuntNotFound`] if `hunt_id` does not exist.
+    /// * [`HuntErrorCode::Unauthorized`] if `creator` is not the hunt's creator.
     pub fn remove_view_only_access(
         env: Env,
         hunt_id: u64,
@@ -3064,14 +3238,22 @@ impl HuntyCore {
         Ok(())
     }
 
+    /// Returns whether `address` has per-hunt view-only access to `hunt_id`.
     pub fn is_view_only(env: Env, hunt_id: u64, address: Address) -> bool {
         Storage::is_view_only(&env, hunt_id, &address)
     }
 
+    /// Lists every address with per-hunt view-only access to `hunt_id`.
     pub fn get_view_only_list(env: Env, hunt_id: u64) -> Vec<Address> {
         Storage::get_view_only_list(&env, hunt_id)
     }
 
+    /// Grants `new_co_creator` co-creator privileges on a hunt, allowing them
+    /// to manage it (e.g. add clues, update metadata) alongside the creator.
+    ///
+    /// # Errors
+    /// * [`HuntErrorCode::HuntNotFound`] if `hunt_id` does not exist.
+    /// * [`HuntErrorCode::Unauthorized`] if `creator` is not the hunt's creator.
     pub fn add_co_creator(
         env: Env,
         hunt_id: u64,
@@ -3087,6 +3269,11 @@ impl HuntyCore {
         Ok(())
     }
 
+    /// Revokes co-creator privileges for `co_creator_to_remove` on a hunt.
+    ///
+    /// # Errors
+    /// * [`HuntErrorCode::HuntNotFound`] if `hunt_id` does not exist.
+    /// * [`HuntErrorCode::Unauthorized`] if `creator` is not the hunt's creator.
     pub fn remove_co_creator(
         env: Env,
         hunt_id: u64,
@@ -3102,6 +3289,7 @@ impl HuntyCore {
         Ok(())
     }
 
+    /// Lists every co-creator currently registered for `hunt_id`.
     pub fn get_co_creators(env: Env, hunt_id: u64) -> Vec<Address> {
         Storage::get_co_creators(&env, hunt_id)
     }
@@ -3165,6 +3353,11 @@ impl HuntyCore {
         Ok(())
     }
 
+    /// Grants `viewer` read-only visibility across *every* hunt in the
+    /// contract, not just one. Only the contract admin may grant this.
+    ///
+    /// # Errors
+    /// * [`HuntErrorCode::Unauthorized`] if `admin` is not the configured contract admin.
     pub fn add_global_view_only(
         env: Env,
         admin: Address,
@@ -3182,6 +3375,11 @@ impl HuntyCore {
         Ok(())
     }
 
+    /// Revokes a previously granted global (contract-wide) view-only access
+    /// for `viewer`. Only the contract admin may revoke this.
+    ///
+    /// # Errors
+    /// * [`HuntErrorCode::Unauthorized`] if `admin` is not the configured contract admin.
     pub fn remove_global_view_only(
         env: Env,
         admin: Address,
@@ -3199,15 +3397,23 @@ impl HuntyCore {
         Ok(())
     }
 
+    /// Returns whether `address` has been granted global (contract-wide)
+    /// view-only access.
     pub fn is_global_view_only(env: Env, address: Address) -> bool {
         Storage::is_global_view_only(&env, &address)
     }
 
+    /// Lists every address with global (contract-wide) view-only access.
     pub fn get_global_view_only_list(env: Env) -> Vec<Address> {
         Storage::get_global_view_only_list(&env)
     }
 
     // Pause controls
+    /// Globally pauses new player registrations across all hunts. Existing
+    /// registrations and in-progress play are unaffected.
+    ///
+    /// # Errors
+    /// * [`HuntErrorCode::Unauthorized`] if `admin` is not the configured contract admin.
     pub fn pause_registrations(env: Env, admin: Address) -> Result<(), HuntErrorCode> {
         admin.require_auth();
 
@@ -3220,6 +3426,10 @@ impl HuntyCore {
         Ok(())
     }
 
+    /// Resumes player registrations after [`Self::pause_registrations`].
+    ///
+    /// # Errors
+    /// * [`HuntErrorCode::Unauthorized`] if `admin` is not the configured contract admin.
     pub fn unpause_registrations(env: Env, admin: Address) -> Result<(), HuntErrorCode> {
         admin.require_auth();
 
@@ -3232,6 +3442,11 @@ impl HuntyCore {
         Ok(())
     }
 
+    /// Globally pauses answer submissions across all hunts (see
+    /// [`Self::submit_answer`] / [`Self::submit_answer_with_hash`]).
+    ///
+    /// # Errors
+    /// * [`HuntErrorCode::Unauthorized`] if `admin` is not the configured contract admin.
     pub fn pause_answers(env: Env, admin: Address) -> Result<(), HuntErrorCode> {
         admin.require_auth();
 
@@ -3244,6 +3459,10 @@ impl HuntyCore {
         Ok(())
     }
 
+    /// Resumes answer submissions after [`Self::pause_answers`].
+    ///
+    /// # Errors
+    /// * [`HuntErrorCode::Unauthorized`] if `admin` is not the configured contract admin.
     pub fn unpause_answers(env: Env, admin: Address) -> Result<(), HuntErrorCode> {
         admin.require_auth();
 
@@ -3256,6 +3475,11 @@ impl HuntyCore {
         Ok(())
     }
 
+    /// Globally pauses reward distribution across all hunts (e.g. affects
+    /// [`Self::close_hunt`] and claim flows).
+    ///
+    /// # Errors
+    /// * [`HuntErrorCode::Unauthorized`] if `admin` is not the configured contract admin.
     pub fn pause_rewards(env: Env, admin: Address) -> Result<(), HuntErrorCode> {
         admin.require_auth();
 
@@ -3268,6 +3492,10 @@ impl HuntyCore {
         Ok(())
     }
 
+    /// Resumes reward distribution after [`Self::pause_rewards`].
+    ///
+    /// # Errors
+    /// * [`HuntErrorCode::Unauthorized`] if `admin` is not the configured contract admin.
     pub fn unpause_rewards(env: Env, admin: Address) -> Result<(), HuntErrorCode> {
         admin.require_auth();
 
@@ -3281,6 +3509,8 @@ impl HuntyCore {
     }
 
     // Query pause state
+    /// Returns the three independent global pause flags as
+    /// `(registrations_paused, answers_paused, rewards_paused)`.
     pub fn get_pause_state(env: Env) -> (bool, bool, bool) {
         (
             Storage::is_pause_registrations(&env),
@@ -3293,15 +3523,31 @@ impl HuntyCore {
     // Schema Migration & Monitoring
     // -----------------------------------------------------------------------------
 
+    /// Returns the contract's current persisted storage schema version.
     pub fn get_schema_version(env: Env) -> u32 {
         migration::HuntyCoreMigration::get_schema_version(&env)
     }
 
+    /// Initializes the storage schema-version tracker. Intended to be called
+    /// once, typically alongside contract deployment/initialization.
+    ///
+    /// # Panics
+    /// Panics (via the underlying migration module) if `admin` is not
+    /// authorized or the schema has already been initialized.
     pub fn initialize_schema(env: Env, admin: Address) {
         admin.require_auth();
         migration::HuntyCoreMigration::initialize_schema(&env, &admin);
     }
 
+    /// Runs a storage migration up to `target_version`.
+    ///
+    /// When `dry_run` is `true`, the migration is evaluated and reported on
+    /// without mutating storage, which is useful for verifying a migration
+    /// plan before committing to it.
+    ///
+    /// # Errors
+    /// Returns [`hunty_migration::UpgradeAuthError`] if `admin` is not
+    /// authorized to perform the migration.
     pub fn run_migration(
         env: Env,
         admin: Address,
@@ -3312,6 +3558,11 @@ impl HuntyCore {
         migration::HuntyCoreMigration::run_migration(&env, &admin, target_version, dry_run)
     }
 
+    /// Rolls back the most recently applied storage migration.
+    ///
+    /// # Errors
+    /// Returns [`hunty_migration::UpgradeAuthError`] if `admin` is not
+    /// authorized to perform the rollback.
     pub fn rollback_migration(
         env: Env,
         admin: Address,
@@ -3319,6 +3570,8 @@ impl HuntyCore {
         migration::HuntyCoreMigration::rollback_migration(&env, &admin)
     }
 
+    /// Returns a snapshot of contract health/monitoring metrics, as tracked
+    /// by the [`monitoring`] module.
     pub fn get_health_dashboard(env: Env) -> monitoring::ContractHealth {
         monitoring::Monitoring::health_dashboard(&env)
     }
@@ -3342,12 +3595,19 @@ impl HuntyCore {
 }
 
 
+/// Typed error codes and internal error conversions used throughout the contract.
 mod errors;
+/// Versioned storage-schema migration logic.
 mod migration;
+/// Operational health metrics exposed via [`HuntyCore::get_health_dashboard`].
 mod monitoring;
+/// Per-caller rate limiting used to throttle hunt-creation and similar actions.
 mod rate_limit;
+/// Input validation and normalization helpers (titles, descriptions, answers, etc.).
 mod sanitization;
+/// Persisted-state access layer wrapping Soroban storage for all contract data.
 mod storage;
+/// Shared data structures and event payload types used across the public interface.
 pub mod types;
 
 #[cfg(test)]
