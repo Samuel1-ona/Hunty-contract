@@ -1,9 +1,10 @@
 {
   "generators": {
-    "address": 4,
+    "address": 5,
     "nonce": 0
   },
   "auth": [
+    [],
     [],
     [],
     [
@@ -22,7 +23,7 @@
                   "u64": 1
                 },
                 {
-                  "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAITA4"
+                  "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAK3IM"
                 },
                 {
                   "map": [
@@ -37,7 +38,7 @@
                         "symbol": "description"
                       },
                       "val": {
-                        "string": "Desc"
+                        "string": "Completed the City Hunt"
                       }
                     },
                     {
@@ -53,7 +54,7 @@
                         "symbol": "hunt_title"
                       },
                       "val": {
-                        "string": "Alias Test"
+                        "string": "Hunt Champion"
                       }
                     },
                     {
@@ -61,7 +62,7 @@
                         "symbol": "image_uri"
                       },
                       "val": {
-                        "string": "ipfs://alias"
+                        "string": "ipfs://QmExample123"
                       }
                     },
                     {
@@ -91,7 +92,7 @@
                         "symbol": "title"
                       },
                       "val": {
-                        "string": "Alias Test"
+                        "string": "Hunt Champion"
                       }
                     }
                   ]
@@ -103,8 +104,6 @@
         }
       ]
     ],
-    [],
-    [],
     []
   ],
   "ledger": {
@@ -580,7 +579,7 @@
                         "symbol": "completion_player"
                       },
                       "val": {
-                        "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAITA4"
+                        "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAK3IM"
                       }
                     },
                     {
@@ -620,7 +619,7 @@
                         "symbol": "owner"
                       },
                       "val": {
-                        "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAITA4"
+                        "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAK3IM"
                       }
                     },
                     {
@@ -733,7 +732,7 @@
                         "symbol": "description"
                       },
                       "val": {
-                        "string": "Desc"
+                        "string": "Completed the City Hunt"
                       }
                     },
                     {
@@ -749,7 +748,7 @@
                         "symbol": "hunt_title"
                       },
                       "val": {
-                        "string": "Alias Test"
+                        "string": "Hunt Champion"
                       }
                     },
                     {
@@ -757,7 +756,7 @@
                         "symbol": "image_uri"
                       },
                       "val": {
-                        "string": "ipfs://alias"
+                        "string": "ipfs://QmExample123"
                       }
                     },
                     {
@@ -787,7 +786,7 @@
                         "symbol": "title"
                       },
                       "val": {
-                        "string": "Alias Test"
+                        "string": "Hunt Champion"
                       }
                     }
                   ]
@@ -809,7 +808,7 @@
                   "symbol": "ONFC"
                 },
                 {
-                  "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAITA4"
+                  "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAK3IM"
                 }
               ]
             },
@@ -829,7 +828,7 @@
                       "symbol": "ONFC"
                     },
                     {
-                      "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAITA4"
+                      "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAK3IM"
                     }
                   ]
                 },
@@ -854,7 +853,7 @@
                   "symbol": "ONFT"
                 },
                 {
-                  "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAITA4"
+                  "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAK3IM"
                 },
                 {
                   "u32": 0
@@ -877,7 +876,7 @@
                       "symbol": "ONFT"
                     },
                     {
-                      "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAITA4"
+                      "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAK3IM"
                     },
                     {
                       "u32": 0
@@ -905,7 +904,7 @@
                   "symbol": "ONFX"
                 },
                 {
-                  "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAITA4"
+                  "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAK3IM"
                 },
                 {
                   "u64": 1
@@ -928,7 +927,7 @@
                       "symbol": "ONFX"
                     },
                     {
-                      "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAITA4"
+                      "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAK3IM"
                     },
                     {
                       "u64": 1
@@ -985,7 +984,9 @@
                               "key": {
                                 "symbol": "creator"
                               },
-                              "val": "void"
+                              "val": {
+                                "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAITA4"
+                              }
                             },
                             {
                               "key": {

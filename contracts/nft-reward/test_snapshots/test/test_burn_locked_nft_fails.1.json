@@ -6,6 +6,7 @@
   "auth": [
     [],
     [],
+    [],
     [
       [
         "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHK3M",
@@ -53,7 +54,7 @@
                         "symbol": "hunt_title"
                       },
                       "val": {
-                        "string": "Alias Test"
+                        "string": "Locked NFT"
                       }
                     },
                     {
@@ -61,7 +62,7 @@
                         "symbol": "image_uri"
                       },
                       "val": {
-                        "string": "ipfs://alias"
+                        "string": "ipfs://locked"
                       }
                     },
                     {
@@ -91,7 +92,7 @@
                         "symbol": "title"
                       },
                       "val": {
-                        "string": "Alias Test"
+                        "string": "Locked NFT"
                       }
                     }
                   ]
@@ -103,8 +104,31 @@
         }
       ]
     ],
-    [],
-    [],
+    [
+      [
+        "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4",
+        {
+          "function": {
+            "contract_fn": {
+              "contract_address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
+              "function_name": "set_nft_locked",
+              "args": [
+                {
+                  "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4"
+                },
+                {
+                  "u64": 1
+                },
+                {
+                  "bool": true
+                }
+              ]
+            }
+          },
+          "sub_invocations": []
+        }
+      ]
+    ],
     []
   ],
   "ledger": {
@@ -596,7 +620,7 @@
                         "symbol": "locked"
                       },
                       "val": {
-                        "bool": false
+                        "bool": true
                       }
                     },
                     {
@@ -749,7 +773,7 @@
                         "symbol": "hunt_title"
                       },
                       "val": {
-                        "string": "Alias Test"
+                        "string": "Locked NFT"
                       }
                     },
                     {
@@ -757,7 +781,7 @@
                         "symbol": "image_uri"
                       },
                       "val": {
-                        "string": "ipfs://alias"
+                        "string": "ipfs://locked"
                       }
                     },
                     {
@@ -787,7 +811,7 @@
                         "symbol": "title"
                       },
                       "val": {
-                        "string": "Alias Test"
+                        "string": "Locked NFT"
                       }
                     }
                   ]
@@ -1030,6 +1054,39 @@
             "ext": "v0"
           },
           4095
+        ]
+      ],
+      [
+        {
+          "contract_data": {
+            "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4",
+            "key": {
+              "ledger_key_nonce": {
+                "nonce": 5541220902715666415
+              }
+            },
+            "durability": "temporary"
+          }
+        },
+        [
+          {
+            "last_modified_ledger_seq": 0,
+            "data": {
+              "contract_data": {
+                "ext": "v0",
+                "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4",
+                "key": {
+                  "ledger_key_nonce": {
+                    "nonce": 5541220902715666415
+                  }
+                },
+                "durability": "temporary",
+                "val": "void"
+              }
+            },
+            "ext": "v0"
+          },
+          6311999
         ]
       ],
       [

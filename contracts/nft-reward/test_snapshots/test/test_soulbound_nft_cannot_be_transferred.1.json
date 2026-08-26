@@ -1,6 +1,6 @@
 {
   "generators": {
-    "address": 4,
+    "address": 5,
     "nonce": 0
   },
   "auth": [
@@ -13,7 +13,7 @@
           "function": {
             "contract_fn": {
               "contract_address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
-              "function_name": "mint_reward_nft",
+              "function_name": "mint_reward_nft_from_map",
               "args": [
                 {
                   "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHK3M"
@@ -28,32 +28,10 @@
                   "map": [
                     {
                       "key": {
-                        "symbol": "creator"
-                      },
-                      "val": "void"
-                    },
-                    {
-                      "key": {
                         "symbol": "description"
                       },
                       "val": {
-                        "string": "Desc"
-                      }
-                    },
-                    {
-                      "key": {
-                        "symbol": "extensions"
-                      },
-                      "val": {
-                        "map": []
-                      }
-                    },
-                    {
-                      "key": {
-                        "symbol": "hunt_title"
-                      },
-                      "val": {
-                        "string": "Alias Test"
+                        "string": "Bound to the owner"
                       }
                     },
                     {
@@ -61,29 +39,7 @@
                         "symbol": "image_uri"
                       },
                       "val": {
-                        "string": "ipfs://alias"
-                      }
-                    },
-                    {
-                      "key": {
-                        "symbol": "rarity"
-                      },
-                      "val": {
-                        "u32": 0
-                      }
-                    },
-                    {
-                      "key": {
-                        "symbol": "royalty_bps"
-                      },
-                      "val": "void"
-                    },
-                    {
-                      "key": {
-                        "symbol": "tier"
-                      },
-                      "val": {
-                        "u32": 0
+                        "string": "ipfs://soulbound"
                       }
                     },
                     {
@@ -91,7 +47,15 @@
                         "symbol": "title"
                       },
                       "val": {
-                        "string": "Alias Test"
+                        "string": "Soulbound Trophy"
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "transferable"
+                      },
+                      "val": {
+                        "bool": false
                       }
                     }
                   ]
@@ -103,8 +67,6 @@
         }
       ]
     ],
-    [],
-    [],
     []
   ],
   "ledger": {
@@ -628,7 +590,7 @@
                         "symbol": "transferable"
                       },
                       "val": {
-                        "bool": true
+                        "bool": false
                       }
                     }
                   ]
@@ -726,14 +688,16 @@
                       "key": {
                         "symbol": "creator"
                       },
-                      "val": "void"
+                      "val": {
+                        "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAITA4"
+                      }
                     },
                     {
                       "key": {
                         "symbol": "description"
                       },
                       "val": {
-                        "string": "Desc"
+                        "string": "Bound to the owner"
                       }
                     },
                     {
@@ -749,7 +713,7 @@
                         "symbol": "hunt_title"
                       },
                       "val": {
-                        "string": "Alias Test"
+                        "string": "Soulbound Trophy"
                       }
                     },
                     {
@@ -757,7 +721,7 @@
                         "symbol": "image_uri"
                       },
                       "val": {
-                        "string": "ipfs://alias"
+                        "string": "ipfs://soulbound"
                       }
                     },
                     {
@@ -787,7 +751,7 @@
                         "symbol": "title"
                       },
                       "val": {
-                        "string": "Alias Test"
+                        "string": "Soulbound Trophy"
                       }
                     }
                   ]
