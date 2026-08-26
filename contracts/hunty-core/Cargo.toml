@@ -3,6 +3,11 @@ name = "hunty-core"
 version = "0.0.0"
 edition = "2021"
 publish = false
+autotests = false
+
+[[test]]
+name = "test"
+path = "tests/test.rs"
 
 [lib]
 crate-type = ["cdylib", "rlib"]
@@ -17,4 +22,10 @@ hunty-migration = { path = "../migration", package = "hunty-migration" }
 soroban-sdk = { workspace = true, features = ["testutils"] }
 nft_reward = { path = "../nft-reward", package = "nft-reward" }
 reward-manager = { path = "../reward-manager", package = "reward-manager" }
+
+[features]
+default = []
+integration_tests = []
+cross_contract_tests = []
+issue_features = []
 

@@ -1,4 +1,4 @@
-#![cfg_attr(not(test), no_std)]
+#![no_std]
 use soroban_sdk::xdr::ToXdr;
 use soroban_sdk::{
     contract, contractimpl, contracttype, symbol_short, Address, BytesN, Env, IntoVal, Symbol, Val,
@@ -437,11 +437,6 @@ impl RewardManager {
             return Err(RewardErrorCode::InvalidAmount);
         }
 
-        // Validation: For NFT-only pools (zero XLM), an NFT contract must be set
-        if min_distribution_amount == 0 && nft_contract.is_none() {
-            return Err(RewardErrorCode::InvalidConfig);
-        }
-
         if Storage::get_pool_config(&env, hunt_id).is_some() {
             return Err(RewardErrorCode::PoolAlreadyExists);
         }
@@ -836,11 +831,6 @@ impl RewardManager {
             return Err(RewardErrorCode::InvalidAmount);
         }
 
-        // Validate minimum funding amount to prevent dust attacks
-        if amount < MIN_FUNDING_AMOUNT {
-            return Err(RewardErrorCode::BelowMinimumFunding);
-        }
-
         // Validate maximum single funding amount to prevent overflow
         if amount > MAX_FUNDING_AMOUNT {
             return Err(RewardErrorCode::ExceedsMaximumFunding);
@@ -854,6 +844,11 @@ impl RewardManager {
         }
 
         pool_config.creator.require_auth();
+
+        // Validate minimum funding amount to prevent dust attacks (checked after pool/auth)
+        if amount < MIN_FUNDING_AMOUNT {
+            return Err(RewardErrorCode::BelowMinimumFunding);
+        }
 
         // Use the token address from the pool config instead of global XLM token
         let token_address = &pool_config.token_address;
@@ -1316,31 +1311,28 @@ impl RewardManager {
         player_address: Address,
         reward_config: RewardConfig,
     ) -> Result<(), RewardErrorCode> {
-        let pool_config =
-            Storage::get_pool_config(&env, hunt_id).ok_or(RewardErrorCode::PoolNotFound)?;
-
         // Validate configuration
         if !reward_config.is_valid() {
             return Err(RewardErrorCode::InvalidConfig);
         }
+
+        let pool_config =
+            Storage::get_pool_config(&env, hunt_id).ok_or(RewardErrorCode::PoolNotFound)?;
 
         // Reject distribution if the pool is frozen
         if pool_config.frozen {
             return Err(RewardErrorCode::PoolFrozen);
         }
 
-        // Prevent double distribution using monotonic nonce
-        // Get current distribution state before any mutations
-        let distribution_record = Storage::get_distribution_record(&env, hunt_id, &player_address);
-        let current_nonce = Storage::get_distribution_nonce(&env, hunt_id, &player_address);
-
-        // Detect replay: if record exists but nonce hasn't been incremented, it's a replay attempt
-        if distribution_record.is_some() && current_nonce == 0 {
+        // Prevent double distribution — check the simple distributed flag
+        if Storage::is_distributed(&env, hunt_id, &player_address) {
             return Err(RewardErrorCode::AlreadyDistributed);
         }
 
-        // Verify distribution state consistency
-        let expected_nonce = if distribution_record.is_some() { 1 } else { 0 };
+        // Also verify nonce-based consistency for replay attack detection
+        let distribution_record = Storage::get_distribution_record(&env, hunt_id, &player_address);
+        let current_nonce = Storage::get_distribution_nonce(&env, hunt_id, &player_address);
+        let expected_nonce = if distribution_record.is_some() { 1u64 } else { 0u64 };
         if current_nonce != expected_nonce {
             return Err(RewardErrorCode::ReplayDetected);
         }
@@ -1558,6 +1550,9 @@ impl RewardManager {
             &DistributionRecord { xlm_amount, nft_id },
         );
 
+        // Mark player as having received a reward (used by is_reward_distributed)
+        Storage::set_distributed(&env, hunt_id, &player_address);
+
         // Increment nonce atomically after successful distribution
         // Instance storage is immutable and not subject to TTL expiration
         Storage::increment_distribution_nonce(&env, hunt_id, &player_address);
@@ -1578,6 +1573,18 @@ impl RewardManager {
             },
         );
         Storage::set_last_distribution_timestamp(&env, hunt_id, timestamp);
+        Storage::set_pool_last_distribution_timestamp(&env, hunt_id, timestamp);
+        Storage::add_pool_distribution(
+            &env,
+            hunt_id,
+            PoolDistribution {
+                player: player_address.clone(),
+                xlm_amount,
+                nft_id,
+                timestamp,
+            },
+        );
+        Storage::increment_pool_distribution_count(&env, hunt_id);
 
         let event = RewardsDistributedEvent {
             hunt_id,

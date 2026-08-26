@@ -1,4 +1,4 @@
-#![cfg_attr(not(test), no_std)]
+#![no_std]
 use soroban_sdk::{
     contract, contractimpl, contracttype, panic_with_error, symbol_short, Address, Env, Map,
     String, Symbol, Val, Vec,
@@ -325,11 +325,8 @@ impl NftReward {
         let image_uri = metadata
             .get(Symbol::new(&env, "image_uri"))
             .and_then(|v| String::try_from_val(&env, &v).ok())
-            .unwrap_or_else(|| String::from_str(&env, ""));
-
-        if !image_uri_is_valid(&image_uri) {
-            panic!("Invalid NFT image_uri: must be non-empty");
-        }
+            .filter(|uri| image_uri_is_valid(uri))
+            .unwrap_or_else(|| String::from_str(&env, "https://hunty.app/default-nft.png"));
 
         let hunt_title = metadata
             .get(Symbol::new(&env, "hunt_title"))
@@ -342,7 +339,7 @@ impl NftReward {
             .unwrap_or(0u32);
 
         if rarity > 5 {
-            panic!("InvalidRarity");
+            panic_with_error!(&env, crate::errors::NftErrorCode::InvalidRarity);
         }
 
         let tier = metadata

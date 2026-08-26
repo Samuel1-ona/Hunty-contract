@@ -37,7 +37,7 @@ fn test_cancel_hunt_with_reward_pool_refund() {
 
     // Mint tokens to creator
     let sac = token::StellarAssetClient::new(&env, &token_address);
-    sac.mint(&creator, &5_000);
+    sac.mint(&creator, &10_000_000);
 
     // Create hunt, add clue, activate, and set reward manager
     let hunt_id = client.create_hunt(
@@ -46,19 +46,22 @@ fn test_cancel_hunt_with_reward_pool_refund() {
         &String::from_str(&env, "Testing refund on cancel"),
         &None,
         &None,
+        &0u32,
+        &None,
+        &None,
     );
-    client.add_clue(&hunt_id, &question, &answer, &1, &true, &1);
+    client.add_clue(&hunt_id, &question, &answer, &1, &true, &None, &None);
     client.activate_hunt(&hunt_id, &creator);
     client.set_reward_manager(&admin, &reward_manager_id);
 
     // Create reward pool on reward manager
     env.as_contract(&reward_manager_id, || {
-        RewardManager::create_reward_pool(env.clone(), creator.clone(), hunt_id, 0).unwrap();
-        RewardManager::fund_reward_pool(env.clone(), creator.clone(), hunt_id, 5_000).unwrap();
+        RewardManager::create_reward_pool(env.clone(), creator.clone(), hunt_id, token_address.clone(), 10_000_000).unwrap();
+        RewardManager::fund_reward_pool(env.clone(), creator.clone(), hunt_id, 10_000_000).unwrap();
     });
 
     env.as_contract(&reward_manager_id, || {
-        assert_eq!(RewardManager::get_pool_balance(env.clone(), hunt_id), 5_000);
+        assert_eq!(RewardManager::get_pool_balance(env.clone(), hunt_id), 10_000_000);
     });
 
     // Cancel the hunt — should trigger cross-contract refund_pool call
@@ -69,6 +72,6 @@ fn test_cancel_hunt_with_reward_pool_refund() {
     });
 
     let token_client = token::Client::new(&env, &token_address);
-    assert_eq!(token_client.balance(&creator), 5_000);
+    assert_eq!(token_client.balance(&creator), 10_000_000);
     assert_eq!(token_client.balance(&reward_manager_id), 0);
 }

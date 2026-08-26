@@ -10,6 +10,12 @@ fn create_mock_token(env: &Env) -> Address {
         .address()
 }
 
+/// Helper to mint tokens using StellarAssetClient
+fn mint_tokens(env: &Env, token_address: &Address, to: &Address, amount: i128) {
+    let client = soroban_sdk::token::StellarAssetClient::new(env, token_address);
+    client.mint(to, &amount);
+}
+
 #[test]
 fn test_create_pool_with_xlm_token() {
     let env = Env::default();
@@ -156,6 +162,7 @@ fn test_fund_pool_uses_correct_token() {
 
         // Fund the pool
         let fund_amount = 50_000_000i128;
+        mint_tokens(&env, &usdc_token, &creator, fund_amount);
         let result = RewardManager::fund_reward_pool(env.clone(), creator.clone(), 1, fund_amount);
 
         assert!(result.is_ok());
@@ -187,6 +194,7 @@ fn test_distribute_rewards_uses_pool_token() {
             .unwrap();
 
         // Fund the pool
+        mint_tokens(&env, &usdc_token, &creator, 100_000_000);
         RewardManager::fund_reward_pool(env.clone(), creator.clone(), 1, 100_000_000).unwrap();
 
         // Distribute rewards
@@ -231,6 +239,7 @@ fn test_refund_pool_uses_correct_token() {
         RewardManager::create_reward_pool(env.clone(), creator.clone(), 1, usdc_token.clone(), 0)
             .unwrap();
 
+        mint_tokens(&env, &usdc_token, &creator, 50_000_000);
         RewardManager::fund_reward_pool(env.clone(), creator.clone(), 1, 50_000_000).unwrap();
 
         // Refund the pool

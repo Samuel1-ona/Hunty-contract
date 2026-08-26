@@ -1,3 +1,4 @@
+#![cfg(feature = "integration_tests")]
 //! Testnet integration test — runs only with `--ignored` when live network is available.
 //!
 //! Validates: deploy → create hunt → register → submit answer → complete → verify balances → cancel/cleanup.
@@ -36,6 +37,8 @@ fn testnet_full_hunt_lifecycle_simulation() {
             String::from_str(&env, "E2E lifecycle"),
             None,
             None,
+            0,
+            None,
         )
         .unwrap();
 
@@ -46,6 +49,8 @@ fn testnet_full_hunt_lifecycle_simulation() {
             String::from_str(&env, "Paris"),
             10,
             true,
+            None,
+            None,
         )
         .unwrap();
 

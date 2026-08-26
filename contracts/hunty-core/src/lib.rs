@@ -986,7 +986,12 @@ impl HuntyCore {
                 *b += b'a' - b'A';
             }
         }
-        let normalized = Bytes::from_slice(env, &buf[..end]);
+        let norm_len = end - start;
+        if start > 12 {
+            buf.copy_within(start..end, 12);
+        }
+        let total_len = 12 + norm_len;
+        let normalized = Bytes::from_slice(env, &buf[..total_len]);
         let hash = env.crypto().sha256(&normalized);
         Ok(hash.to_bytes())
     }
