@@ -251,11 +251,13 @@ impl NftReward {
     }
 
     fn require_authorized_caller(env: &Env, caller: &Address) {
+        caller.require_auth();
         if Storage::has_authorized_contracts(env) {
-            caller.require_auth();
             if !Storage::is_authorized_contract(env, caller) {
                 panic_with_error!(env, crate::errors::NftErrorCode::Unauthorized);
             }
+        } else if !Storage::is_minter(env, caller) {
+            panic_with_error!(env, crate::errors::NftErrorCode::Unauthorized);
         }
     }
 
@@ -397,7 +399,7 @@ impl NftReward {
     }
 
     fn validate_extensions(
-        env: &Env,
+        _env: &Env,
         extensions: &Map<String, String>,
     ) -> Result<(), NftErrorCode> {
         let count = extensions.len();
@@ -681,8 +683,34 @@ impl NftReward {
         Ok(())
     }
 
-    /// Batch-updates image URIs for all NFTs whose `image_uri` starts with `old_prefix`,
+    /// Adds a minter to the whitelist. Only the admin can call this.
+    pub fn add_minter(
+        env: Env,
+        admin: Address,
+        minter: Address,
+    ) -> Result<(), crate::errors::NftErrorCode> {
+        Self::require_admin(&env, &admin)?;
+        Storage::add_minter(&env, &minter);
+        Ok(())
+    }
+
+    /// Removes a minter from the whitelist. Only the admin can call this.
+    pub fn remove_minter(
+        env: Env,
+        admin: Address,
+        minter: Address,
+    ) -> Result<(), crate::errors::NftErrorCode> {
+        Self::require_admin(&env, &admin)?;
+        Storage::remove_minter(&env, &minter);
+        Ok(())
+    }
+
+    /// Batch-updates image URIs for NFTs whose `image_uri` starts with `old_prefix`,
     /// replacing it with `new_prefix`. Useful for migrating between IPFS gateways or CDNs.
+    ///
+    /// Processes at most `limit` NFTs per call, starting from `offset` into the
+    /// full NFT id list. Call repeatedly with increasing offsets until the
+    /// returned `updated_count` indicates completion.
     ///
     /// # Authorization
     /// Only the configured admin can call this function.
@@ -691,28 +719,53 @@ impl NftReward {
     /// * `admin` - The admin address (must match the stored admin)
     /// * `old_prefix` - The prefix to match (e.g. "ipfs://oldgateway/")
     /// * `new_prefix` - The replacement prefix (e.g. "ipfs://newgateway/")
+    /// * `offset` - Starting index into the NFT id list (0-based)
+    /// * `limit` - Maximum number of NFTs to inspect in this call (capped at MAX_SCAN_LIMIT)
     ///
     /// # Returns
-    /// The number of NFTs whose image URIs were updated.
+    /// The number of NFTs whose image URIs were updated in this batch.
     pub fn admin_update_image_uris(
         env: Env,
         admin: Address,
         old_prefix: String,
         new_prefix: String,
+        offset: u32,
+        limit: u32,
     ) -> Result<u32, crate::errors::NftErrorCode> {
         Self::require_admin(&env, &admin)?;
 
         let all_ids = Storage::get_all_nft_ids(&env);
+        let total_count = all_ids.len();
+
+        if offset >= total_count {
+            env.events().publish(
+                (Symbol::new(&env, "AdminImageUrisUpdated"),),
+                AdminImageUrisUpdatedEvent {
+                    old_prefix,
+                    new_prefix,
+                    updated_count: 0,
+                },
+            );
+            return Ok(0);
+        }
+
+        let bounded_limit = limit.min(MAX_SCAN_LIMIT);
+        let end = offset.saturating_add(bounded_limit).min(total_count);
         let mut updated: u32 = 0;
 
-        for nft_id in all_ids.iter() {
-            if let Some(mut nft) = Storage::get_nft(&env, nft_id) {
-                if let Some(new_uri) =
-                    Self::replace_prefix(&env, &nft.metadata.image_uri, &old_prefix, &new_prefix)
-                {
-                    nft.metadata.image_uri = new_uri;
-                    Storage::save_nft(&env, &nft);
-                    updated += 1;
+        for i in offset..end {
+            if let Some(nft_id) = all_ids.get(i) {
+                if let Some(mut nft) = Storage::get_nft(&env, nft_id) {
+                    if let Some(new_uri) = Self::replace_prefix(
+                        &env,
+                        &nft.metadata.image_uri,
+                        &old_prefix,
+                        &new_prefix,
+                    ) {
+                        nft.metadata.image_uri = new_uri;
+                        Storage::save_nft(&env, &nft);
+                        updated += 1;
+                    }
                 }
             }
         }
@@ -743,20 +796,27 @@ impl NftReward {
             return None;
         }
 
-        let mut buf_uri = [0u8; 256];
-        let mut buf_old = [0u8; 256];
-        let mut buf_new = [0u8; 256];
+        if uri_len > MAX_URI_LEN || old_len > MAX_URI_LEN || new_len > MAX_URI_LEN {
+            return None;
+        }
 
-        uri.copy_into_slice(&mut buf_uri[..uri_len.min(256)]);
-        old_prefix.copy_into_slice(&mut buf_old[..old_len.min(256)]);
-        new_prefix.copy_into_slice(&mut buf_new[..new_len.min(256)]);
+        let mut buf_uri = [0u8; MAX_URI_LEN];
+        let mut buf_old = [0u8; MAX_URI_LEN];
+        let mut buf_new = [0u8; MAX_URI_LEN];
+
+        uri.copy_into_slice(&mut buf_uri[..uri_len]);
+        old_prefix.copy_into_slice(&mut buf_old[..old_len]);
+        new_prefix.copy_into_slice(&mut buf_new[..new_len]);
 
         if buf_uri[..old_len] == buf_old[..old_len] {
-            let mut final_buf = [0u8; 512];
-            final_buf[..new_len].copy_from_slice(&buf_new[..new_len]);
             let suffix_len = uri_len - old_len;
-            final_buf[new_len..new_len + suffix_len].copy_from_slice(&buf_uri[old_len..uri_len]);
             let total_len = new_len + suffix_len;
+            if total_len > MAX_URI_LEN {
+                return None;
+            }
+            let mut final_buf = [0u8; MAX_URI_LEN];
+            final_buf[..new_len].copy_from_slice(&buf_new[..new_len]);
+            final_buf[new_len..total_len].copy_from_slice(&buf_uri[old_len..uri_len]);
             // SAFETY: `final_buf` is assembled entirely from bytes copied
             // out of soroban_sdk::String values, so the slice is valid UTF-8.
             let text = unsafe { core::str::from_utf8_unchecked(&final_buf[..total_len]) };
@@ -1179,6 +1239,8 @@ impl NftReward {
         Storage::remove_nft(&env, nft_id);
         Storage::remove_nft_from_hunt(&env, hunt_id, nft_id);
         Storage::remove_nft_from_owner(&env, &owner, nft_id);
+        Storage::decrement_nft_counter(&env);
+        Storage::update_collection_metadata_total_supply(&env, Storage::get_nft_counter(&env));
 
         env.events().publish(
             (Symbol::new(&env, "NftBurned"), nft_id),
@@ -1189,6 +1251,29 @@ impl NftReward {
             },
         );
 
+        Ok(())
+    }
+
+    /// Locks or unlocks an NFT. When locked, the NFT cannot be transferred or burned.
+    /// Only the admin can call this function.
+    ///
+    /// # Arguments
+    /// * `admin` - The admin address (must match the stored admin)
+    /// * `nft_id` - The NFT to lock or unlock
+    /// * `locked` - `true` to lock, `false` to unlock
+    pub fn set_nft_locked(
+        env: Env,
+        admin: Address,
+        nft_id: u64,
+        locked: bool,
+    ) -> Result<(), crate::errors::NftErrorCode> {
+        Self::require_admin(&env, &admin)?;
+
+        let mut nft =
+            Storage::get_nft(&env, nft_id).ok_or(crate::errors::NftErrorCode::NftNotFound)?;
+
+        nft.locked = locked;
+        Storage::save_nft(&env, &nft);
         Ok(())
     }
 }
