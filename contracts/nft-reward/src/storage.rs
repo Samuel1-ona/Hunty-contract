@@ -290,6 +290,19 @@ impl Storage {
             .unwrap_or(0)
     }
 
+    pub fn decrement_nft_counter(env: &Env) {
+        let current: u64 = env
+            .storage()
+            .persistent()
+            .get(&Self::NFT_COUNTER_KEY)
+            .unwrap_or(0);
+        if current > 0 {
+            env.storage()
+                .persistent()
+                .set(&Self::NFT_COUNTER_KEY, &(current - 1));
+        }
+    }
+
     pub fn get_nft_count_for_hunt(env: &Env, hunt_id: u64) -> u64 {
         let all_ids = Self::get_all_nft_ids(env);
         let mut count = 0u64;

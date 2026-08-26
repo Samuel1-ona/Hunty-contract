@@ -13,7 +13,7 @@
           "function": {
             "contract_fn": {
               "contract_address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
-              "function_name": "mint_reward_nft",
+              "function_name": "mint_reward_nft_from_map",
               "args": [
                 {
                   "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHK3M"
@@ -28,24 +28,10 @@
                   "map": [
                     {
                       "key": {
-                        "symbol": "creator"
-                      },
-                      "val": "void"
-                    },
-                    {
-                      "key": {
                         "symbol": "description"
                       },
                       "val": {
-                        "string": "Desc"
-                      }
-                    },
-                    {
-                      "key": {
-                        "symbol": "extensions"
-                      },
-                      "val": {
-                        "map": []
+                        "u32": 123456
                       }
                     },
                     {
@@ -53,7 +39,7 @@
                         "symbol": "hunt_title"
                       },
                       "val": {
-                        "string": "Alias Test"
+                        "u32": 999
                       }
                     },
                     {
@@ -61,7 +47,7 @@
                         "symbol": "image_uri"
                       },
                       "val": {
-                        "string": "ipfs://alias"
+                        "string": "ipfs://valid"
                       }
                     },
                     {
@@ -69,21 +55,15 @@
                         "symbol": "rarity"
                       },
                       "val": {
-                        "u32": 0
+                        "string": "invalid"
                       }
-                    },
-                    {
-                      "key": {
-                        "symbol": "royalty_bps"
-                      },
-                      "val": "void"
                     },
                     {
                       "key": {
                         "symbol": "tier"
                       },
                       "val": {
-                        "u32": 0
+                        "string": "invalid"
                       }
                     },
                     {
@@ -91,7 +71,15 @@
                         "symbol": "title"
                       },
                       "val": {
-                        "string": "Alias Test"
+                        "string": "Valid Title"
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "transferable"
+                      },
+                      "val": {
+                        "u32": 123
                       }
                     }
                   ]
@@ -103,8 +91,6 @@
         }
       ]
     ],
-    [],
-    [],
     []
   ],
   "ledger": {
@@ -628,7 +614,7 @@
                         "symbol": "transferable"
                       },
                       "val": {
-                        "bool": true
+                        "bool": false
                       }
                     }
                   ]
@@ -726,14 +712,16 @@
                       "key": {
                         "symbol": "creator"
                       },
-                      "val": "void"
+                      "val": {
+                        "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAITA4"
+                      }
                     },
                     {
                       "key": {
                         "symbol": "description"
                       },
                       "val": {
-                        "string": "Desc"
+                        "string": ""
                       }
                     },
                     {
@@ -749,7 +737,7 @@
                         "symbol": "hunt_title"
                       },
                       "val": {
-                        "string": "Alias Test"
+                        "string": "Valid Title"
                       }
                     },
                     {
@@ -757,7 +745,7 @@
                         "symbol": "image_uri"
                       },
                       "val": {
-                        "string": "ipfs://alias"
+                        "string": "ipfs://valid"
                       }
                     },
                     {
@@ -787,7 +775,7 @@
                         "symbol": "title"
                       },
                       "val": {
-                        "string": "Alias Test"
+                        "string": "Valid Title"
                       }
                     }
                   ]
