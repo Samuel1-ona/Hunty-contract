@@ -13,7 +13,7 @@
           "function": {
             "contract_fn": {
               "contract_address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
-              "function_name": "mint_reward_nft",
+              "function_name": "mint_reward_nft_from_map",
               "args": [
                 {
                   "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHK3M"
@@ -28,62 +28,10 @@
                   "map": [
                     {
                       "key": {
-                        "symbol": "creator"
-                      },
-                      "val": "void"
-                    },
-                    {
-                      "key": {
-                        "symbol": "description"
-                      },
-                      "val": {
-                        "string": "Desc"
-                      }
-                    },
-                    {
-                      "key": {
-                        "symbol": "extensions"
-                      },
-                      "val": {
-                        "map": []
-                      }
-                    },
-                    {
-                      "key": {
-                        "symbol": "hunt_title"
-                      },
-                      "val": {
-                        "string": "Alias Test"
-                      }
-                    },
-                    {
-                      "key": {
                         "symbol": "image_uri"
                       },
                       "val": {
-                        "string": "ipfs://alias"
-                      }
-                    },
-                    {
-                      "key": {
-                        "symbol": "rarity"
-                      },
-                      "val": {
-                        "u32": 0
-                      }
-                    },
-                    {
-                      "key": {
-                        "symbol": "royalty_bps"
-                      },
-                      "val": "void"
-                    },
-                    {
-                      "key": {
-                        "symbol": "tier"
-                      },
-                      "val": {
-                        "u32": 0
+                        "string": "ipfs://default"
                       }
                     },
                     {
@@ -91,7 +39,7 @@
                         "symbol": "title"
                       },
                       "val": {
-                        "string": "Alias Test"
+                        "string": "Test NFT"
                       }
                     }
                   ]
@@ -103,8 +51,6 @@
         }
       ]
     ],
-    [],
-    [],
     []
   ],
   "ledger": {
@@ -628,7 +574,7 @@
                         "symbol": "transferable"
                       },
                       "val": {
-                        "bool": true
+                        "bool": false
                       }
                     }
                   ]
@@ -726,14 +672,16 @@
                       "key": {
                         "symbol": "creator"
                       },
-                      "val": "void"
+                      "val": {
+                        "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAITA4"
+                      }
                     },
                     {
                       "key": {
                         "symbol": "description"
                       },
                       "val": {
-                        "string": "Desc"
+                        "string": ""
                       }
                     },
                     {
@@ -749,7 +697,7 @@
                         "symbol": "hunt_title"
                       },
                       "val": {
-                        "string": "Alias Test"
+                        "string": "Test NFT"
                       }
                     },
                     {
@@ -757,7 +705,7 @@
                         "symbol": "image_uri"
                       },
                       "val": {
-                        "string": "ipfs://alias"
+                        "string": "ipfs://default"
                       }
                     },
                     {
@@ -787,7 +735,7 @@
                         "symbol": "title"
                       },
                       "val": {
-                        "string": "Alias Test"
+                        "string": "Test NFT"
                       }
                     }
                   ]

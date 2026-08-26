@@ -1,6 +1,6 @@
 {
   "generators": {
-    "address": 4,
+    "address": 5,
     "nonce": 0
   },
   "auth": [
@@ -53,7 +53,7 @@
                         "symbol": "hunt_title"
                       },
                       "val": {
-                        "string": "Alias Test"
+                        "string": "Owned NFT"
                       }
                     },
                     {
@@ -61,7 +61,7 @@
                         "symbol": "image_uri"
                       },
                       "val": {
-                        "string": "ipfs://alias"
+                        "string": "ipfs://owned"
                       }
                     },
                     {
@@ -91,7 +91,7 @@
                         "symbol": "title"
                       },
                       "val": {
-                        "string": "Alias Test"
+                        "string": "Owned NFT"
                       }
                     }
                   ]
@@ -103,8 +103,6 @@
         }
       ]
     ],
-    [],
-    [],
     []
   ],
   "ledger": {
@@ -749,7 +747,7 @@
                         "symbol": "hunt_title"
                       },
                       "val": {
-                        "string": "Alias Test"
+                        "string": "Owned NFT"
                       }
                     },
                     {
@@ -757,7 +755,7 @@
                         "symbol": "image_uri"
                       },
                       "val": {
-                        "string": "ipfs://alias"
+                        "string": "ipfs://owned"
                       }
                     },
                     {
@@ -787,7 +785,7 @@
                         "symbol": "title"
                       },
                       "val": {
-                        "string": "Alias Test"
+                        "string": "Owned NFT"
                       }
                     }
                   ]
