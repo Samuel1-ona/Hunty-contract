@@ -127,7 +127,7 @@ impl HuntyCore {
         start_multiplier_bps: Option<u32>,
         default_points: Option<u32>,
     ) -> Result<u64, HuntErrorCode> {
-        monitoring::Monitoring::record_invocation(&env, 50_000, true);
+        hunty_common::monitoring::Monitoring::record_invocation(&env, 50_000, true);
         if Storage::is_blacklisted(&env, &creator) {
             return Err(HuntErrorCode::AddressBlacklisted);
         }
@@ -3319,8 +3319,8 @@ impl HuntyCore {
         migration::HuntyCoreMigration::rollback_migration(&env, &admin)
     }
 
-    pub fn get_health_dashboard(env: Env) -> monitoring::ContractHealth {
-        monitoring::Monitoring::health_dashboard(&env)
+    pub fn get_health_dashboard(env: Env) -> hunty_common::monitoring::ContractHealth {
+        hunty_common::monitoring::Monitoring::health_dashboard(&env)
     }
 
     #[cfg(debug_assertions)]
@@ -3344,7 +3344,6 @@ impl HuntyCore {
 
 mod errors;
 mod migration;
-mod monitoring;
 mod rate_limit;
 mod sanitization;
 mod storage;
