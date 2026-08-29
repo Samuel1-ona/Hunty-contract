@@ -255,6 +255,9 @@ pub struct StoredPlayerProgress {
     pub recent_submissions: Vec<u64>,
     pub clue_last_attempts: Map<u32, u64>,
     pub required_completed_count: u32,
+    /// The player's finishing position among all completions for this hunt,
+    /// frozen at the moment `is_completed` was set to `true`. 0 = not yet completed.
+    pub completion_rank: u32,
 }
 
 /// Public view of player progress, with `player` and `hunt_id` reconstructed from the key.
@@ -272,6 +275,10 @@ pub struct PlayerProgress {
     pub completed_at: u64,
     pub is_completed: bool,
     pub reward_claimed: bool,
+    /// The player's finishing position among all completions for this hunt,
+    /// frozen at the moment `is_completed` was set to `true`.  Zero means the
+    /// player has not yet completed the hunt.
+    pub completion_rank: u32,
     pub recent_submissions: Vec<u64>,
     pub clue_last_attempts: Map<u32, u64>,
 }
@@ -290,6 +297,7 @@ impl PlayerProgress {
             completed_at: 0,
             is_completed: false,
             reward_claimed: false,
+            completion_rank: 0,
             recent_submissions: Vec::new(env),
             clue_last_attempts: Map::new(env),
         }
@@ -333,6 +341,7 @@ impl PlayerProgress {
             recent_submissions: self.recent_submissions.clone(),
             clue_last_attempts: self.clue_last_attempts.clone(),
             required_completed_count: self.required_completed_count,
+            completion_rank: self.completion_rank,
         }
     }
 
@@ -375,6 +384,7 @@ impl PlayerProgress {
             completed_at,
             is_completed: (stored.flags & 0b0000_0001) != 0,
             reward_claimed: (stored.flags & 0b0000_0010) != 0,
+            completion_rank: stored.completion_rank,
             recent_submissions: stored.recent_submissions,
             clue_last_attempts: stored.clue_last_attempts,
         }

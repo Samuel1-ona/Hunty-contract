@@ -168,6 +168,9 @@ pub struct PendingNftMint {
     pub nft_hunt_title: soroban_sdk::String,
     pub nft_rarity: u32,
     pub nft_tier: u32,
+    /// Frozen completion rank from hunty-core; preserved so a retry emits the
+    /// same rank that would have been recorded on the first attempt.
+    pub completion_rank: u32,
 }
 
 /// Result of a pool validation check, returned by validate_pool().
