@@ -1977,6 +1977,120 @@ pub fn archive_hunt(env: Env, hunt_id: u64, caller: Address) -> Result<(), HuntE
 
 ---
 
+#### `gc_hunt`
+
+Reclaims the storage of a cancelled or archived hunt (issue #446).
+
+A cancelled hunt keeps every clue, player-progress, team, leaderboard
+and bookkeeping entry it ever wrote. Nothing referenced those entries
+any more, but nothing removed them either, so they sat in persistent
+storage paying rent until their TTL lapsed.
+
+Only `Cancelled` and `Archived` hunts may be collected — those are the
+two terminal states. Anything else is rejected with `InvalidHuntStatus`,
+because collecting a live hunt would destroy player progress.
+
+The sweep is **idempotent**: running it twice reports zero the second
+time rather than failing, so an interrupted call is safe to retry.
+
+# Authorization
+The hunt creator or the contract admin.
+
+# Returns
+A [`GcReport`] describing what was reclaimed.
+
+**Signature:**
+
+```rust
+pub fn gc_hunt(env: Env, hunt_id: u64, caller: Address) -> Result<GcReport, HuntErrorCode>
+```
+
+**Parameters:**
+
+- `env: Env`
+- `hunt_id: u64`
+- `caller: Address`
+
+**Returns:** `Result<GcReport, HuntErrorCode>`
+
+**Error type:** `HuntErrorCode`
+
+**Error codes:**
+
+- `HuntNotFound` = 1
+- `ClueNotFound` = 2
+- `InvalidHuntStatus` = 3
+- `PlayerNotRegistered` = 4
+- `ClueAlreadyCompleted` = 5
+- `InvalidAnswer` = 6
+- `HuntNotActive` = 7
+- `Unauthorized` = 8
+- `InsufficientRewardPool` = 9
+- `DuplicateRegistration` = 10
+- `InvalidTitle` = 11
+- `InvalidDescription` = 12
+- `InvalidAddress` = 13
+- `TooManyClues` = 14
+- `InvalidQuestion` = 15
+- `RefundFailed` = 16
+- `NoCluesAdded` = 17
+- `HuntNotCompleted` = 18
+- `RewardAlreadyClaimed` = 19
+- `RewardDistributionFailed` = 20
+- `NoRewardsConfigured` = 21
+- `DuplicateSubmission` = 22
+- `SubmissionExpired` = 23
+- `BannedPlayer` = 24
+- `NoRequiredClues` = 25
+- `RateLimitExceeded` = 26
+- `ScoreOverflow` = 27
+- `RegistrationsPaused` = 28
+- `AnswersPaused` = 29
+- `RewardsPaused` = 30
+- `HuntEndTimeInPast` = 31
+- `NoPendingAdmin` = 32
+- `PendingAdminMismatch` = 33
+- `InvalidRarity` = 34
+- `InvalidTimeBonusConfig` = 35
+- `AddressBlacklisted` = 36
+- `ContractPaused` = 37
+- `InvalidMaxAttempts` = 38
+- `InvalidWeight` = 39
+- `HintNotAvailable` = 40
+- `HintAlreadyUnlocked` = 41
+- `InsufficientScore` = 42
+- `TooManyCategories` = 43
+- `InvalidCategory` = 44
+- `InvalidDifficulty` = 45
+- `CorruptPlayerProgress` = 46
+- `HuntNotStarted` = 47
+- `AdminAlreadyProposed` = 48
+- `InvalidPoints` = 49
+- `HuntFull` = 50
+
+---
+
+#### `get_hunt_storage_footprint`
+
+Reports how much storage a hunt currently occupies, without removing
+anything. Read-only, so it needs no authorization — hunt existence and
+size are already public via `get_hunt_info`.
+
+**Signature:**
+
+```rust
+pub fn get_hunt_storage_footprint(env: Env, hunt_id: u64) -> GcReport
+```
+
+**Parameters:**
+
+- `env: Env`
+- `hunt_id: u64`
+
+**Returns:** `GcReport`
+
+---
+
 #### `get_hunt_info`
 
 **Signature:**
@@ -2879,6 +2993,10 @@ pub fn register_with_invite(env: Env, hunt_id: u64, player: Address, invite_code
 
 Verifies a candidate answer for a registered player with authorization and rate limiting.
 
+Unlike `submit_answer`, `preview_answer` does not mark the clue as completed, award points,
+or emit clue completion events, but requires player authorization and enforces the same
+per-minute rate limits and attempt cooldowns to prevent brute-force dictionary attacks.
+
 **Signature:**
 
 ```rust
@@ -2896,6 +3014,59 @@ pub fn preview_answer(env: Env, hunt_id: u64, clue_id: u32, player: Address, ans
 **Returns:** `Result<bool, HuntErrorCode>`
 
 **Error type:** `HuntErrorCode`
+
+**Error codes:**
+
+- `HuntNotFound` = 1
+- `ClueNotFound` = 2
+- `InvalidHuntStatus` = 3
+- `PlayerNotRegistered` = 4
+- `ClueAlreadyCompleted` = 5
+- `InvalidAnswer` = 6
+- `HuntNotActive` = 7
+- `Unauthorized` = 8
+- `InsufficientRewardPool` = 9
+- `DuplicateRegistration` = 10
+- `InvalidTitle` = 11
+- `InvalidDescription` = 12
+- `InvalidAddress` = 13
+- `TooManyClues` = 14
+- `InvalidQuestion` = 15
+- `RefundFailed` = 16
+- `NoCluesAdded` = 17
+- `HuntNotCompleted` = 18
+- `RewardAlreadyClaimed` = 19
+- `RewardDistributionFailed` = 20
+- `NoRewardsConfigured` = 21
+- `DuplicateSubmission` = 22
+- `SubmissionExpired` = 23
+- `BannedPlayer` = 24
+- `NoRequiredClues` = 25
+- `RateLimitExceeded` = 26
+- `ScoreOverflow` = 27
+- `RegistrationsPaused` = 28
+- `AnswersPaused` = 29
+- `RewardsPaused` = 30
+- `HuntEndTimeInPast` = 31
+- `NoPendingAdmin` = 32
+- `PendingAdminMismatch` = 33
+- `InvalidRarity` = 34
+- `InvalidTimeBonusConfig` = 35
+- `AddressBlacklisted` = 36
+- `ContractPaused` = 37
+- `InvalidMaxAttempts` = 38
+- `InvalidWeight` = 39
+- `HintNotAvailable` = 40
+- `HintAlreadyUnlocked` = 41
+- `InsufficientScore` = 42
+- `TooManyCategories` = 43
+- `InvalidCategory` = 44
+- `InvalidDifficulty` = 45
+- `CorruptPlayerProgress` = 46
+- `HuntNotStarted` = 47
+- `AdminAlreadyProposed` = 48
+- `InvalidPoints` = 49
+- `HuntFull` = 50
 
 ---
 
@@ -5650,6 +5821,72 @@ pub fn get_hunt_nft_count(env: Env, hunt_id: u64) -> u32
 
 ---
 
+#### `set_operator`
+
+Grants `operator` the ability to manage all NFTs owned by `owner`.
+
+# Authorization
+`owner` must authorize this call.
+
+**Signature:**
+
+```rust
+pub fn set_operator(env: Env, owner: Address, operator: Address) -> ()
+```
+
+**Parameters:**
+
+- `env: Env`
+- `owner: Address`
+- `operator: Address`
+
+**Returns:** `()`
+
+---
+
+#### `remove_operator`
+
+Revokes operator approval for `operator` over `owner`'s NFTs.
+
+# Authorization
+`owner` must authorize this call.
+
+**Signature:**
+
+```rust
+pub fn remove_operator(env: Env, owner: Address, operator: Address) -> ()
+```
+
+**Parameters:**
+
+- `env: Env`
+- `owner: Address`
+- `operator: Address`
+
+**Returns:** `()`
+
+---
+
+#### `is_operator`
+
+Returns true if `operator` is approved to manage all NFTs of `owner`.
+
+**Signature:**
+
+```rust
+pub fn is_operator(env: Env, owner: Address, operator: Address) -> bool
+```
+
+**Parameters:**
+
+- `env: Env`
+- `owner: Address`
+- `operator: Address`
+
+**Returns:** `bool`
+
+---
+
 #### `burn_nft`
 
 Burns (permanently destroys) an NFT, removing it from storage and the owner's list.
@@ -5720,7 +5957,7 @@ Must be called once before any reward distribution.
 **Signature:**
 
 ```rust
-pub fn initialize(env: Env, admin: Address, xlm_token: Address) -> Result<(), RewardErrorCode>
+pub fn initialize(env: Env, admin: Address, xlm_token: Address, hunty_core: Address) -> Result<(), RewardErrorCode>
 ```
 
 **Parameters:**
@@ -5728,6 +5965,7 @@ pub fn initialize(env: Env, admin: Address, xlm_token: Address) -> Result<(), Re
 - `env: Env`
 - `admin: Address`
 - `xlm_token: Address`
+- `hunty_core: Address`
 
 **Returns:** `Result<(), RewardErrorCode>`
 
@@ -5757,6 +5995,8 @@ pub fn initialize(env: Env, admin: Address, xlm_token: Address) -> Result<(), Re
 - `GlobalDailyCapExceeded` = 20 - Global daily distribution cap has been exceeded.
 - `ContractPaused` = 21 - Contract is paused and cannot perform operations.
 - `EmergencyWithdrawalFailed` = 22 - Emergency withdrawal failed.
+- `FundingPaused` = 23 - Pool funding is paused (issue #628). Distribution may still be running.
+- `DistributionPaused` = 24 - Reward distribution is paused (issue #628). Funding may still be open.
 
 ---
 
@@ -5804,6 +6044,8 @@ pub fn propose_new_admin(env: Env, admin: Address, new_admin: Address) -> Result
 - `GlobalDailyCapExceeded` = 20 - Global daily distribution cap has been exceeded.
 - `ContractPaused` = 21 - Contract is paused and cannot perform operations.
 - `EmergencyWithdrawalFailed` = 22 - Emergency withdrawal failed.
+- `FundingPaused` = 23 - Pool funding is paused (issue #628). Distribution may still be running.
+- `DistributionPaused` = 24 - Reward distribution is paused (issue #628). Funding may still be open.
 
 ---
 
@@ -5850,6 +6092,8 @@ pub fn accept_admin(env: Env, new_admin: Address) -> Result<(), RewardErrorCode>
 - `GlobalDailyCapExceeded` = 20 - Global daily distribution cap has been exceeded.
 - `ContractPaused` = 21 - Contract is paused and cannot perform operations.
 - `EmergencyWithdrawalFailed` = 22 - Emergency withdrawal failed.
+- `FundingPaused` = 23 - Pool funding is paused (issue #628). Distribution may still be running.
+- `DistributionPaused` = 24 - Reward distribution is paused (issue #628). Funding may still be open.
 
 ---
 
@@ -5899,6 +6143,8 @@ pub fn set_nft_reward_contract(env: Env, admin: Address, nft_contract: Address) 
 - `GlobalDailyCapExceeded` = 20 - Global daily distribution cap has been exceeded.
 - `ContractPaused` = 21 - Contract is paused and cannot perform operations.
 - `EmergencyWithdrawalFailed` = 22 - Emergency withdrawal failed.
+- `FundingPaused` = 23 - Pool funding is paused (issue #628). Distribution may still be running.
+- `DistributionPaused` = 24 - Reward distribution is paused (issue #628). Funding may still be open.
 
 ---
 
@@ -5948,6 +6194,8 @@ pub fn set_hunty_core(env: Env, admin: Address, hunty_core: Address) -> Result<(
 - `GlobalDailyCapExceeded` = 20 - Global daily distribution cap has been exceeded.
 - `ContractPaused` = 21 - Contract is paused and cannot perform operations.
 - `EmergencyWithdrawalFailed` = 22 - Emergency withdrawal failed.
+- `FundingPaused` = 23 - Pool funding is paused (issue #628). Distribution may still be running.
+- `DistributionPaused` = 24 - Reward distribution is paused (issue #628). Funding may still be open.
 
 ---
 
@@ -5998,6 +6246,8 @@ pub fn add_authorized_contract(env: Env, admin: Address, contract: Address) -> R
 - `GlobalDailyCapExceeded` = 20 - Global daily distribution cap has been exceeded.
 - `ContractPaused` = 21 - Contract is paused and cannot perform operations.
 - `EmergencyWithdrawalFailed` = 22 - Emergency withdrawal failed.
+- `FundingPaused` = 23 - Pool funding is paused (issue #628). Distribution may still be running.
+- `DistributionPaused` = 24 - Reward distribution is paused (issue #628). Funding may still be open.
 
 ---
 
@@ -6046,6 +6296,8 @@ pub fn remove_authorized_contract(env: Env, admin: Address, contract: Address) -
 - `GlobalDailyCapExceeded` = 20 - Global daily distribution cap has been exceeded.
 - `ContractPaused` = 21 - Contract is paused and cannot perform operations.
 - `EmergencyWithdrawalFailed` = 22 - Emergency withdrawal failed.
+- `FundingPaused` = 23 - Pool funding is paused (issue #628). Distribution may still be running.
+- `DistributionPaused` = 24 - Reward distribution is paused (issue #628). Funding may still be open.
 
 ---
 
@@ -6053,8 +6305,9 @@ pub fn remove_authorized_contract(env: Env, admin: Address, contract: Address) -
 
 Creates a reward pool for a specific hunt with a specified token.
 
-Must be called before `fund_reward_pool`. Only the creator is authorized
-to fund the pool after creation. The token contract must be SAC-compatible.
+Must be called before `fund_reward_pool`. Any address may fund the pool
+after creation (see `fund_reward_pool`); the token contract must be
+SAC-compatible.
 
 For NFT-only pools (pools that distribute only NFTs without any token component),
 set `min_distribution_amount` to 0 and provide an `nft_contract` address.
@@ -6065,18 +6318,21 @@ set `min_distribution_amount` to 0 and provide an `nft_contract` address.
 * `token_address` - Address of the SAC-compatible token contract (e.g., XLM, USDC)
 * `min_distribution_amount` - Minimum token amount per distribution (0 for NFT-only pools)
 * `nft_contract` - Optional NFT contract address for NFT rewards
+* `nft_royalty_bps` - Creator royalty basis points (0-10000) for secondary market sales
+* `nft_transferable` - Whether reward NFTs from this pool are transferable
 
 # Errors
 * `PoolAlreadyExists` - A pool already exists for this hunt_id
 * `InvalidAmount` - min_distribution_amount is negative
 * `InvalidTokenContract` - token_address is not a valid SAC-compatible token
 * `InvalidConfig` - min_distribution_amount is 0 but no NFT contract provided
-* `HuntNotFound` - hunt_id does not exist in HuntyCore (only when `set_hunty_core` has been called)
+* `NotInitialized` - hunty_core has not been configured (set during initialize)
+* `HuntNotFound` - hunt_id does not exist in HuntyCore
 
 **Signature:**
 
 ```rust
-pub fn create_reward_pool_with_nft(env: Env, creator: Address, hunt_id: u64, token_address: Address, min_distribution_amount: i128, nft_contract: Option<Address>) -> Result<(), RewardErrorCode>
+pub fn create_reward_pool_with_nft(env: Env, creator: Address, hunt_id: u64, token_address: Address, min_distribution_amount: i128, nft_contract: Option<Address>, nft_royalty_bps: u32, nft_transferable: bool) -> Result<(), RewardErrorCode>
 ```
 
 **Parameters:**
@@ -6087,6 +6343,8 @@ pub fn create_reward_pool_with_nft(env: Env, creator: Address, hunt_id: u64, tok
 - `token_address: Address`
 - `min_distribution_amount: i128`
 - `nft_contract: Option<Address>`
+- `nft_royalty_bps: u32`
+- `nft_transferable: bool`
 
 **Returns:** `Result<(), RewardErrorCode>`
 
@@ -6116,6 +6374,8 @@ pub fn create_reward_pool_with_nft(env: Env, creator: Address, hunt_id: u64, tok
 - `GlobalDailyCapExceeded` = 20 - Global daily distribution cap has been exceeded.
 - `ContractPaused` = 21 - Contract is paused and cannot perform operations.
 - `EmergencyWithdrawalFailed` = 22 - Emergency withdrawal failed.
+- `FundingPaused` = 23 - Pool funding is paused (issue #628). Distribution may still be running.
+- `DistributionPaused` = 24 - Reward distribution is paused (issue #628). Funding may still be open.
 
 ---
 
@@ -6123,25 +6383,29 @@ pub fn create_reward_pool_with_nft(env: Env, creator: Address, hunt_id: u64, tok
 
 Creates a reward pool for a specific hunt with a specified token.
 
-Must be called before `fund_reward_pool`. Only the creator is authorized
-to fund the pool after creation. The token contract must be SAC-compatible.
+Must be called before `fund_reward_pool`. Any address may fund the pool
+after creation (see `fund_reward_pool`); the token contract must be
+SAC-compatible.
 
 # Arguments
 * `creator` - The hunt creator who will own and fund the pool
 * `hunt_id` - The hunt this pool is for
 * `token_address` - Address of the SAC-compatible token contract (e.g., XLM, USDC)
 * `min_distribution_amount` - Minimum token amount per distribution (0 = no minimum)
+* `nft_royalty_bps` - Creator royalty basis points (0-10000) for secondary market sales
+* `nft_transferable` - Whether reward NFTs from this pool are transferable
 
 # Errors
 * `PoolAlreadyExists` - A pool already exists for this hunt_id
 * `InvalidAmount` - min_distribution_amount is negative
 * `InvalidTokenContract` - token_address is not a valid SAC-compatible token
-* `HuntNotFound` - hunt_id does not exist in HuntyCore (only when `set_hunty_core` has been called)
+* `NotInitialized` - hunty_core has not been configured (set during initialize)
+* `HuntNotFound` - hunt_id does not exist in HuntyCore
 
 **Signature:**
 
 ```rust
-pub fn create_reward_pool(env: Env, creator: Address, hunt_id: u64, token_address: Address, min_distribution_amount: i128) -> Result<(), RewardErrorCode>
+pub fn create_reward_pool(env: Env, creator: Address, hunt_id: u64, token_address: Address, min_distribution_amount: i128, nft_royalty_bps: u32, nft_transferable: bool) -> Result<(), RewardErrorCode>
 ```
 
 **Parameters:**
@@ -6151,6 +6415,8 @@ pub fn create_reward_pool(env: Env, creator: Address, hunt_id: u64, token_addres
 - `hunt_id: u64`
 - `token_address: Address`
 - `min_distribution_amount: i128`
+- `nft_royalty_bps: u32`
+- `nft_transferable: bool`
 
 **Returns:** `Result<(), RewardErrorCode>`
 
@@ -6180,6 +6446,8 @@ pub fn create_reward_pool(env: Env, creator: Address, hunt_id: u64, token_addres
 - `GlobalDailyCapExceeded` = 20 - Global daily distribution cap has been exceeded.
 - `ContractPaused` = 21 - Contract is paused and cannot perform operations.
 - `EmergencyWithdrawalFailed` = 22 - Emergency withdrawal failed.
+- `FundingPaused` = 23 - Pool funding is paused (issue #628). Distribution may still be running.
+- `DistributionPaused` = 24 - Reward distribution is paused (issue #628). Funding may still be open.
 
 ---
 
@@ -6242,6 +6510,8 @@ pub fn update_pool_config(env: Env, creator: Address, hunt_id: u64, min_distribu
 - `GlobalDailyCapExceeded` = 20 - Global daily distribution cap has been exceeded.
 - `ContractPaused` = 21 - Contract is paused and cannot perform operations.
 - `EmergencyWithdrawalFailed` = 22 - Emergency withdrawal failed.
+- `FundingPaused` = 23 - Pool funding is paused (issue #628). Distribution may still be running.
+- `DistributionPaused` = 24 - Reward distribution is paused (issue #628). Funding may still be open.
 
 ---
 
@@ -6291,6 +6561,8 @@ pub fn set_pool_target_amount(env: Env, creator: Address, hunt_id: u64, target_a
 - `GlobalDailyCapExceeded` = 20 - Global daily distribution cap has been exceeded.
 - `ContractPaused` = 21 - Contract is paused and cannot perform operations.
 - `EmergencyWithdrawalFailed` = 22 - Emergency withdrawal failed.
+- `FundingPaused` = 23 - Pool funding is paused (issue #628). Distribution may still be running.
+- `DistributionPaused` = 24 - Reward distribution is paused (issue #628). Funding may still be open.
 
 ---
 
@@ -6339,6 +6611,8 @@ pub fn set_min_distribution_interval(env: Env, creator: Address, hunt_id: u64, m
 - `GlobalDailyCapExceeded` = 20 - Global daily distribution cap has been exceeded.
 - `ContractPaused` = 21 - Contract is paused and cannot perform operations.
 - `EmergencyWithdrawalFailed` = 22 - Emergency withdrawal failed.
+- `FundingPaused` = 23 - Pool funding is paused (issue #628). Distribution may still be running.
+- `DistributionPaused` = 24 - Reward distribution is paused (issue #628). Funding may still be open.
 
 ---
 
@@ -6387,6 +6661,8 @@ pub fn set_distribution_mode(env: Env, creator: Address, hunt_id: u64, mode: Dis
 - `GlobalDailyCapExceeded` = 20 - Global daily distribution cap has been exceeded.
 - `ContractPaused` = 21 - Contract is paused and cannot perform operations.
 - `EmergencyWithdrawalFailed` = 22 - Emergency withdrawal failed.
+- `FundingPaused` = 23 - Pool funding is paused (issue #628). Distribution may still be running.
+- `DistributionPaused` = 24 - Reward distribution is paused (issue #628). Funding may still be open.
 
 ---
 
@@ -6458,6 +6734,8 @@ pub fn set_pool_tiers(env: Env, creator: Address, hunt_id: u64, time_based_tiers
 - `GlobalDailyCapExceeded` = 20 - Global daily distribution cap has been exceeded.
 - `ContractPaused` = 21 - Contract is paused and cannot perform operations.
 - `EmergencyWithdrawalFailed` = 22 - Emergency withdrawal failed.
+- `FundingPaused` = 23 - Pool funding is paused (issue #628). Distribution may still be running.
+- `DistributionPaused` = 24 - Reward distribution is paused (issue #628). Funding may still be open.
 
 ---
 
@@ -6516,6 +6794,8 @@ pub fn set_pool_nft_contract(env: Env, creator: Address, hunt_id: u64, nft_contr
 - `GlobalDailyCapExceeded` = 20 - Global daily distribution cap has been exceeded.
 - `ContractPaused` = 21 - Contract is paused and cannot perform operations.
 - `EmergencyWithdrawalFailed` = 22 - Emergency withdrawal failed.
+- `FundingPaused` = 23 - Pool funding is paused (issue #628). Distribution may still be running.
+- `DistributionPaused` = 24 - Reward distribution is paused (issue #628). Funding may still be open.
 
 ---
 
@@ -6565,6 +6845,8 @@ pub fn add_delegate(env: Env, creator: Address, hunt_id: u64, delegate: Address)
 - `GlobalDailyCapExceeded` = 20 - Global daily distribution cap has been exceeded.
 - `ContractPaused` = 21 - Contract is paused and cannot perform operations.
 - `EmergencyWithdrawalFailed` = 22 - Emergency withdrawal failed.
+- `FundingPaused` = 23 - Pool funding is paused (issue #628). Distribution may still be running.
+- `DistributionPaused` = 24 - Reward distribution is paused (issue #628). Funding may still be open.
 
 ---
 
@@ -6614,6 +6896,8 @@ pub fn remove_delegate(env: Env, creator: Address, hunt_id: u64, delegate: Addre
 - `GlobalDailyCapExceeded` = 20 - Global daily distribution cap has been exceeded.
 - `ContractPaused` = 21 - Contract is paused and cannot perform operations.
 - `EmergencyWithdrawalFailed` = 22 - Emergency withdrawal failed.
+- `FundingPaused` = 23 - Pool funding is paused (issue #628). Distribution may still be running.
+- `DistributionPaused` = 24 - Reward distribution is paused (issue #628). Funding may still be open.
 
 ---
 
@@ -6642,10 +6926,28 @@ pub fn get_pool_config(env: Env, hunt_id: u64) -> Option<RewardPoolConfig>
 
 #### `fund_reward_pool`
 
+Records `amount` as a contribution from `funder` toward `hunt_id`'s
+pool sponsorship ledger, adding them to the pool's funder list the
+first time they contribute. Shared by `fund_reward_pool` and
+`migrate_pool` (which attributes the migrated lump sum to the shared
+creator) so `refund_pool` can always pay the current balance back out
+in proportion to who funded it.
+Wipes a pool's sponsorship ledger — every tracked funder's recorded
+contribution and the funder list itself. Used once a pool's balance
+has been fully paid out (`refund_pool`) or moved elsewhere
+(`migrate_pool`'s source pool), so stale contribution records can
+never be double-counted against a pool's balance again.
 Funds the reward pool for a specific hunt.
 
 The pool must have been created via `create_reward_pool` first.
-Only the original pool creator is authorized to fund it.
+**Anyone may fund a pool** — this supports sponsorship (a brand funding
+a community hunt, a DAO topping up a pool, several people pooling a
+prize), not just the creator. Each funder must authorize the call
+themselves; their contribution is tracked individually so that
+`refund_pool` can later pay the remaining balance back out in
+proportion to what each funder put in, and never hand one funder's
+contribution to another party. See `docs/adr/006-reward-pool-sponsorship.md`.
+
 Transfers tokens from the funder to this contract and records the balance.
 Uses the token address specified when the pool was created.
 
@@ -6654,19 +6956,21 @@ Uses the token address specified when the pool was created.
 - Maximum single funding: 1 billion tokens to prevent overflow
 - Pool balance limit: 1 billion tokens total to prevent overflow
 - Rejects zero or negative amounts
+- At most `MAX_FUNDERS_PER_POOL` distinct funders are tracked per pool
 
 # Arguments
-* `funder` - The address funding the pool (must be the pool creator)
+* `funder` - The address funding the pool (must authorize this call)
 * `hunt_id` - The hunt to fund
 * `amount` - Token amount to add to the pool (must be > 0)
 
 # Errors
 * `PoolNotFound` - Pool has not been created yet
-* `Unauthorized` - Funder is not the pool creator
 * `InvalidAmount` - Amount is <= 0
 * `BelowMinimumFunding` - Amount is less than minimum (dust attack prevention)
 * `ExceedsMaximumFunding` - Amount exceeds maximum limit
 * `PoolBalanceOverflow` - Adding this amount would exceed pool balance limit
+* `TooManyFunders` - This would be a new funder and the pool already
+tracks the maximum number of distinct funders
 
 **Signature:**
 
@@ -6709,14 +7013,52 @@ pub fn fund_reward_pool(env: Env, funder: Address, hunt_id: u64, amount: i128) -
 - `GlobalDailyCapExceeded` = 20 - Global daily distribution cap has been exceeded.
 - `ContractPaused` = 21 - Contract is paused and cannot perform operations.
 - `EmergencyWithdrawalFailed` = 22 - Emergency withdrawal failed.
+- `FundingPaused` = 23 - Pool funding is paused (issue #628). Distribution may still be running.
+- `DistributionPaused` = 24 - Reward distribution is paused (issue #628). Funding may still be open.
 
 ---
 
 #### `refund_pool`
 
-Refunds the entire remaining pool balance for a hunt back to the pool creator.
-Can only be called by the same creator that owns the pool.
-Uses the token address specified when the pool was created.
+Refunds the remaining pool balance for a hunt, paid out **pro rata**
+across every address that funded it (see `fund_reward_pool`) in
+proportion to each funder's share of total contributions — never
+paying one funder's contribution to another party. A pool funded by a
+single address (the common case) simply gets its whole balance back.
+
+Can only be triggered by the pool creator, who must authorize the
+call; the payout destinations are the tracked funders, not the caller.
+Uses the token address specified when the pool was created. The hunt
+must be in a terminal state (cancelled or ended) when HuntyCore is
+configured — refunding an active hunt's pool out from under its
+players is rejected.
+
+**Important:** This is a destructive operation. Ensure all distributions are complete
+before calling this function, as any remaining unclaimed rewards cannot be distributed
+after the pool is refunded.
+
+# Accounting
+This function updates:
+- Pool balance: Set to 0
+- Total refunded: Incremented by the refund amount
+- Audit log: Entry recorded with PoolOperation::Refund
+
+After a refund, the accounting identity is:
+`total_deposited == balance + total_distributed + total_refunded`
+
+# Events
+Emits one `PoolRefundedEvent` per funder paid out (a single event for
+the common single-funder case).
+
+# Arguments
+* `creator` - The pool creator (must authorize this call)
+* `hunt_id` - The hunt whose pool is being refunded
+
+# Errors
+* `PoolNotFound` - Pool has not been created yet
+* `InvalidHuntStatus` - The hunt is not cancelled or ended (only when
+`set_hunty_core` has been called)
+* `Unauthorized` - Caller is not the pool creator
 
 **Signature:**
 
@@ -6758,6 +7100,8 @@ pub fn refund_pool(env: Env, creator: Address, hunt_id: u64) -> Result<(), Rewar
 - `GlobalDailyCapExceeded` = 20 - Global daily distribution cap has been exceeded.
 - `ContractPaused` = 21 - Contract is paused and cannot perform operations.
 - `EmergencyWithdrawalFailed` = 22 - Emergency withdrawal failed.
+- `FundingPaused` = 23 - Pool funding is paused (issue #628). Distribution may still be running.
+- `DistributionPaused` = 24 - Reward distribution is paused (issue #628). Funding may still be open.
 
 ---
 
@@ -6795,6 +7139,8 @@ source pool has no balance to migrate
 * `Unauthorized` - the caller does not own both pools
 * `SourcePoolNotEligible` - the source hunt is neither expired nor cancelled
 * `PoolBalanceOverflow` - crediting the destination would overflow the pool cap
+* `TooManyFunders` - the destination already tracks the maximum number of
+distinct funders and the creator is not already one of them
 
 **Signature:**
 
@@ -6837,6 +7183,8 @@ pub fn migrate_pool(env: Env, creator: Address, source_hunt_id: u64, dest_hunt_i
 - `GlobalDailyCapExceeded` = 20 - Global daily distribution cap has been exceeded.
 - `ContractPaused` = 21 - Contract is paused and cannot perform operations.
 - `EmergencyWithdrawalFailed` = 22 - Emergency withdrawal failed.
+- `FundingPaused` = 23 - Pool funding is paused (issue #628). Distribution may still be running.
+- `DistributionPaused` = 24 - Reward distribution is paused (issue #628). Funding may still be open.
 
 ---
 
@@ -6860,6 +7208,49 @@ pub fn get_reward_pool(env: Env, hunt_id: u64) -> Option<RewardPoolStatus>
 - `hunt_id: u64`
 
 **Returns:** `Option<RewardPoolStatus>`
+
+---
+
+#### `get_pool_funders`
+
+Returns the distinct addresses currently tracked as funders of a pool
+(i.e. that have contributed and not yet been refunded), in the order
+they first contributed. Empty if the pool has never been funded, has
+been fully refunded, or has no sponsorship ledger (see `refund_pool`).
+
+**Signature:**
+
+```rust
+pub fn get_pool_funders(env: Env, hunt_id: u64) -> Vec<Address>
+```
+
+**Parameters:**
+
+- `env: Env`
+- `hunt_id: u64`
+
+**Returns:** `Vec<Address>`
+
+---
+
+#### `get_pool_funder_contribution`
+
+Returns how much `funder` has contributed to a pool that has not yet
+been refunded. 0 if they have never funded it or were already refunded.
+
+**Signature:**
+
+```rust
+pub fn get_pool_funder_contribution(env: Env, hunt_id: u64, funder: Address) -> i128
+```
+
+**Parameters:**
+
+- `env: Env`
+- `hunt_id: u64`
+- `funder: Address`
+
+**Returns:** `i128`
 
 ---
 
@@ -6967,6 +7358,8 @@ pub fn freeze_pool(env: Env, caller: Address, hunt_id: u64) -> Result<(), Reward
 - `GlobalDailyCapExceeded` = 20 - Global daily distribution cap has been exceeded.
 - `ContractPaused` = 21 - Contract is paused and cannot perform operations.
 - `EmergencyWithdrawalFailed` = 22 - Emergency withdrawal failed.
+- `FundingPaused` = 23 - Pool funding is paused (issue #628). Distribution may still be running.
+- `DistributionPaused` = 24 - Reward distribution is paused (issue #628). Funding may still be open.
 
 ---
 
@@ -7025,6 +7418,8 @@ pub fn unfreeze_pool(env: Env, caller: Address, hunt_id: u64) -> Result<(), Rewa
 - `GlobalDailyCapExceeded` = 20 - Global daily distribution cap has been exceeded.
 - `ContractPaused` = 21 - Contract is paused and cannot perform operations.
 - `EmergencyWithdrawalFailed` = 22 - Emergency withdrawal failed.
+- `FundingPaused` = 23 - Pool funding is paused (issue #628). Distribution may still be running.
+- `DistributionPaused` = 24 - Reward distribution is paused (issue #628). Funding may still be open.
 
 ---
 
@@ -7049,6 +7444,24 @@ pub fn is_pool_frozen(env: Env, hunt_id: u64) -> bool
 ---
 
 #### `set_daily_pool_cap`
+
+Sets the daily distribution cap for a specific pool.
+
+This limit controls the maximum amount of rewards that can be distributed from
+a pool in a single day (24-hour rolling window). This is a live operational control
+and should be validated to prevent silent misconfiguration.
+
+# Arguments
+* `admin` - The contract admin address (must match the stored admin)
+* `hunt_id` - The hunt whose pool cap to set
+* `cap` - The maximum amount to distribute per day. Must be positive (> 0).
+A cap of 0 means no distributions are allowed (use to disable).
+
+# Errors
+* `NotInitialized` - Contract has not been initialized (no admin set)
+* `Unauthorized` - Caller is not the contract admin
+* `PoolNotFound` - No pool exists for this hunt_id
+* `InvalidAmount` - Cap is negative (negative caps silently block distributions)
 
 **Signature:**
 
@@ -7091,6 +7504,8 @@ pub fn set_daily_pool_cap(env: Env, admin: Address, hunt_id: u64, cap: i128) -> 
 - `GlobalDailyCapExceeded` = 20 - Global daily distribution cap has been exceeded.
 - `ContractPaused` = 21 - Contract is paused and cannot perform operations.
 - `EmergencyWithdrawalFailed` = 22 - Emergency withdrawal failed.
+- `FundingPaused` = 23 - Pool funding is paused (issue #628). Distribution may still be running.
+- `DistributionPaused` = 24 - Reward distribution is paused (issue #628). Funding may still be open.
 
 ---
 
@@ -7136,6 +7551,8 @@ pub fn set_daily_global_cap(env: Env, admin: Address, cap: i128) -> Result<(), R
 - `GlobalDailyCapExceeded` = 20 - Global daily distribution cap has been exceeded.
 - `ContractPaused` = 21 - Contract is paused and cannot perform operations.
 - `EmergencyWithdrawalFailed` = 22 - Emergency withdrawal failed.
+- `FundingPaused` = 23 - Pool funding is paused (issue #628). Distribution may still be running.
+- `DistributionPaused` = 24 - Reward distribution is paused (issue #628). Funding may still be open.
 
 ---
 
@@ -7182,6 +7599,8 @@ pub fn distribute_rewards(env: Env, hunt_id: u64, player_address: Address, rewar
 - `GlobalDailyCapExceeded` = 20 - Global daily distribution cap has been exceeded.
 - `ContractPaused` = 21 - Contract is paused and cannot perform operations.
 - `EmergencyWithdrawalFailed` = 22 - Emergency withdrawal failed.
+- `FundingPaused` = 23 - Pool funding is paused (issue #628). Distribution may still be running.
+- `DistributionPaused` = 24 - Reward distribution is paused (issue #628). Funding may still be open.
 
 ---
 
@@ -7261,6 +7680,8 @@ pub fn distribute_batch(env: Env, distributions: Vec<BatchDistributionEntry>) ->
 - `GlobalDailyCapExceeded` = 20 - Global daily distribution cap has been exceeded.
 - `ContractPaused` = 21 - Contract is paused and cannot perform operations.
 - `EmergencyWithdrawalFailed` = 22 - Emergency withdrawal failed.
+- `FundingPaused` = 23 - Pool funding is paused (issue #628). Distribution may still be running.
+- `DistributionPaused` = 24 - Reward distribution is paused (issue #628). Funding may still be open.
 
 ---
 
@@ -7327,6 +7748,8 @@ pub fn retry_failed_nft_mint(env: Env, admin: Address, hunt_id: u64, player: Add
 - `GlobalDailyCapExceeded` = 20 - Global daily distribution cap has been exceeded.
 - `ContractPaused` = 21 - Contract is paused and cannot perform operations.
 - `EmergencyWithdrawalFailed` = 22 - Emergency withdrawal failed.
+- `FundingPaused` = 23 - Pool funding is paused (issue #628). Distribution may still be running.
+- `DistributionPaused` = 24 - Reward distribution is paused (issue #628). Funding may still be open.
 
 ---
 
@@ -7355,6 +7778,39 @@ Kept for backward compatibility with HuntyCore. For NFT or full config support u
 
 Note: `nft_enabled` is ignored — NFT distribution requires metadata and a contract address
 that are not available on this path. Use `distribute_rewards` with `RewardConfig` instead.
+**DEPRECATED: Do not use for new integrations.**
+
+This legacy distribution path is maintained only for backward compatibility.
+All new integrations must use `distribute_rewards` instead.
+
+This function wraps `distribute_rewards` and therefore inherits all the same
+security constraints:
+- Replays are rejected via the same nonce-based mechanism
+- The ReentrancyGuard is acquired identically
+- `min_distribution_amount` and daily caps are enforced
+- Authorization checks are identical (fail-open by caller)
+
+**Removal timeline:** This function is scheduled for removal in a future major release.
+The exact deprecation timeline will be announced in contract release notes.
+
+**Security note:** Any attacker analyzing this contract should understand that
+`distribute_rewards_legacy` and `distribute_rewards` use identical security checks.
+The legacy path is not a bypass vector.
+
+# Arguments
+* `player` - The address receiving the distribution
+* `hunt_id` - The hunt pool to distribute from
+* `xlm_amount` - Token amount to distribute (0 = no token transfer)
+* `_nft_enabled` - Ignored; NFTs are not supported on this path
+
+# Returns
+- `true` if the distribution succeeded
+- `false` if the distribution failed (check the transaction result for the error code)
+
+# Differences from `distribute_rewards`
+- Returns `bool` instead of `Result<(), RewardErrorCode>` (loses error detail)
+- Discards `_nft_enabled` parameter (NFTs cannot be distributed)
+- No structured logging of the error
 
 **Signature:**
 
@@ -7514,6 +7970,8 @@ pub fn distribute_proportional(env: Env, hunt_id: u64, player: Address, player_s
 - `GlobalDailyCapExceeded` = 20 - Global daily distribution cap has been exceeded.
 - `ContractPaused` = 21 - Contract is paused and cannot perform operations.
 - `EmergencyWithdrawalFailed` = 22 - Emergency withdrawal failed.
+- `FundingPaused` = 23 - Pool funding is paused (issue #628). Distribution may still be running.
+- `DistributionPaused` = 24 - Reward distribution is paused (issue #628). Funding may still be open.
 
 ---
 
@@ -7638,6 +8096,8 @@ pub fn set_vesting_period_secs(env: Env, creator: Address, hunt_id: u64, vesting
 - `GlobalDailyCapExceeded` = 20 - Global daily distribution cap has been exceeded.
 - `ContractPaused` = 21 - Contract is paused and cannot perform operations.
 - `EmergencyWithdrawalFailed` = 22 - Emergency withdrawal failed.
+- `FundingPaused` = 23 - Pool funding is paused (issue #628). Distribution may still be running.
+- `DistributionPaused` = 24 - Reward distribution is paused (issue #628). Funding may still be open.
 
 ---
 
@@ -7704,6 +8164,8 @@ pub fn claim_vested(env: Env, player: Address, hunt_id: u64) -> Result<i128, Rew
 - `GlobalDailyCapExceeded` = 20 - Global daily distribution cap has been exceeded.
 - `ContractPaused` = 21 - Contract is paused and cannot perform operations.
 - `EmergencyWithdrawalFailed` = 22 - Emergency withdrawal failed.
+- `FundingPaused` = 23 - Pool funding is paused (issue #628). Distribution may still be running.
+- `DistributionPaused` = 24 - Reward distribution is paused (issue #628). Funding may still be open.
 
 ---
 
@@ -7792,6 +8254,8 @@ pub fn admin_resolve_distribution(env: Env, admin: Address, hunt_id: u64, player
 - `GlobalDailyCapExceeded` = 20 - Global daily distribution cap has been exceeded.
 - `ContractPaused` = 21 - Contract is paused and cannot perform operations.
 - `EmergencyWithdrawalFailed` = 22 - Emergency withdrawal failed.
+- `FundingPaused` = 23 - Pool funding is paused (issue #628). Distribution may still be running.
+- `DistributionPaused` = 24 - Reward distribution is paused (issue #628). Funding may still be open.
 
 ---
 
@@ -7891,21 +8355,28 @@ pub fn get_distribution_analytics(env: Env, hunt_id: u64, start_time: Option<u64
 
 #### `admin_withdraw_unclaimed`
 
-Allows the admin to withdraw any unclaimed (surplus) XLM remaining in a reward pool.
+Allows the admin to withdraw unclaimed (surplus) XLM remaining in a reward pool
+after the hunt has ended and all winners have been determined.
 
 This is needed when a hunt concludes with fewer winners than anticipated,
 leaving unspent XLM locked in the pool. Only the contract admin may call this.
+
+Withdrawal is only permitted after the hunt has ended (end_time passed) or been
+cancelled. This prevents draining pools while a hunt is active and players may
+still be mid-game. When HuntyCore is configured, the hunt status is verified.
 
 # Arguments
 * `admin` - The contract admin address (must match the stored admin)
 * `hunt_id` - The hunt whose remaining pool balance to withdraw
 * `recipient` - The address that will receive the withdrawn XLM
+* `amount` - The amount to withdraw. Must be positive (> 0).
 
 # Errors
 * `NotInitialized` - Contract has not been initialized (no admin set)
 * `Unauthorized` - Caller is not the contract admin
 * `PoolNotFound` - No pool exists for this hunt_id
-* `InvalidAmount` - Pool balance is zero (nothing to withdraw)
+* `InvalidAmount` - Amount is <= 0, or exceeds the available pool balance
+* `SourcePoolNotEligible` - Hunt is still active (not ended or cancelled)
 
 **Signature:**
 
@@ -7949,6 +8420,78 @@ pub fn admin_withdraw_unclaimed(env: Env, admin: Address, hunt_id: u64, recipien
 - `GlobalDailyCapExceeded` = 20 - Global daily distribution cap has been exceeded.
 - `ContractPaused` = 21 - Contract is paused and cannot perform operations.
 - `EmergencyWithdrawalFailed` = 22 - Emergency withdrawal failed.
+- `FundingPaused` = 23 - Pool funding is paused (issue #628). Distribution may still be running.
+- `DistributionPaused` = 24 - Reward distribution is paused (issue #628). Funding may still be open.
+
+---
+
+#### `admin_withdraw_all`
+
+Explicitly withdraws the entire remaining balance from a reward pool.
+
+This function provides an explicit, intentional way to drain a pool completely.
+Unlike `admin_withdraw_unclaimed`, which handles partial withdrawals of unclaimed
+amounts, this function is semantically clear: it empties the pool by name.
+
+Withdrawal is only permitted after the hunt has ended (end_time passed) or been
+cancelled. This prevents draining pools while a hunt is active and players may
+still be mid-game. When HuntyCore is configured, the hunt status is verified.
+
+# Arguments
+* `admin` - The contract admin address (must match the stored admin)
+* `hunt_id` - The hunt whose pool to drain completely
+* `recipient` - The address that will receive the full pool balance
+
+# Errors
+* `NotInitialized` - Contract has not been initialized (no admin set)
+* `Unauthorized` - Caller is not the contract admin
+* `PoolNotFound` - No pool exists for this hunt_id
+* `InvalidAmount` - Pool balance is zero (nothing to withdraw)
+* `SourcePoolNotEligible` - Hunt is still active (not ended or cancelled)
+
+**Signature:**
+
+```rust
+pub fn admin_withdraw_all(env: Env, admin: Address, hunt_id: u64, recipient: Address) -> Result<(), RewardErrorCode>
+```
+
+**Parameters:**
+
+- `env: Env`
+- `admin: Address`
+- `hunt_id: u64`
+- `recipient: Address`
+
+**Returns:** `Result<(), RewardErrorCode>`
+
+**Error type:** `RewardErrorCode`
+
+**Error codes:**
+
+- `NotInitialized` = 1
+- `InsufficientPool` = 2
+- `AlreadyDistributed` = 3
+- `TransferFailed` = 4
+- `InvalidAmount` = 5
+- `InvalidConfig` = 6
+- `NftMintFailed` = 7
+- `PoolAlreadyExists` = 8
+- `PoolNotFound` = 9
+- `Unauthorized` = 10
+- `BelowMinimumAmount` = 11
+- `AlreadyInitialized` = 12
+- `HuntNotFound` = 13
+- `ReentrancyDetected` = 14 - A recursive distribution attempt was detected during an external XLM or NFT call.
+- `PoolBalanceDivergence` = 15 - The tracked pool balance diverged from the actual XLM token balance.
+- `PoolBalanceOverflow` = 16 - Pool balance would overflow if this funding amount is added (pool balance limit exceeded).
+- `BelowMinimumFunding` = 17 - Funding amount is below the minimum required (dust attack prevention).
+- `ExceedsMaximumFunding` = 18 - Funding amount exceeds the maximum single funding limit.
+- `DailyCapExceeded` = 19 - Daily distribution cap for a specific pool has been exceeded.
+- `GlobalDailyCapExceeded` = 20 - Global daily distribution cap has been exceeded.
+- `ContractPaused` = 21 - Contract is paused and cannot perform operations.
+- `EmergencyWithdrawalFailed` = 22 - Emergency withdrawal failed.
+- `FundingPaused` = 23 - Pool funding is paused (issue #628). Distribution may still be running.
+- `DistributionPaused` = 24 - Reward distribution is paused (issue #628). Funding may still be open.
 
 ---
 
@@ -7997,6 +8540,8 @@ pub fn pause(env: Env, admin: Address, reason: soroban_sdk::String) -> Result<()
 - `GlobalDailyCapExceeded` = 20 - Global daily distribution cap has been exceeded.
 - `ContractPaused` = 21 - Contract is paused and cannot perform operations.
 - `EmergencyWithdrawalFailed` = 22 - Emergency withdrawal failed.
+- `FundingPaused` = 23 - Pool funding is paused (issue #628). Distribution may still be running.
+- `DistributionPaused` = 24 - Reward distribution is paused (issue #628). Funding may still be open.
 
 ---
 
@@ -8044,6 +8589,8 @@ pub fn unpause(env: Env, admin: Address) -> Result<(), RewardErrorCode>
 - `GlobalDailyCapExceeded` = 20 - Global daily distribution cap has been exceeded.
 - `ContractPaused` = 21 - Contract is paused and cannot perform operations.
 - `EmergencyWithdrawalFailed` = 22 - Emergency withdrawal failed.
+- `FundingPaused` = 23 - Pool funding is paused (issue #628). Distribution may still be running.
+- `DistributionPaused` = 24 - Reward distribution is paused (issue #628). Funding may still be open.
 
 ---
 
@@ -8065,8 +8612,242 @@ pub fn is_paused(env: Env) -> bool
 
 ---
 
+#### `pause_funding`
+
+Blocks pool funding. Distribution is unaffected unless separately paused.
+
+**Signature:**
+
+```rust
+pub fn pause_funding(env: Env, admin: Address) -> Result<(), RewardErrorCode>
+```
+
+**Parameters:**
+
+- `env: Env`
+- `admin: Address`
+
+**Returns:** `Result<(), RewardErrorCode>`
+
+**Error type:** `RewardErrorCode`
+
+**Error codes:**
+
+- `NotInitialized` = 1
+- `InsufficientPool` = 2
+- `AlreadyDistributed` = 3
+- `TransferFailed` = 4
+- `InvalidAmount` = 5
+- `InvalidConfig` = 6
+- `NftMintFailed` = 7
+- `PoolAlreadyExists` = 8
+- `PoolNotFound` = 9
+- `Unauthorized` = 10
+- `BelowMinimumAmount` = 11
+- `AlreadyInitialized` = 12
+- `HuntNotFound` = 13
+- `ReentrancyDetected` = 14 - A recursive distribution attempt was detected during an external XLM or NFT call.
+- `PoolBalanceDivergence` = 15 - The tracked pool balance diverged from the actual XLM token balance.
+- `PoolBalanceOverflow` = 16 - Pool balance would overflow if this funding amount is added (pool balance limit exceeded).
+- `BelowMinimumFunding` = 17 - Funding amount is below the minimum required (dust attack prevention).
+- `ExceedsMaximumFunding` = 18 - Funding amount exceeds the maximum single funding limit.
+- `DailyCapExceeded` = 19 - Daily distribution cap for a specific pool has been exceeded.
+- `GlobalDailyCapExceeded` = 20 - Global daily distribution cap has been exceeded.
+- `ContractPaused` = 21 - Contract is paused and cannot perform operations.
+- `EmergencyWithdrawalFailed` = 22 - Emergency withdrawal failed.
+- `FundingPaused` = 23 - Pool funding is paused (issue #628). Distribution may still be running.
+- `DistributionPaused` = 24 - Reward distribution is paused (issue #628). Funding may still be open.
+
+---
+
+#### `unpause_funding`
+
+Resumes pool funding. Has no effect while the global pause is engaged.
+
+**Signature:**
+
+```rust
+pub fn unpause_funding(env: Env, admin: Address) -> Result<(), RewardErrorCode>
+```
+
+**Parameters:**
+
+- `env: Env`
+- `admin: Address`
+
+**Returns:** `Result<(), RewardErrorCode>`
+
+**Error type:** `RewardErrorCode`
+
+**Error codes:**
+
+- `NotInitialized` = 1
+- `InsufficientPool` = 2
+- `AlreadyDistributed` = 3
+- `TransferFailed` = 4
+- `InvalidAmount` = 5
+- `InvalidConfig` = 6
+- `NftMintFailed` = 7
+- `PoolAlreadyExists` = 8
+- `PoolNotFound` = 9
+- `Unauthorized` = 10
+- `BelowMinimumAmount` = 11
+- `AlreadyInitialized` = 12
+- `HuntNotFound` = 13
+- `ReentrancyDetected` = 14 - A recursive distribution attempt was detected during an external XLM or NFT call.
+- `PoolBalanceDivergence` = 15 - The tracked pool balance diverged from the actual XLM token balance.
+- `PoolBalanceOverflow` = 16 - Pool balance would overflow if this funding amount is added (pool balance limit exceeded).
+- `BelowMinimumFunding` = 17 - Funding amount is below the minimum required (dust attack prevention).
+- `ExceedsMaximumFunding` = 18 - Funding amount exceeds the maximum single funding limit.
+- `DailyCapExceeded` = 19 - Daily distribution cap for a specific pool has been exceeded.
+- `GlobalDailyCapExceeded` = 20 - Global daily distribution cap has been exceeded.
+- `ContractPaused` = 21 - Contract is paused and cannot perform operations.
+- `EmergencyWithdrawalFailed` = 22 - Emergency withdrawal failed.
+- `FundingPaused` = 23 - Pool funding is paused (issue #628). Distribution may still be running.
+- `DistributionPaused` = 24 - Reward distribution is paused (issue #628). Funding may still be open.
+
+---
+
+#### `pause_distribution`
+
+Blocks reward distribution. Funding is unaffected unless separately paused.
+
+**Signature:**
+
+```rust
+pub fn pause_distribution(env: Env, admin: Address) -> Result<(), RewardErrorCode>
+```
+
+**Parameters:**
+
+- `env: Env`
+- `admin: Address`
+
+**Returns:** `Result<(), RewardErrorCode>`
+
+**Error type:** `RewardErrorCode`
+
+**Error codes:**
+
+- `NotInitialized` = 1
+- `InsufficientPool` = 2
+- `AlreadyDistributed` = 3
+- `TransferFailed` = 4
+- `InvalidAmount` = 5
+- `InvalidConfig` = 6
+- `NftMintFailed` = 7
+- `PoolAlreadyExists` = 8
+- `PoolNotFound` = 9
+- `Unauthorized` = 10
+- `BelowMinimumAmount` = 11
+- `AlreadyInitialized` = 12
+- `HuntNotFound` = 13
+- `ReentrancyDetected` = 14 - A recursive distribution attempt was detected during an external XLM or NFT call.
+- `PoolBalanceDivergence` = 15 - The tracked pool balance diverged from the actual XLM token balance.
+- `PoolBalanceOverflow` = 16 - Pool balance would overflow if this funding amount is added (pool balance limit exceeded).
+- `BelowMinimumFunding` = 17 - Funding amount is below the minimum required (dust attack prevention).
+- `ExceedsMaximumFunding` = 18 - Funding amount exceeds the maximum single funding limit.
+- `DailyCapExceeded` = 19 - Daily distribution cap for a specific pool has been exceeded.
+- `GlobalDailyCapExceeded` = 20 - Global daily distribution cap has been exceeded.
+- `ContractPaused` = 21 - Contract is paused and cannot perform operations.
+- `EmergencyWithdrawalFailed` = 22 - Emergency withdrawal failed.
+- `FundingPaused` = 23 - Pool funding is paused (issue #628). Distribution may still be running.
+- `DistributionPaused` = 24 - Reward distribution is paused (issue #628). Funding may still be open.
+
+---
+
+#### `unpause_distribution`
+
+Resumes reward distribution. Has no effect while the global pause is engaged.
+
+**Signature:**
+
+```rust
+pub fn unpause_distribution(env: Env, admin: Address) -> Result<(), RewardErrorCode>
+```
+
+**Parameters:**
+
+- `env: Env`
+- `admin: Address`
+
+**Returns:** `Result<(), RewardErrorCode>`
+
+**Error type:** `RewardErrorCode`
+
+**Error codes:**
+
+- `NotInitialized` = 1
+- `InsufficientPool` = 2
+- `AlreadyDistributed` = 3
+- `TransferFailed` = 4
+- `InvalidAmount` = 5
+- `InvalidConfig` = 6
+- `NftMintFailed` = 7
+- `PoolAlreadyExists` = 8
+- `PoolNotFound` = 9
+- `Unauthorized` = 10
+- `BelowMinimumAmount` = 11
+- `AlreadyInitialized` = 12
+- `HuntNotFound` = 13
+- `ReentrancyDetected` = 14 - A recursive distribution attempt was detected during an external XLM or NFT call.
+- `PoolBalanceDivergence` = 15 - The tracked pool balance diverged from the actual XLM token balance.
+- `PoolBalanceOverflow` = 16 - Pool balance would overflow if this funding amount is added (pool balance limit exceeded).
+- `BelowMinimumFunding` = 17 - Funding amount is below the minimum required (dust attack prevention).
+- `ExceedsMaximumFunding` = 18 - Funding amount exceeds the maximum single funding limit.
+- `DailyCapExceeded` = 19 - Daily distribution cap for a specific pool has been exceeded.
+- `GlobalDailyCapExceeded` = 20 - Global daily distribution cap has been exceeded.
+- `ContractPaused` = 21 - Contract is paused and cannot perform operations.
+- `EmergencyWithdrawalFailed` = 22 - Emergency withdrawal failed.
+- `FundingPaused` = 23 - Pool funding is paused (issue #628). Distribution may still be running.
+- `DistributionPaused` = 24 - Reward distribution is paused (issue #628). Funding may still be open.
+
+---
+
+#### `get_pause_state`
+
+Effective pause state as `(global, funding, distribution)`.
+
+The two granular values are the *effective* ones, so they read `true`
+whenever the global stop is engaged. Mirrors `HuntyCore::get_pause_state`.
+
+**Signature:**
+
+```rust
+pub fn get_pause_state(env: Env) -> (bool, bool, bool)
+```
+
+**Parameters:**
+
+- `env: Env`
+
+**Returns:** `(bool, bool, bool)`
+
+---
+
+#### `get_raw_pause_flags`
+
+The granular flags as stored, ignoring the global stop — lets an
+operator see what will still be paused after `unpause()`.
+
+**Signature:**
+
+```rust
+pub fn get_raw_pause_flags(env: Env) -> (bool, bool)
+```
+
+**Parameters:**
+
+- `env: Env`
+
+**Returns:** `(bool, bool)`
+
+---
+
 #### `emergency_withdraw`
 
+Rejects the call when funding is paused.
+Rejects the call when distribution is paused.
 Emergency withdrawal: allows the admin to withdraw all funds from one or all
 reward pools when the contract is paused (e.g. due to a critical vulnerability).
 When `hunt_id` is 0, all pools with non-zero balances are drained.
@@ -8127,6 +8908,8 @@ pub fn emergency_withdraw(env: Env, admin: Address, hunt_id: u64, recipient: Add
 - `GlobalDailyCapExceeded` = 20 - Global daily distribution cap has been exceeded.
 - `ContractPaused` = 21 - Contract is paused and cannot perform operations.
 - `EmergencyWithdrawalFailed` = 22 - Emergency withdrawal failed.
+- `FundingPaused` = 23 - Pool funding is paused (issue #628). Distribution may still be running.
+- `DistributionPaused` = 24 - Reward distribution is paused (issue #628). Funding may still be open.
 
 ---
 
@@ -8518,6 +9301,8 @@ pub fn get_pool_audit_log(env: Env, hunt_id: u64, start_after: Option<u64>, limi
 - `GlobalDailyCapExceeded` = 20 - Global daily distribution cap has been exceeded.
 - `ContractPaused` = 21 - Contract is paused and cannot perform operations.
 - `EmergencyWithdrawalFailed` = 22 - Emergency withdrawal failed.
+- `FundingPaused` = 23 - Pool funding is paused (issue #628). Distribution may still be running.
+- `DistributionPaused` = 24 - Reward distribution is paused (issue #628). Funding may still be open.
 
 ## `UpgradeAuthError`
 

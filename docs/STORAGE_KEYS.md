@@ -146,6 +146,7 @@ A CI/script check (`scripts/ci/check_storage_keys_doc.sh`) asserts that every
 | `POOL_CFG_KEY` | `PCFG` | `(PCFG, hunt_id)` |
 | `POOL_DEP_KEY` | `PDEP` | `(PDEP, hunt_id)` deposited |
 | `POOL_DST_KEY` | `PDST` | `(PDST, hunt_id)` distributed |
+| `POOL_RFD_KEY` | `PRFD` | `(PRFD, hunt_id)` total refunded (issue #628) |
 | `POOL_DIST_COUNT_KEY` | `PDCNT` | `(PDCNT, hunt_id)` distribution count |
 | `POOL_LAST_DIST_TS_KEY` | `PLDTS` | `(PLDTS, hunt_id)` |
 | `POOL_DISTRIBUTIONS_KEY` | `PLDIST` | `(PLDIST, hunt_id)` distribution list |
@@ -155,9 +156,13 @@ A CI/script check (`scripts/ci/check_storage_keys_doc.sh`) asserts that every
 | `AUDIT_COUNT_KEY` | `AUDC` | `(AUDC, hunt_id)` — total audit entries appended |
 | `AUDIT_LOG_KEY` | `AUDL` | `(AUDL, hunt_id, index)` — ring-buffer slot (`index % MAX_AUDIT_ENTRIES_PER_POOL`) |
 | `PAUSED_KEY` | `PAUSE` | emergency pause — also seen as `PAUSED` / `PAUS` |
+| `PAUSE_FUNDING_KEY` | `PAUSE_FD` | granular funding pause (issue #628) |
+| `PAUSE_DIST_KEY` | `PAUSE_DS` | granular distribution pause (issue #628) |
 | `EMERGENCY_LOG_KEY` | `EMLOG` | emergency action log — also seen as `ELOG` |
 | `PENDING_NFT_KEY` | `PNFT` | `(PNFT, hunt_id, player)` pending mint |
 | `VESTING_KEY` | `VEST` | `(VEST, hunt_id, player)` vesting record |
+| `POOL_FUNDERS_KEY` | `PFNDRS` | `(PFNDRS, hunt_id)` — list of distinct funders not yet refunded |
+| `POOL_FUNDER_CONTRIB_KEY` | `PFCONT` | `(PFCONT, hunt_id, funder)` — cumulative unrefunded contribution |
 
 ### Audit log capacity (reward-manager)
 

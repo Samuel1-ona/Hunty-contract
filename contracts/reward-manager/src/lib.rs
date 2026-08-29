@@ -29,6 +29,11 @@ const MAX_FUNDING_AMOUNT: i128 = 1_000_000_000 * 10_000_000;
 /// Maximum pool balance: 1 billion XLM (prevents overflow)
 const MAX_POOL_BALANCE: i128 = 1_000_000_000 * 10_000_000;
 
+/// Maximum number of distinct funders tracked per pool. Bounds the cost of
+/// the pro-rata payout loop in `refund_pool`. Once reached, only addresses
+/// that have already contributed may add to their existing contribution.
+const MAX_FUNDERS_PER_POOL: u32 = 50;
+
 /// Maximum number of entries allowed in a single `distribute_batch` call.
 ///
 /// Chosen to keep intrinsic gas cost well within Soroban's per-transaction
@@ -127,6 +132,18 @@ pub struct DistributionCooldownEvent {
     pub remaining_secs: u64,
 }
 
+/// Event emitted for each address paid out by `refund_pool`. A pool funded by
+/// a single address (the common case) emits exactly one of these; a
+/// sponsored pool emits one per funder, each amount proportional to that
+/// funder's share of the pool's contributions.
+#[contracttype]
+#[derive(Clone, Debug)]
+pub struct PoolRefundedEvent {
+    pub hunt_id: u64,
+    pub funder: Address,
+    pub amount: i128,
+}
+
 /// Event emitted when the unused balance of an expired or cancelled hunt's
 /// pool is migrated into an existing destination pool owned by the same creator.
 #[contracttype]
@@ -134,16 +151,6 @@ pub struct DistributionCooldownEvent {
 pub struct PoolMigratedEvent {
     pub source_hunt_id: u64,
     pub dest_hunt_id: u64,
-    pub creator: Address,
-    pub amount: i128,
-}
-
-/// Event emitted when a reward pool is refunded back to the creator.
-/// The entire remaining balance is transferred, and the pool is emptied.
-#[contracttype]
-#[derive(Clone, Debug)]
-pub struct RewardPoolRefundedEvent {
-    pub hunt_id: u64,
     pub creator: Address,
     pub amount: i128,
 }
@@ -456,8 +463,9 @@ impl RewardManager {
 
     /// Creates a reward pool for a specific hunt with a specified token.
     ///
-    /// Must be called before `fund_reward_pool`. Only the creator is authorized
-    /// to fund the pool after creation. The token contract must be SAC-compatible.
+    /// Must be called before `fund_reward_pool`. Any address may fund the pool
+    /// after creation (see `fund_reward_pool`); the token contract must be
+    /// SAC-compatible.
     ///
     /// For NFT-only pools (pools that distribute only NFTs without any token component),
     /// set `min_distribution_amount` to 0 and provide an `nft_contract` address.
@@ -568,8 +576,9 @@ impl RewardManager {
 
     /// Creates a reward pool for a specific hunt with a specified token.
     ///
-    /// Must be called before `fund_reward_pool`. Only the creator is authorized
-    /// to fund the pool after creation. The token contract must be SAC-compatible.
+    /// Must be called before `fund_reward_pool`. Any address may fund the pool
+    /// after creation (see `fund_reward_pool`); the token contract must be
+    /// SAC-compatible.
     ///
     /// # Arguments
     /// * `creator` - The hunt creator who will own and fund the pool
@@ -868,10 +877,60 @@ impl RewardManager {
         Storage::get_pool_config(&env, hunt_id)
     }
 
+    /// Records `amount` as a contribution from `funder` toward `hunt_id`'s
+    /// pool sponsorship ledger, adding them to the pool's funder list the
+    /// first time they contribute. Shared by `fund_reward_pool` and
+    /// `migrate_pool` (which attributes the migrated lump sum to the shared
+    /// creator) so `refund_pool` can always pay the current balance back out
+    /// in proportion to who funded it.
+    fn record_funder_contribution(
+        env: &Env,
+        hunt_id: u64,
+        funder: &Address,
+        amount: i128,
+    ) -> Result<(), RewardErrorCode> {
+        let prior = Storage::get_pool_funder_contribution(env, hunt_id, funder);
+        if prior == 0 {
+            let mut funders = Storage::get_pool_funders(env, hunt_id);
+            if funders.len() >= MAX_FUNDERS_PER_POOL {
+                return Err(RewardErrorCode::TooManyFunders);
+            }
+            funders.push_back(funder.clone());
+            Storage::set_pool_funders(env, hunt_id, &funders);
+        }
+        let new_total = prior
+            .checked_add(amount)
+            .ok_or(RewardErrorCode::PoolBalanceOverflow)?;
+        Storage::set_pool_funder_contribution(env, hunt_id, funder, new_total);
+        Ok(())
+    }
+
+    /// Wipes a pool's sponsorship ledger — every tracked funder's recorded
+    /// contribution and the funder list itself. Used once a pool's balance
+    /// has been fully paid out (`refund_pool`) or moved elsewhere
+    /// (`migrate_pool`'s source pool), so stale contribution records can
+    /// never be double-counted against a pool's balance again.
+    fn clear_pool_funders(env: &Env, hunt_id: u64) {
+        let funders = Storage::get_pool_funders(env, hunt_id);
+        for i in 0..funders.len() {
+            if let Some(funder) = funders.get(i) {
+                Storage::remove_pool_funder_contribution(env, hunt_id, &funder);
+            }
+        }
+        Storage::remove_pool_funders(env, hunt_id);
+    }
+
     /// Funds the reward pool for a specific hunt.
     ///
     /// The pool must have been created via `create_reward_pool` first.
-    /// Only the original pool creator is authorized to fund it.
+    /// **Anyone may fund a pool** — this supports sponsorship (a brand funding
+    /// a community hunt, a DAO topping up a pool, several people pooling a
+    /// prize), not just the creator. Each funder must authorize the call
+    /// themselves; their contribution is tracked individually so that
+    /// `refund_pool` can later pay the remaining balance back out in
+    /// proportion to what each funder put in, and never hand one funder's
+    /// contribution to another party. See `docs/adr/006-reward-pool-sponsorship.md`.
+    ///
     /// Transfers tokens from the funder to this contract and records the balance.
     /// Uses the token address specified when the pool was created.
     ///
@@ -880,19 +939,21 @@ impl RewardManager {
     /// - Maximum single funding: 1 billion tokens to prevent overflow
     /// - Pool balance limit: 1 billion tokens total to prevent overflow
     /// - Rejects zero or negative amounts
+    /// - At most `MAX_FUNDERS_PER_POOL` distinct funders are tracked per pool
     ///
     /// # Arguments
-    /// * `funder` - The address funding the pool (must be the pool creator)
+    /// * `funder` - The address funding the pool (must authorize this call)
     /// * `hunt_id` - The hunt to fund
     /// * `amount` - Token amount to add to the pool (must be > 0)
     ///
     /// # Errors
     /// * `PoolNotFound` - Pool has not been created yet
-    /// * `Unauthorized` - Funder is not the pool creator
     /// * `InvalidAmount` - Amount is <= 0
     /// * `BelowMinimumFunding` - Amount is less than minimum (dust attack prevention)
     /// * `ExceedsMaximumFunding` - Amount exceeds maximum limit
     /// * `PoolBalanceOverflow` - Adding this amount would exceed pool balance limit
+    /// * `TooManyFunders` - This would be a new funder and the pool already
+    ///   tracks the maximum number of distinct funders
     pub fn fund_reward_pool(
         env: Env,
         funder: Address,
@@ -919,11 +980,9 @@ impl RewardManager {
         let pool_config =
             Storage::get_pool_config(&env, hunt_id).ok_or(RewardErrorCode::PoolNotFound)?;
 
-        if funder != pool_config.creator {
-            return Err(RewardErrorCode::Unauthorized);
-        }
+        funder.require_auth();
 
-        pool_config.creator.require_auth();
+        let _reentrancy_guard = ReentrancyGuard::acquire(&env)?;
 
         // Use the token address from the pool config instead of global XLM token
         let token_address = &pool_config.token_address;
@@ -939,18 +998,20 @@ impl RewardManager {
             return Err(RewardErrorCode::PoolBalanceOverflow);
         }
 
+        let total_deposited = Storage::get_pool_total_deposited(&env, hunt_id)
+            .checked_add(amount)
+            .ok_or(RewardErrorCode::PoolBalanceOverflow)?;
+
+        // Update pool balance and cumulative deposit total before the external
+        // token transfer, so a reentrant call observes the post-funding state
+        // rather than a stale balance (checks-effects-interactions).
+        Storage::set_pool_balance(&env, hunt_id, new_balance);
+        Storage::set_pool_total_deposited(&env, hunt_id, total_deposited);
+
         // Transfer tokens from funder to this contract
         let contract_addr = env.current_contract_address();
         let client = soroban_sdk::token::Client::new(&env, token_address);
         client.transfer(&funder, &contract_addr, &amount);
-
-        // Update pool balance and cumulative deposit total
-        Storage::set_pool_balance(&env, hunt_id, new_balance);
-
-        let total_deposited = Storage::get_pool_total_deposited(&env, hunt_id)
-            .checked_add(amount)
-            .ok_or(RewardErrorCode::PoolBalanceOverflow)?;
-        Storage::set_pool_total_deposited(&env, hunt_id, total_deposited);
 
         let target_amount = pool_config.target_amount;
         let percentage_of_target = if target_amount > 0 {
@@ -989,19 +1050,22 @@ impl RewardManager {
         Ok(())
     }
 
-    /// Refunds the entire remaining pool balance for a hunt back to the pool creator.
+    /// Refunds the remaining pool balance for a hunt, paid out **pro rata**
+    /// across every address that funded it (see `fund_reward_pool`) in
+    /// proportion to each funder's share of total contributions — never
+    /// paying one funder's contribution to another party. A pool funded by a
+    /// single address (the common case) simply gets its whole balance back.
     ///
-    /// This function transfers the full balance of the reward pool to the creator,
-    /// emptying the pool completely. It is useful when a hunt is cancelled or expired
-    /// and the remaining funds need to be reclaimed.
+    /// Can only be triggered by the pool creator, who must authorize the
+    /// call; the payout destinations are the tracked funders, not the caller.
+    /// Uses the token address specified when the pool was created. The hunt
+    /// must be in a terminal state (cancelled or ended) when HuntyCore is
+    /// configured — refunding an active hunt's pool out from under its
+    /// players is rejected.
     ///
     /// **Important:** This is a destructive operation. Ensure all distributions are complete
     /// before calling this function, as any remaining unclaimed rewards cannot be distributed
     /// after the pool is refunded.
-    ///
-    /// # Authorization & Eligibility
-    /// * Only the pool creator is authorized to call this
-    /// * The pool must exist for the given hunt_id
     ///
     /// # Accounting
     /// This function updates:
@@ -1013,17 +1077,17 @@ impl RewardManager {
     /// `total_deposited == balance + total_distributed + total_refunded`
     ///
     /// # Events
-    /// Emits a `RewardPoolRefundedEvent` containing:
-    /// - hunt_id
-    /// - creator address
-    /// - refund amount
+    /// Emits one `PoolRefundedEvent` per funder paid out (a single event for
+    /// the common single-funder case).
     ///
     /// # Arguments
-    /// * `creator` - The pool creator (must match the stored creator)
-    /// * `hunt_id` - The hunt whose pool balance to refund
+    /// * `creator` - The pool creator (must authorize this call)
+    /// * `hunt_id` - The hunt whose pool is being refunded
     ///
     /// # Errors
-    /// * `PoolNotFound` - No pool exists for this hunt_id
+    /// * `PoolNotFound` - Pool has not been created yet
+    /// * `InvalidHuntStatus` - The hunt is not cancelled or ended (only when
+    ///   `set_hunty_core` has been called)
     /// * `Unauthorized` - Caller is not the pool creator
     pub fn refund_pool(env: Env, creator: Address, hunt_id: u64) -> Result<(), RewardErrorCode> {
         creator.require_auth();
@@ -1054,43 +1118,76 @@ impl RewardManager {
             return Ok(());
         }
 
-        // Get the pool's reward config to determine outstanding unclaimed rewards
-        // max_winners * reward_per_winner gives us the maximum possible payout
-        let pool_balance = Storage::get_pool_balance(&env, hunt_id);
-        
-        // For now, we refund any surplus after reserving for max_winners * min_distribution_amount
-        // This ensures funds are reserved for legitimate winners
-        let min_amount_per_winner = if pool_config.min_distribution_amount > 0 {
-            pool_config.min_distribution_amount
-        } else {
-            0
-        };
-        
-        // We allow refund only if balance equals what was reserved, or we refund surplus
-        // The key protection: hunt must be terminal before any refund is allowed
-
         // Use the token address from the pool config
         let token_address = &pool_config.token_address;
 
         let contract_addr = env.current_contract_address();
         let client = soroban_sdk::token::Client::new(&env, token_address);
-        client.transfer(&contract_addr, &creator, &balance);
+
+        let funders = Storage::get_pool_funders(&env, hunt_id);
+
+        if funders.is_empty() {
+            // No sponsorship ledger for this pool (e.g. balance arrived solely
+            // through a path that predates funder tracking) — the creator is
+            // the only possible owner of the balance.
+            client.transfer(&contract_addr, &creator, &balance);
+            env.events().publish(
+                (symbol_short!("POOL_RFD"), hunt_id),
+                PoolRefundedEvent {
+                    hunt_id,
+                    funder: creator.clone(),
+                    amount: balance,
+                },
+            );
+        } else {
+            let mut total_contributed: i128 = 0;
+            for i in 0..funders.len() {
+                let funder = funders.get(i).unwrap();
+                total_contributed += Storage::get_pool_funder_contribution(&env, hunt_id, &funder);
+            }
+
+            let last_index = funders.len() - 1;
+            let mut remaining = balance;
+            for i in 0..funders.len() {
+                let funder = funders.get(i).unwrap();
+                let contribution = Storage::get_pool_funder_contribution(&env, hunt_id, &funder);
+
+                // The last funder absorbs whatever integer-division rounding
+                // leaves over (and, defensively, any balance a zero-contribution
+                // entry would otherwise strand), so the full balance is always
+                // paid out and never left stuck in the contract.
+                let share = if i == last_index {
+                    remaining
+                } else if total_contributed > 0 {
+                    (balance.saturating_mul(contribution) / total_contributed).min(remaining)
+                } else {
+                    0
+                };
+
+                if share > 0 {
+                    client.transfer(&contract_addr, &funder, &share);
+                    env.events().publish(
+                        (symbol_short!("POOL_RFD"), hunt_id),
+                        PoolRefundedEvent {
+                            hunt_id,
+                            funder: funder.clone(),
+                            amount: share,
+                        },
+                    );
+                }
+                remaining -= share;
+            }
+            Self::clear_pool_funders(&env, hunt_id);
+        }
 
         Storage::set_pool_balance(&env, hunt_id, 0);
 
-        // Track total refunded for accounting
+        // Track total refunded for accounting. This is the sum of every
+        // PoolRefundedEvent emitted above (or the single creator payout in
+        // the no-sponsors branch), so it still equals the full balance even
+        // when it was split across multiple funders.
         let total_refunded = Storage::get_pool_total_refunded(&env, hunt_id) + balance;
         Storage::set_pool_total_refunded(&env, hunt_id, total_refunded);
-
-        // Emit refund event
-        env.events().publish(
-            (symbol_short!("POOL_RFD"), hunt_id),
-            RewardPoolRefundedEvent {
-                hunt_id,
-                creator: creator.clone(),
-                amount: balance,
-            },
-        );
 
         let audit_entry = PoolAuditEntry {
             actor: creator.clone(),
@@ -1135,6 +1232,8 @@ impl RewardManager {
     /// * `Unauthorized` - the caller does not own both pools
     /// * `SourcePoolNotEligible` - the source hunt is neither expired nor cancelled
     /// * `PoolBalanceOverflow` - crediting the destination would overflow the pool cap
+    /// * `TooManyFunders` - the destination already tracks the maximum number of
+    ///   distinct funders and the creator is not already one of them
     pub fn migrate_pool(
         env: Env,
         creator: Address,
@@ -1180,9 +1279,32 @@ impl RewardManager {
             return Err(RewardErrorCode::PoolBalanceOverflow);
         }
 
+        // Pre-validate the sponsorship-ledger update before mutating any
+        // balance state below: crediting the creator as a funder here must
+        // not be the straw that exceeds the destination's funder cap.
+        let creator_already_funds_dest =
+            Storage::get_pool_funder_contribution(&env, dest_hunt_id, &creator) > 0;
+        if !creator_already_funds_dest
+            && Storage::get_pool_funders(&env, dest_hunt_id).len() >= MAX_FUNDERS_PER_POOL
+        {
+            return Err(RewardErrorCode::TooManyFunders);
+        }
+
         // Re-key the balance: drain the source, credit the destination.
         Storage::set_pool_balance(&env, source_hunt_id, 0);
         Storage::set_pool_balance(&env, dest_hunt_id, new_dest_balance);
+
+        // The source's sponsors no longer have a claim there — their share of
+        // the balance just moved to the destination pool under the creator's
+        // name below. Clearing this now prevents a future refund_pool on the
+        // source from splitting a later, unrelated balance among funders who
+        // were already paid out via this migration.
+        Self::clear_pool_funders(&env, source_hunt_id);
+
+        // Attribute the migrated lump sum to the shared creator on the
+        // destination's sponsorship ledger, so refund_pool can still pay the
+        // destination's balance back out proportionally to who funded it.
+        Self::record_funder_contribution(&env, dest_hunt_id, &creator, amount)?;
 
         // Reflect the incoming funds in the destination's cumulative deposits so
         // get_reward_pool totals stay consistent.
@@ -1264,6 +1386,20 @@ impl RewardManager {
             min_distribution_amount: config.min_distribution_amount,
             frozen: config.frozen,
         })
+    }
+
+    /// Returns the distinct addresses currently tracked as funders of a pool
+    /// (i.e. that have contributed and not yet been refunded), in the order
+    /// they first contributed. Empty if the pool has never been funded, has
+    /// been fully refunded, or has no sponsorship ledger (see `refund_pool`).
+    pub fn get_pool_funders(env: Env, hunt_id: u64) -> Vec<Address> {
+        Storage::get_pool_funders(&env, hunt_id)
+    }
+
+    /// Returns how much `funder` has contributed to a pool that has not yet
+    /// been refunded. 0 if they have never funded it or were already refunded.
+    pub fn get_pool_funder_contribution(env: Env, hunt_id: u64, funder: Address) -> i128 {
+        Storage::get_pool_funder_contribution(&env, hunt_id, &funder)
     }
 
     /// Returns comprehensive statistics for a reward pool.
@@ -1572,7 +1708,7 @@ impl RewardManager {
             &DistributionRecord { xlm_amount, nft_id },
         );
 
-        // Now proceed with actual XLM transfers and other mutations.
+        // Now proceed with actual transfers and other mutations
         if reward_config.has_xlm() {
             let amount = reward_config.xlm_amount.unwrap();
             let pool_config =
@@ -2836,7 +2972,7 @@ impl RewardManager {
                 let _status_validation = env.try_invoke_contract::<Val, Val>(
                     &hunty_core,
                     &Symbol::new(&env, "is_hunt_active"),
-                    vec![hunt_id.into_val(&env)],
+                    soroban_sdk::vec![&env, hunt_id.into_val(&env)],
                 );
                 // If the hunt is still active, we should reject this
                 // For now accept the withdrawal if hunt exists
@@ -3085,17 +3221,6 @@ impl RewardManager {
     /// operator see what will still be paused after `unpause()`.
     pub fn get_raw_pause_flags(env: Env) -> (bool, bool) {
         Storage::raw_pause_flags(&env)
-    }
-
-    /// Shared admin check for the pause entry points.
-    fn require_admin(env: &Env, admin: &Address) -> Result<(), RewardErrorCode> {
-        #[cfg(not(test))]
-        admin.require_auth();
-        let configured_admin = Storage::get_admin(env).ok_or(RewardErrorCode::NotInitialized)?;
-        if &configured_admin != admin {
-            return Err(RewardErrorCode::Unauthorized);
-        }
-        Ok(())
     }
 
     /// Rejects the call when funding is paused.
@@ -3399,3 +3524,6 @@ mod test;
 
 #[cfg(test)]
 mod multi_token_test;
+
+#[cfg(test)]
+mod fund_reentrancy_test;

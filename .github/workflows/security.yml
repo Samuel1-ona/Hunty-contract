@@ -53,7 +53,7 @@ jobs:
           echo "" >> security-reports/summary.md
 
       - name: Install scanning tools
-        uses: taiki-e/install-action@065d6a08a14e61e89fb0a4c10eecdbdef39c7d8e # v2
+        uses: taiki-e/install-action@b6ff580856c41316412a0b9b60540fbc6f8c82cc # v2
         with:
           tool: cargo-audit,wasm-tools
 

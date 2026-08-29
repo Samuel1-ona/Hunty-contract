@@ -134,6 +134,9 @@ pub struct NftCore {
 /// ScVal map. Use per-NFT auxiliary keys for new metadata instead.
 #[contracttype]
 #[derive(Clone, Debug, PartialEq, Eq)]
+
+/// Expected number of fields in NftData — do not change without migration
+pub const NFT_DATA_FIELD_COUNT: usize = 8;
 pub struct NftData {
     pub nft_id: u64,
     pub hunt_id: u64,

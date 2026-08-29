@@ -93,7 +93,10 @@ pub struct DistributionRecord {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct RewardPoolConfig {
     /// Address of the hunt creator who owns this pool.
-    /// Only the creator is authorized to fund it.
+    /// Anyone may fund the pool (see `fund_reward_pool`); the creator is the
+    /// only address authorized to manage its configuration and to trigger
+    /// `refund_pool`, which pays out the remaining balance pro rata across
+    /// every address that funded it.
     pub creator: Address,
     /// Addresses allowed to distribute rewards for this pool.
     /// Only the creator can manage this list.

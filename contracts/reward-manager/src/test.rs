@@ -75,6 +75,41 @@ mod test {
         Address::generate(env)
     }
 
+    /// Initializes the contract with a permissive `MockHuntyCore` (`hunty_core`
+    /// is a mandatory `initialize` argument) and creates a zero-minimum pool
+    /// with a placeholder NFT contract, exactly like the old
+    /// `initialize_contract` + `create_pool_with_token(..., 0)` pair did
+    /// before `create_reward_pool` started requiring a working HuntyCore.
+    /// Used by the sponsorship tests below, which don't exercise HuntyCore's
+    /// own eligibility rules.
+    fn init_and_create_pool(
+        env: &Env,
+        admin: Address,
+        token_address: &Address,
+        hunty_core: &Address,
+        creator: Address,
+        hunt_id: u64,
+    ) {
+        RewardManager::initialize(
+            env.clone(),
+            admin,
+            token_address.clone(),
+            hunty_core.clone(),
+        )
+        .unwrap();
+        RewardManager::create_reward_pool_with_nft(
+            env.clone(),
+            creator,
+            hunt_id,
+            token_address.clone(),
+            0,
+            Some(nft_contract_placeholder(env)),
+            0,
+            true,
+        )
+        .unwrap();
+    }
+
     fn get_balance(env: &Env, token_address: &Address, addr: &Address) -> i128 {
         let client = token::Client::new(env, token_address);
         client.balance(addr)
@@ -1067,47 +1102,66 @@ mod test {
         });
     }
 
-    /// Verifies that `fund_reward_pool` rejects any caller who is not the pool creator.
+    /// Verifies that `fund_reward_pool` allows a third-party sponsor to fund a
+    /// pool they did not create.
     ///
-    /// A third-party address (attacker) with sufficient token balance attempts to fund a pool
-    /// they did not create. The call must return `Unauthorized` and leave the attacker's
-    /// balance untouched — no tokens should be transferred.
-    ///
-    /// Closes #195.
+    /// Issue #195 originally restricted funding to the pool creator; issue #869
+    /// deliberately supersedes that restriction to support sponsorship (a brand
+    /// funding a community hunt, a DAO topping up a pool, several people
+    /// pooling a prize). A sponsor with sufficient token balance funds a pool
+    /// created by someone else. The call must succeed, move tokens from the
+    /// sponsor to the pool, and be tracked as that sponsor's contribution —
+    /// see `test_refund_pool_splits_pro_rata_across_funders` for the payout
+    /// side of that guarantee.
     #[test]
-    fn test_fund_reward_pool_unauthorized_funder() {
+    fn test_fund_reward_pool_allows_third_party_sponsor() {
         let env = Env::default();
         env.mock_all_auths_allowing_non_root_auth();
         let (contract_id, token_address, token_admin) = setup(&env);
+        let admin = Address::generate(&env);
         let creator = Address::generate(&env);
-        let attacker = Address::generate(&env);
+        let sponsor = Address::generate(&env);
+        let hunty_core = env.register(MockHuntyCore, ());
 
-        mint_tokens(&env, &token_address, &token_admin, &attacker, 100_000_000);
+        mint_tokens(&env, &token_address, &token_admin, &sponsor, 100_000_000);
 
         env.as_contract(&contract_id, || {
-            initialize_contract(&env, &token_address);
-            create_pool_with_token(&env, creator.clone(), 1, token_address.clone(), 0).unwrap();
+            init_and_create_pool(&env, admin, &token_address, &hunty_core, creator.clone(), 1);
 
-            // Non-creator tries to fund
+            // Non-creator sponsor funds the pool, authorizing for themselves.
             let result =
-                RewardManager::fund_reward_pool(env.clone(), attacker.clone(), 1, 10_000_000);
-            assert_eq!(result, Err(RewardErrorCode::Unauthorized));
+                RewardManager::fund_reward_pool(env.clone(), sponsor.clone(), 1, 10_000_000);
+            assert!(result.is_ok());
+
+            assert_eq!(RewardManager::get_pool_balance(env.clone(), 1), 10_000_000);
+            assert_eq!(
+                RewardManager::get_pool_funder_contribution(env.clone(), 1, sponsor.clone()),
+                10_000_000
+            );
+            assert_eq!(
+                RewardManager::get_pool_funders(env.clone(), 1),
+                Vec::from_array(&env, [sponsor.clone()])
+            );
         });
 
-        // Attacker's balance unchanged — no tokens were transferred
-        assert_eq!(get_balance(&env, &token_address, &attacker), 100_000_000);
+        // Sponsor's balance decreased by the funded amount.
+        assert_eq!(get_balance(&env, &token_address, &sponsor), 90_000_000);
     }
 
     #[test]
     #[should_panic]
-    fn test_fund_reward_pool_requires_creator_auth() {
+    fn test_fund_reward_pool_requires_funder_auth() {
         let env = Env::default();
-        // Do NOT mock auths here to test require_auth rejection
-        let (contract_id, token_address, _) = setup(&env);
+        // Do NOT mock auths here to test require_auth rejection. `setup()`
+        // now mocks all auths by default, so this test builds its own
+        // contract/token registration instead of using it.
+        let contract_id = env.register(RewardManager, ());
+        let token_admin = Address::generate(&env);
+        let token_contract = env.register_stellar_asset_contract_v2(token_admin.clone());
+        let token_address = token_contract.address();
         let creator = Address::generate(&env);
 
         env.as_contract(&contract_id, || {
-            initialize_contract(&env, &token_address);
             crate::storage::Storage::set_pool_config(
                 &env,
                 1,
@@ -1122,11 +1176,108 @@ mod test {
                     target_amount: 0,
                     min_distribution_interval_secs: 0,
                     distribution_mode: crate::types::DistributionMode::Fixed,
-                    claim_deadline: 0,
                     vesting_period_secs: 0,
+                    claim_deadline: 0,
+                    nft_royalty_bps: 0,
+                    nft_transferable: true,
                 },
             );
+            // funder == creator here, but the auth now required is the
+            // funder's own — unrelated to whether they happen to be the creator.
             let _ = RewardManager::fund_reward_pool(env.clone(), creator.clone(), 1, 10_000_000);
+        });
+    }
+
+    /// Verifies per-funder contributions and the funders list stay correct
+    /// across multiple contributors and repeat top-ups.
+    #[test]
+    fn test_fund_reward_pool_tracks_funder_contribution() {
+        let env = Env::default();
+        env.mock_all_auths_allowing_non_root_auth();
+        let (contract_id, token_address, token_admin) = setup(&env);
+        let admin = Address::generate(&env);
+        let creator = Address::generate(&env);
+        let sponsor = Address::generate(&env);
+        let hunty_core = env.register(MockHuntyCore, ());
+
+        mint_tokens(&env, &token_address, &token_admin, &creator, 100_000_000);
+        mint_tokens(&env, &token_address, &token_admin, &sponsor, 100_000_000);
+
+        env.as_contract(&contract_id, || {
+            init_and_create_pool(&env, admin, &token_address, &hunty_core, creator.clone(), 1);
+
+            RewardManager::fund_reward_pool(env.clone(), creator.clone(), 1, 30_000_000).unwrap();
+            RewardManager::fund_reward_pool(env.clone(), sponsor.clone(), 1, 20_000_000).unwrap();
+            // Creator tops up again — contribution accumulates, no duplicate list entry.
+            RewardManager::fund_reward_pool(env.clone(), creator.clone(), 1, 10_000_000).unwrap();
+
+            assert_eq!(
+                RewardManager::get_pool_funder_contribution(env.clone(), 1, creator.clone()),
+                40_000_000
+            );
+            assert_eq!(
+                RewardManager::get_pool_funder_contribution(env.clone(), 1, sponsor.clone()),
+                20_000_000
+            );
+            assert_eq!(
+                RewardManager::get_pool_funders(env.clone(), 1),
+                Vec::from_array(&env, [creator.clone(), sponsor.clone()])
+            );
+        });
+    }
+
+    /// Verifies the pool rejects a distinct funder beyond `MAX_FUNDERS_PER_POOL`,
+    /// while an existing funder can still top up past that point.
+    #[test]
+    fn test_fund_reward_pool_too_many_funders() {
+        let env = Env::default();
+        env.mock_all_auths_allowing_non_root_auth();
+        let (contract_id, token_address, token_admin) = setup(&env);
+        let admin = Address::generate(&env);
+        let creator = Address::generate(&env);
+        let hunty_core = env.register(MockHuntyCore, ());
+
+        env.as_contract(&contract_id, || {
+            init_and_create_pool(&env, admin, &token_address, &hunty_core, creator.clone(), 1);
+
+            let mut sponsors = Vec::new(&env);
+            for _ in 0..50 {
+                let sponsor = Address::generate(&env);
+                mint_tokens(&env, &token_address, &token_admin, &sponsor, 10_000_000);
+                RewardManager::fund_reward_pool(env.clone(), sponsor.clone(), 1, 10_000_000)
+                    .unwrap();
+                sponsors.push_back(sponsor);
+            }
+
+            // 51st distinct funder is rejected — no tokens should move.
+            let latecomer = Address::generate(&env);
+            mint_tokens(&env, &token_address, &token_admin, &latecomer, 10_000_000);
+            let result =
+                RewardManager::fund_reward_pool(env.clone(), latecomer.clone(), 1, 10_000_000);
+            assert_eq!(result, Err(RewardErrorCode::TooManyFunders));
+            assert_eq!(
+                RewardManager::get_pool_funder_contribution(env.clone(), 1, latecomer.clone()),
+                0
+            );
+
+            // An existing funder can still top up.
+            let first_sponsor = sponsors.get(0).unwrap();
+            mint_tokens(
+                &env,
+                &token_address,
+                &token_admin,
+                &first_sponsor,
+                10_000_000,
+            );
+            RewardManager::fund_reward_pool(env.clone(), first_sponsor.clone(), 1, 10_000_000)
+                .unwrap();
+            assert_eq!(
+                RewardManager::get_pool_funder_contribution(env.clone(), 1, first_sponsor),
+                20_000_000
+            );
+
+            // The rejected call never transferred the latecomer's tokens.
+            assert_eq!(get_balance(&env, &token_address, &latecomer), 10_000_000);
         });
     }
 
@@ -2072,6 +2223,108 @@ mod test {
         assert_eq!(get_balance(&env, &token_address, &contract_id), 0);
     }
 
+    /// Verifies `refund_pool` splits the balance pro rata across every
+    /// tracked funder — the core acceptance criterion of #869: a sponsor's
+    /// contribution can never be paid out to another party. With no
+    /// distributions between funding and refund, the balance exactly equals
+    /// total contributions, so each funder gets back precisely what they put in.
+    #[test]
+    fn test_refund_pool_splits_pro_rata_across_funders() {
+        let env = Env::default();
+        env.mock_all_auths_allowing_non_root_auth();
+        let (contract_id, token_address, token_admin) = setup(&env);
+        let creator = Address::generate(&env);
+        let sponsor = Address::generate(&env);
+        let hunty_core = env.register(MockHuntyCore, ());
+
+        mint_tokens(&env, &token_address, &token_admin, &creator, 100_000_000);
+        mint_tokens(&env, &token_address, &token_admin, &sponsor, 100_000_000);
+
+        env.as_contract(&contract_id, || {
+            init_and_create_pool(
+                &env,
+                token_admin.clone(),
+                &token_address,
+                &hunty_core,
+                creator.clone(),
+                5,
+            );
+            RewardManager::fund_reward_pool(env.clone(), creator.clone(), 5, 30_000_000).unwrap();
+            RewardManager::fund_reward_pool(env.clone(), sponsor.clone(), 5, 20_000_000).unwrap();
+
+            RewardManager::refund_pool(env.clone(), creator.clone(), 5).unwrap();
+
+            assert_eq!(RewardManager::get_pool_balance(env.clone(), 5), 0);
+            // Ledger is wiped once a pool is fully refunded.
+            assert_eq!(
+                RewardManager::get_pool_funders(env.clone(), 5),
+                Vec::new(&env)
+            );
+        });
+
+        // Each funder gets back exactly their own contribution.
+        assert_eq!(get_balance(&env, &token_address, &creator), 100_000_000);
+        assert_eq!(get_balance(&env, &token_address, &sponsor), 100_000_000);
+        assert_eq!(get_balance(&env, &token_address, &contract_id), 0);
+    }
+
+    /// Verifies pro-rata splitting still holds after the balance has been
+    /// partially drawn down by a distribution — the split is proportional to
+    /// each funder's *contribution*, applied to whatever balance remains, not
+    /// an equal split of the remaining balance.
+    #[test]
+    fn test_refund_pool_splits_pro_rata_after_partial_distribution() {
+        let env = Env::default();
+        env.mock_all_auths_allowing_non_root_auth();
+        let (contract_id, token_address, token_admin) = setup(&env);
+        let creator = Address::generate(&env);
+        let sponsor = Address::generate(&env);
+        let player = Address::generate(&env);
+        let hunty_core = env.register(MockHuntyCore, ());
+
+        mint_tokens(&env, &token_address, &token_admin, &creator, 100_000_000);
+        mint_tokens(&env, &token_address, &token_admin, &sponsor, 100_000_000);
+
+        env.as_contract(&contract_id, || {
+            init_and_create_pool(
+                &env,
+                token_admin.clone(),
+                &token_address,
+                &hunty_core,
+                creator.clone(),
+                6,
+            );
+            // 40/60 split between creator and sponsor.
+            RewardManager::fund_reward_pool(env.clone(), creator.clone(), 6, 40_000_000).unwrap();
+            RewardManager::fund_reward_pool(env.clone(), sponsor.clone(), 6, 60_000_000).unwrap();
+
+            // A distribution spends 30M, leaving 70M — still split 40/60.
+            RewardManager::distribute_rewards(
+                env.clone(),
+                6,
+                player.clone(),
+                xlm_only_config(&env, 30_000_000),
+            )
+            .unwrap();
+            assert_eq!(RewardManager::get_pool_balance(env.clone(), 6), 70_000_000);
+
+            RewardManager::refund_pool(env.clone(), creator.clone(), 6).unwrap();
+            assert_eq!(RewardManager::get_pool_balance(env.clone(), 6), 0);
+        });
+
+        assert_eq!(get_balance(&env, &token_address, &player), 30_000_000);
+        // Creator: minted 100M, funded 40M, refunded 40% of the remaining 70M = 28M.
+        assert_eq!(
+            get_balance(&env, &token_address, &creator),
+            100_000_000 - 40_000_000 + 28_000_000
+        );
+        // Sponsor: minted 100M, funded 60M, refunded 60% of the remaining 70M = 42M.
+        assert_eq!(
+            get_balance(&env, &token_address, &sponsor),
+            100_000_000 - 60_000_000 + 42_000_000
+        );
+    }
+
     #[test]
     fn test_refund_pool_unauthorized_fails() {
         let env = Env::default();
@@ -2732,6 +2985,13 @@ mod test {
 
     /// Minimal stand-in for HuntyCore used to drive migrate_pool's eligibility
     /// check. Eligibility is set per hunt_id via `set_eligible`.
+    ///
+    /// `get_hunt_info` and `is_hunt_terminal` unconditionally report success /
+    /// terminal for every hunt_id: `create_reward_pool` now requires a working
+    /// `get_hunt_info` call to succeed (hunty_core is mandatory since
+    /// `initialize` started taking it), and `refund_pool` now requires
+    /// `is_hunt_terminal` once hunty_core is configured. Neither of those
+    /// gates is what these tests are exercising, so both are permissive here.
     #[soroban_sdk::contract]
     pub struct MockHuntyCore;
 
@@ -2743,6 +3003,14 @@ mod test {
 
         pub fn is_hunt_expired_or_cancelled(env: Env, hunt_id: u64) -> bool {
             env.storage().persistent().get(&hunt_id).unwrap_or(false)
+        }
+
+        pub fn get_hunt_info(_env: Env, _hunt_id: u64) -> bool {
+            true
+        }
+
+        pub fn is_hunt_terminal(_env: Env, _hunt_id: u64) -> bool {
+            true
         }
     }
 
@@ -2803,6 +3071,97 @@ mod test {
             assert_eq!(dest.balance, 60_000_000);
             assert_eq!(dest.total_deposited, 60_000_000);
         });
+    }
+
+    /// Verifies that migrating a source pool's balance into a destination
+    /// pool that already has its own sponsor doesn't dilute or misattribute
+    /// either party's share: the migrated lump sum is credited to the shared
+    /// creator (who authorized the migration), the destination's sponsor
+    /// keeps exactly their own contribution, and a later `refund_pool` on the
+    /// destination pays each of them only their own share. Also verifies the
+    /// source pool's sponsorship ledger is cleared by the migration, so it
+    /// can't be double-counted if that hunt_id is ever funded again.
+    #[test]
+    fn test_migrate_pool_then_refund_preserves_sponsor_share() {
+        let env = Env::default();
+        env.mock_all_auths_allowing_non_root_auth();
+        let (contract_id, token_address, token_admin) = setup(&env);
+        let admin = Address::generate(&env);
+        let creator = Address::generate(&env);
+        let sponsor = Address::generate(&env);
+
+        mint_tokens(&env, &token_address, &token_admin, &creator, 100_000_000);
+        mint_tokens(&env, &token_address, &token_admin, &sponsor, 100_000_000);
+        // Source hunt (1) is expired/cancelled and therefore migratable.
+        let hunty_core_id = setup_hunty_core(&env, 1, true);
+
+        env.as_contract(&contract_id, || {
+            RewardManager::initialize(
+                env.clone(),
+                admin.clone(),
+                token_address.clone(),
+                hunty_core_id.clone(),
+            )
+            .unwrap();
+            RewardManager::create_reward_pool_with_nft(
+                env.clone(),
+                creator.clone(),
+                1,
+                token_address.clone(),
+                0,
+                Some(nft_contract_placeholder(&env)),
+                0,
+                true,
+            )
+            .unwrap();
+            RewardManager::create_reward_pool_with_nft(
+                env.clone(),
+                creator.clone(),
+                2,
+                token_address.clone(),
+                0,
+                Some(nft_contract_placeholder(&env)),
+                0,
+                true,
+            )
+            .unwrap();
+
+            // Creator funds the source pool; a sponsor separately funds the
+            // destination pool before any migration happens.
+            RewardManager::fund_reward_pool(env.clone(), creator.clone(), 1, 50_000_000).unwrap();
+            RewardManager::fund_reward_pool(env.clone(), sponsor.clone(), 2, 20_000_000).unwrap();
+
+            let migrated = RewardManager::migrate_pool(env.clone(), creator.clone(), 1, 2).unwrap();
+            assert_eq!(migrated, 50_000_000);
+
+            // Destination now holds both the sponsor's original 20M and the
+            // creator's migrated 50M, attributed to each of them respectively.
+            assert_eq!(RewardManager::get_pool_balance(env.clone(), 2), 70_000_000);
+            assert_eq!(
+                RewardManager::get_pool_funder_contribution(env.clone(), 2, sponsor.clone()),
+                20_000_000
+            );
+            assert_eq!(
+                RewardManager::get_pool_funder_contribution(env.clone(), 2, creator.clone()),
+                50_000_000
+            );
+
+            // The source pool's sponsorship ledger was cleared by the migration.
+            assert_eq!(
+                RewardManager::get_pool_funders(env.clone(), 1),
+                Vec::new(&env)
+            );
+
+            RewardManager::refund_pool(env.clone(), creator.clone(), 2).unwrap();
+            assert_eq!(RewardManager::get_pool_balance(env.clone(), 2), 0);
+        });
+
+        // Sponsor gets back exactly what they put into the destination pool —
+        // none of the creator's migrated funds, and none withheld either.
+        assert_eq!(get_balance(&env, &token_address, &sponsor), 100_000_000);
+        // Creator: minted 100M, spent 50M funding the (now-migrated) source,
+        // and gets that same 50M back via the destination's refund.
+        assert_eq!(get_balance(&env, &token_address, &creator), 100_000_000);
     }
 
     #[test]
@@ -3510,7 +3869,6 @@ mod test {
             );
         }
     }
-}
 
     // ========== Authorization Tests (Auth Bypass Fixes) ==========
 
@@ -3739,7 +4097,6 @@ mod test {
             assert!(Storage::is_authorized_contract(&env, &contract_addr));
         });
     }
-}
 
     // ========== Audit Fixes: Replay Detection & Refund Accounting ==========
 

@@ -49,6 +49,10 @@ impl Storage {
     const PAUSE_FUNDING_KEY: soroban_sdk::Symbol = symbol_short!("PAUSE_FD");
     const PAUSE_DIST_KEY: soroban_sdk::Symbol = symbol_short!("PAUSE_DS");
     const EMERGENCY_LOG_KEY: soroban_sdk::Symbol = symbol_short!("EMLOG");
+    /// List of distinct addresses that have funded a pool and not yet been refunded.
+    const POOL_FUNDERS_KEY: soroban_sdk::Symbol = symbol_short!("PFNDRS");
+    /// Per-(hunt_id, funder) cumulative amount contributed and not yet refunded.
+    const POOL_FUNDER_CONTRIB_KEY: soroban_sdk::Symbol = symbol_short!("PFCONT");
 
     pub const PENDING_NFT_KEY: soroban_sdk::Symbol = symbol_short!("PNFT");
 
@@ -512,6 +516,56 @@ impl Storage {
 
     fn pool_distributions_key(hunt_id: u64) -> (soroban_sdk::Symbol, u64) {
         (Self::POOL_DISTRIBUTIONS_KEY, hunt_id)
+    }
+
+    // ========== Pool Funders (sponsorship tracking) ==========
+
+    /// Returns the distinct addresses that have funded a pool and have not yet
+    /// been refunded, in the order they first contributed.
+    pub fn get_pool_funders(env: &Env, hunt_id: u64) -> Vec<Address> {
+        let key = Self::pool_funders_key(hunt_id);
+        env.storage()
+            .persistent()
+            .get(&key)
+            .unwrap_or_else(|| Vec::new(env))
+    }
+
+    pub fn set_pool_funders(env: &Env, hunt_id: u64, funders: &Vec<Address>) {
+        let key = Self::pool_funders_key(hunt_id);
+        env.storage().persistent().set(&key, funders);
+    }
+
+    pub fn remove_pool_funders(env: &Env, hunt_id: u64) {
+        let key = Self::pool_funders_key(hunt_id);
+        env.storage().persistent().remove(&key);
+    }
+
+    /// Cumulative amount `funder` has contributed to a pool that has not yet
+    /// been refunded. 0 if they have never funded it or were already refunded.
+    pub fn get_pool_funder_contribution(env: &Env, hunt_id: u64, funder: &Address) -> i128 {
+        let key = Self::pool_funder_contribution_key(hunt_id, funder);
+        env.storage().persistent().get(&key).unwrap_or(0)
+    }
+
+    pub fn set_pool_funder_contribution(env: &Env, hunt_id: u64, funder: &Address, amount: i128) {
+        let key = Self::pool_funder_contribution_key(hunt_id, funder);
+        env.storage().persistent().set(&key, &amount);
+    }
+
+    pub fn remove_pool_funder_contribution(env: &Env, hunt_id: u64, funder: &Address) {
+        let key = Self::pool_funder_contribution_key(hunt_id, funder);
+        env.storage().persistent().remove(&key);
+    }
+
+    fn pool_funders_key(hunt_id: u64) -> (soroban_sdk::Symbol, u64) {
+        (Self::POOL_FUNDERS_KEY, hunt_id)
+    }
+
+    fn pool_funder_contribution_key(
+        hunt_id: u64,
+        funder: &Address,
+    ) -> (soroban_sdk::Symbol, u64, Address) {
+        (Self::POOL_FUNDER_CONTRIB_KEY, hunt_id, funder.clone())
     }
 
     // ========== Audit Log ==========
