@@ -3,6 +3,9 @@
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Rust](https://img.shields.io/badge/rust-1.70+-orange.svg)](https://www.rust-lang.org/)
 [![Soroban](https://img.shields.io/badge/soroban-22.0+-purple.svg)](https://soroban.stellar.org/)
+[![CI](https://github.com/Samuel1-ona/Hunty-contract/actions/workflows/ci.yml/badge.svg)](https://github.com/Samuel1-ona/Hunty-contract/actions/workflows/ci.yml)
+[![WASM Size](https://github.com/Samuel1-ona/Hunty-contract/actions/workflows/wasm-size.yml/badge.svg)](https://github.com/Samuel1-ona/Hunty-contract/actions/workflows/wasm-size.yml)
+[![Coverage](https://img.shields.io/badge/coverage-checked_in_CI-blue)](https://github.com/Samuel1-ona/Hunty-contract/actions/workflows/ci.yml)
 
 Hunty is a decentralized scavenger hunt game built on Stellar/Soroban. Create thrilling scavenger hunts with multiple clues and challenges, engage players in immersive treasure hunts, and reward them with XLM tokens or exclusive NFTs.
 
@@ -45,7 +48,7 @@ graph TB
     HuntyCore -->|Hunt Completed| RewardManager[RewardManager Contract]
     RewardManager -->|Distributes XLM| Player
     RewardManager -->|Mints NFT| NftReward[NftReward Contract]
-    NftReward -->|Transfers NFT| Player
+    NftReward -->|Transfers NFT| Player.
     
     style HuntyCore fill:#4a90e2
     style RewardManager fill:#50c878
@@ -281,11 +284,12 @@ flowchart TD
 
 ## Architecture
 
-Hunty consists of three main smart contracts:
+Hunty consists of three main smart contracts and an off-chain rate-limiting microservice:
 
 1. **HuntyCore** - Main game logic, hunt management, and clue verification
 2. **RewardManager** - Coordinates reward distribution (XLM and NFT)
 3. **NftReward** - Handles NFT minting and transfer for completion rewards
+4. **Off-Chain Mint Rate Limiter** (`src/`) - Express microservice protecting the NFT minting path against per-address abuse and spam
 
 ### Contract Responsibilities
 
@@ -309,6 +313,16 @@ Hunty consists of three main smart contracts:
 - Manages NFT ownership and transfers
 - Provides query functions for NFT information
 
+**Off-Chain Mint Rate Limiter Microservice (`src/`):**
+- Serves as an off-chain API layer (`hunty-mint-rate-limiter`) sitting in front of the on-chain NFT reward minting pipeline.
+- Enforces sliding-window rate limits per Stellar wallet address (`maxMints` per `windowMs`) to prevent automated minting abuse, bot spam, and gas exhaustion on the network.
+- Exposes administrative and operational endpoints:
+  - `POST /mint` - Evaluates rate limits for a given player address `{ address }` before initiating the Soroban `NftReward` mint.
+  - `GET /mint/count/:address` - Returns active window mint count for an address.
+  - `GET /health` - Health check returning service status, network environment, RPC endpoint, and contract IDs (`huntyCoreId`, `rewardManagerId`, `nftRewardId`).
+  - `GET /environment` - Renders visual environment badge for non-production environments (`testnet`, `staging`).
+  - `GET /admin/config` & `PATCH /admin/config` - Query and dynamically update rate limit settings at runtime (requires `x-admin-secret` authentication header).
+
 ## Quick Start
 
 ### Prerequisites
@@ -328,6 +342,91 @@ cd Hunty-contract
 cd contracts/hunty-core && make build
 cd ../reward-manager && make build
 cd ../nft-reward && make build
+```
+
+### Environment Configuration
+
+The API is configured with explicit environment files so development/testnet, QA/staging, and mainnet deployments do not share contract addresses or RPC settings.
+
+Available templates (tracked in git, placeholders only — **never** put real secrets in these):
+
+- `.env.testnet.example` for development and testnet integration work
+- `.env.staging.example` for QA/pre-production validation on dedicated staging contracts
+- `.env.mainnet.example` for production mainnet deployment
+- `.env.example` as the shared reference template
+
+Copy the template for your target environment to its unsuffixed name and fill in the real values:
+
+```bash
+cp .env.testnet.example .env.testnet
+cp .env.staging.example .env.staging
+cp .env.mainnet.example .env.mainnet
+```
+
+The working files (`.env`, `.env.testnet`, `.env.staging`, `.env.mainnet`, and any other
+`.env.*`) are git-ignored, so a filled-in `ADMIN_SECRET` can never be committed by
+`git add -A`. Only `.env.example` and `.env.*.example` are negated back into tracking.
+
+> **Never** rename a filled-in file back to `*.example`, and never commit real
+> credentials. Rotate `ADMIN_SECRET` immediately if one is ever pushed.
+
+Required variables are validated when the API starts. Startup fails fast with a clear error if a value is missing, invalid, or still contains a `replace-with-...` placeholder.
+
+The mint rate-limiter API (`src/rateLimiter.ts`) **gates minting with shared Redis state** (`REDIS_URL`). Per-address mint timestamps are stored in Redis so limits survive process restarts and stay correct when multiple API instances run behind a load balancer. An in-memory `Map` is only used inside unit tests.
+
+```bash
+# Development/testnet
+pnpm dev:testnet
+
+# QA/staging
+pnpm dev:staging
+
+# Environment-specific builds
+pnpm build:testnet
+pnpm build:staging
+pnpm build:mainnet
+
+# Start compiled output with an environment file
+pnpm start:staging
+```
+
+Contract addresses are tracked per environment in:
+
+- `config/contracts.testnet.json`
+- `config/contracts.staging.json`
+- `config/contracts.mainnet.json`
+
+Keep these files in sync with the matching `.env.<environment>` file (your local copy of
+`.env.<environment>.example`) after each deployment.
+
+Browser-facing environment visibility:
+
+- `GET /health` returns the active environment, Stellar network, RPC URL, and contract IDs.
+- `GET /environment` renders a visible environment badge for `testnet` and `staging` only; mainnet returns `204 No Content` so no production badge is shown.
+
+### Environment Deployments
+
+Build contract WASMs first, then deploy to the target environment:
+
+```bash
+stellar contract build
+
+# Testnet development deployment
+scripts/deploy_contracts.sh testnet myaccount
+
+# Dedicated QA/pre-production deployment
+scripts/deploy_contracts.sh staging staging-deployer
+
+# Mainnet deployment; requires MAINNET_RPC_URL
+MAINNET_RPC_URL=https://... scripts/deploy_contracts.sh mainnet mainnet-deployer
+```
+
+The deploy script writes the deployed contract IDs to `config/contracts.<environment>.json`. Copy the resulting IDs into the corresponding `.env.<environment>` values:
+
+```bash
+HUNTY_CORE_ID=...
+REWARD_MANAGER_ID=...
+NFT_REWARD_ID=...
 ```
 
 ### Running Tests
@@ -367,9 +466,19 @@ hunty-contract/
 │       │   ├── lib.rs
 │       │   └── test.rs
 │       └── Cargo.toml
+├── src/                     # Off-chain Mint Rate Limiter Express service (TypeScript)
+│   ├── index.ts             # Express server setup and route definitions
+│   ├── rateLimiter.ts       # Sliding-window rate limiter implementation
+│   ├── config.ts            # Environment and contract configuration loader
+│   ├── errors.ts            # Custom rate limit error definitions
+│   └── types.ts             # TypeScript interface definitions
+├── scripts/                 # Deployment and environment helper scripts
+│   ├── deploy_contracts.sh # Multi-environment deployment script
+│   └── with-env.mjs         # Environment loader CLI helper
 ├── CONTRIBUTING.md          # Contribution guidelines
 ├── DEVELOPMENT.md          # Development guide
 ├── GITHUB_ISSUES.md         # List of issues for developers
+├── package.json             # Node.js dependencies & scripts (hunty-mint-rate-limiter)
 ├── Cargo.toml               # Workspace configuration
 └── README.md
 ```

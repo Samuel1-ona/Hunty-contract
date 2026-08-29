@@ -1,0 +1,28 @@
+{
+  "version": 1,
+  "unit": "soroban_instructions",
+  "tolerance_percent": 10,
+  "operations": {
+    "create_hunt": {
+      "gas": 0
+    },
+    "add_clue": {
+      "gas": 0
+    },
+    "submit_answer": {
+      "gas": 0
+    },
+    "register_player": {
+      "gas": 0
+    },
+    "get_leaderboard": {
+      "gas": 0
+    },
+    "distribute_rewards": {
+      "gas": 0
+    },
+    "mint_nft": {
+      "gas": 0
+    }
+  }
+}

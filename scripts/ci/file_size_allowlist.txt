@@ -1,0 +1,7 @@
+# Tracked files permitted to exceed MAX_FILE_BYTES (~1 MiB).
+# Only grandfathered historical blobs — do not add new binaries here
+# without an explicit maintainer decision.
+#
+# rustup-init2.exe and vs_BuildTools.exe were removed from HEAD
+# (developer-machine installers checked in by mistake, ~17 MB total).
+# *.exe is now covered by .gitignore, so no allowlist entry is needed.

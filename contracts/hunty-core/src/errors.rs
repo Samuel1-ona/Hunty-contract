@@ -1,6 +1,11 @@
-use core::fmt;
-use soroban_sdk::{contracterror, String};
+use soroban_sdk::contracterror;
 
+// NOTE: Soroban's #[contracterror] XDR spec caps error enums at 50 cases
+// (ScSpecUdtErrorEnumV0::cases is a VecM<_, 50>). This enum is already at
+// that limit. If a new error code is ever needed, reuse a semantically-close
+// existing variant instead of adding one (see InviteNotConfigured/
+// InvalidInviteCode below for the established pattern) rather than removing
+// or renumbering an existing variant.
 #[contracterror]
 #[derive(Clone, Copy, Debug, Eq, PartialEq, PartialOrd, Ord)]
 #[repr(u32)]
@@ -26,144 +31,142 @@ pub enum HuntErrorCode {
     RewardAlreadyClaimed = 19,
     RewardDistributionFailed = 20,
     NoRewardsConfigured = 21,
-    NoRequiredClues = 22,
-    InvalidRarity = 23,
-    LeaderboardVisibilityUnauthorized = 24,
+    DuplicateSubmission = 22,
+    SubmissionExpired = 23,
+    BannedPlayer = 24,
+    NoRequiredClues = 25,
+    RateLimitExceeded = 26,
+    ScoreOverflow = 27,
+    RegistrationsPaused = 28,
+    AnswersPaused = 29,
+    RewardsPaused = 30,
+    HuntEndTimeInPast = 31,
+    NoPendingAdmin = 32,
+    PendingAdminMismatch = 33,
+    InvalidRarity = 34,
+    InvalidTimeBonusConfig = 35,
+    AddressBlacklisted = 36,
+    ContractPaused = 37,
+    InvalidMaxAttempts = 38,
+    InvalidWeight = 39,
+    HintNotAvailable = 40,
+    HintAlreadyUnlocked = 41,
+    InsufficientScore = 42,
+    TooManyCategories = 43,
+    InvalidCategory = 44,
+    InvalidDifficulty = 45,
+    CorruptPlayerProgress = 46,
+    HuntNotStarted = 47,
+    AdminAlreadyProposed = 48,
+    InvalidPoints = 49,
+    HuntFull = 50,
 }
 
 #[derive(Debug)]
 pub enum HuntError {
-    HuntNotFound { hunt_id: u64 },
-    ClueNotFound { hunt_id: u64 },
+    HuntNotFound,
+    ClueNotFound,
     InvalidHuntStatus,
-    PlayerNotRegistered { hunt_id: u64 },
-    ClueAlreadyCompleted { hunt_id: u64 },
+    PlayerNotRegistered,
+    ClueAlreadyCompleted,
     InvalidAnswer,
-    HuntNotActive { hunt_id: u64 },
+    HuntNotActive,
     Unauthorized,
-    InsufficientRewardPool { required: i128, available: i128 },
-    DuplicateRegistration { hunt_id: u64 },
-    InvalidTitle { reason: String },
-    InvalidDescription { reason: String },
+    InsufficientRewardPool,
+    DuplicateRegistration,
+    InvalidTitle,
+    InvalidDescription,
     InvalidAddress,
-    TooManyClues { hunt_id: u64, limit: u32 },
+    TooManyClues,
     InvalidQuestion,
-    HuntNotCompleted { hunt_id: u64 },
-    RewardAlreadyClaimed { hunt_id: u64 },
-    RewardDistributionFailed { hunt_id: u64 },
-    NoRewardsConfigured { hunt_id: u64 },
-    NoRequiredClues { hunt_id: u64 },
-    InvalidRarity { value: u32 },
-    LeaderboardVisibilityUnauthorized,
-}
-
-impl fmt::Display for HuntError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            HuntError::HuntNotFound { hunt_id } => {
-                write!(f, "Hunt not found: ID {}", hunt_id)
-            }
-            HuntError::ClueNotFound { hunt_id } => {
-                write!(f, "Clue not found for hunt {}", hunt_id)
-            }
-            HuntError::InvalidHuntStatus => {
-                write!(f, "Invalid hunt status")
-            }
-            HuntError::PlayerNotRegistered { hunt_id } => {
-                write!(f, "Player not registered for hunt {}", hunt_id)
-            }
-            HuntError::ClueAlreadyCompleted { hunt_id } => {
-                write!(f, "Clue already completed for hunt {}", hunt_id)
-            }
-            HuntError::InvalidAnswer => {
-                write!(f, "Invalid answer submitted")
-            }
-            HuntError::HuntNotActive { hunt_id } => {
-                write!(f, "Hunt not active: ID {}", hunt_id)
-            }
-            HuntError::Unauthorized => {
-                write!(f, "Unauthorized access")
-            }
-            HuntError::InsufficientRewardPool {
-                required,
-                available,
-            } => {
-                write!(
-                    f,
-                    "Insufficient reward pool: required {}, available {}",
-                    required, available
-                )
-            }
-            HuntError::DuplicateRegistration { hunt_id } => {
-                write!(f, "Duplicate registration for hunt {}", hunt_id)
-            }
-            HuntError::InvalidTitle { reason } => {
-                write!(f, "Invalid title: {:?}", reason)
-            }
-            HuntError::InvalidDescription { reason } => {
-                write!(f, "Invalid description: {:?}", reason)
-            }
-            HuntError::InvalidAddress => {
-                write!(f, "Invalid address")
-            }
-            HuntError::TooManyClues { hunt_id, limit } => {
-                write!(f, "Too many clues for hunt {} (limit {})", hunt_id, limit)
-            }
-            HuntError::InvalidQuestion => {
-                write!(f, "Invalid question (empty or exceeds max length)")
-            }
-            HuntError::HuntNotCompleted { hunt_id } => {
-                write!(f, "Hunt {} not completed by player", hunt_id)
-            }
-            HuntError::RewardAlreadyClaimed { hunt_id } => {
-                write!(f, "Reward already claimed for hunt {}", hunt_id)
-            }
-            HuntError::RewardDistributionFailed { hunt_id } => {
-                write!(f, "Reward distribution failed for hunt {}", hunt_id)
-            }
-            HuntError::NoRewardsConfigured { hunt_id } => {
-                write!(f, "No rewards configured for hunt {}", hunt_id)
-            }
-            HuntError::NoRequiredClues { hunt_id } => {
-                write!(f, "Hunt {} has no required clues; at least one required clue must exist before activation", hunt_id)
-            }
-            HuntError::InvalidRarity { value } => {
-                write!(f, "Invalid nft_rarity {}: must be 0-5", value)
-            }
-            HuntError::LeaderboardVisibilityUnauthorized => {
-                write!(f, "Leaderboard access denied: insufficient visibility permissions")
-            }
-        }
-    }
+    RefundFailed,
+    NoCluesAdded,
+    HuntNotCompleted,
+    RewardAlreadyClaimed,
+    RewardDistributionFailed,
+    NoRewardsConfigured,
+    DuplicateSubmission,
+    SubmissionExpired,
+    BannedPlayer,
+    NoRequiredClues,
+    RateLimitExceeded,
+    ScoreOverflow,
+    RegistrationsPaused,
+    AnswersPaused,
+    RewardsPaused,
+    HuntEndTimeInPast,
+    NoPendingAdmin,
+    PendingAdminMismatch,
+    AdminAlreadyProposed,
+    InvalidRarity,
+    InvalidTimeBonusConfig,
+    AddressBlacklisted,
+    ContractPaused,
+    InvalidMaxAttempts,
+    InvalidWeight,
+    HintNotAvailable,
+    HintAlreadyUnlocked,
+    InsufficientScore,
+    TooManyCategories,
+    InvalidCategory,
+    InvalidDifficulty,
+    CorruptPlayerProgress,
+    HuntNotStarted,
+    AttemptCooldownNotExpired,
 }
 
 impl From<HuntError> for HuntErrorCode {
     fn from(err: HuntError) -> Self {
         match err {
-            HuntError::HuntNotFound { .. } => HuntErrorCode::HuntNotFound,
-            HuntError::ClueNotFound { .. } => HuntErrorCode::ClueNotFound,
+            HuntError::HuntNotFound => HuntErrorCode::HuntNotFound,
+            HuntError::ClueNotFound => HuntErrorCode::ClueNotFound,
             HuntError::InvalidHuntStatus => HuntErrorCode::InvalidHuntStatus,
-            HuntError::PlayerNotRegistered { .. } => HuntErrorCode::PlayerNotRegistered,
-            HuntError::ClueAlreadyCompleted { .. } => HuntErrorCode::ClueAlreadyCompleted,
+            HuntError::PlayerNotRegistered => HuntErrorCode::PlayerNotRegistered,
+            HuntError::ClueAlreadyCompleted => HuntErrorCode::ClueAlreadyCompleted,
             HuntError::InvalidAnswer => HuntErrorCode::InvalidAnswer,
-            HuntError::HuntNotActive { .. } => HuntErrorCode::HuntNotActive,
+            HuntError::HuntNotActive => HuntErrorCode::HuntNotActive,
             HuntError::Unauthorized => HuntErrorCode::Unauthorized,
-            HuntError::InsufficientRewardPool { .. } => HuntErrorCode::InsufficientRewardPool,
-            HuntError::DuplicateRegistration { .. } => HuntErrorCode::DuplicateRegistration,
-            HuntError::InvalidTitle { .. } => HuntErrorCode::InvalidTitle,
-            HuntError::InvalidDescription { .. } => HuntErrorCode::InvalidDescription,
+            HuntError::InsufficientRewardPool => HuntErrorCode::InsufficientRewardPool,
+            HuntError::DuplicateRegistration => HuntErrorCode::DuplicateRegistration,
+            HuntError::InvalidTitle => HuntErrorCode::InvalidTitle,
+            HuntError::InvalidDescription => HuntErrorCode::InvalidDescription,
             HuntError::InvalidAddress => HuntErrorCode::InvalidAddress,
-            HuntError::TooManyClues { .. } => HuntErrorCode::TooManyClues,
+            HuntError::TooManyClues => HuntErrorCode::TooManyClues,
             HuntError::InvalidQuestion => HuntErrorCode::InvalidQuestion,
-            HuntError::HuntNotCompleted { .. } => HuntErrorCode::HuntNotCompleted,
-            HuntError::RewardAlreadyClaimed { .. } => HuntErrorCode::RewardAlreadyClaimed,
-            HuntError::RewardDistributionFailed { .. } => HuntErrorCode::RewardDistributionFailed,
-            HuntError::NoRewardsConfigured { .. } => HuntErrorCode::NoRewardsConfigured,
-            HuntError::NoRequiredClues { .. } => HuntErrorCode::NoRequiredClues,
-            HuntError::InvalidRarity { .. } => HuntErrorCode::InvalidRarity,
-            HuntError::LeaderboardVisibilityUnauthorized => {
-                HuntErrorCode::LeaderboardVisibilityUnauthorized
-            }
+            HuntError::RefundFailed => HuntErrorCode::RefundFailed,
+            HuntError::NoCluesAdded => HuntErrorCode::NoCluesAdded,
+            HuntError::HuntNotCompleted => HuntErrorCode::HuntNotCompleted,
+            HuntError::RewardAlreadyClaimed => HuntErrorCode::RewardAlreadyClaimed,
+            HuntError::RewardDistributionFailed => HuntErrorCode::RewardDistributionFailed,
+            HuntError::NoRewardsConfigured => HuntErrorCode::NoRewardsConfigured,
+            HuntError::DuplicateSubmission => HuntErrorCode::DuplicateSubmission,
+            HuntError::SubmissionExpired => HuntErrorCode::SubmissionExpired,
+            HuntError::BannedPlayer => HuntErrorCode::BannedPlayer,
+            HuntError::NoRequiredClues => HuntErrorCode::NoRequiredClues,
+            HuntError::RateLimitExceeded => HuntErrorCode::RateLimitExceeded,
+            HuntError::ScoreOverflow => HuntErrorCode::ScoreOverflow,
+            HuntError::RegistrationsPaused => HuntErrorCode::RegistrationsPaused,
+            HuntError::AnswersPaused => HuntErrorCode::AnswersPaused,
+            HuntError::RewardsPaused => HuntErrorCode::RewardsPaused,
+            HuntError::HuntEndTimeInPast => HuntErrorCode::HuntEndTimeInPast,
+            HuntError::NoPendingAdmin => HuntErrorCode::NoPendingAdmin,
+            HuntError::PendingAdminMismatch => HuntErrorCode::PendingAdminMismatch,
+            HuntError::AdminAlreadyProposed => HuntErrorCode::AdminAlreadyProposed,
+            HuntError::InvalidRarity => HuntErrorCode::InvalidRarity,
+            HuntError::InvalidTimeBonusConfig => HuntErrorCode::InvalidTimeBonusConfig,
+            HuntError::AddressBlacklisted => HuntErrorCode::AddressBlacklisted,
+            HuntError::ContractPaused => HuntErrorCode::ContractPaused,
+            HuntError::InvalidMaxAttempts => HuntErrorCode::InvalidMaxAttempts,
+            HuntError::InvalidWeight => HuntErrorCode::InvalidWeight,
+            HuntError::HintNotAvailable => HuntErrorCode::HintNotAvailable,
+            HuntError::HintAlreadyUnlocked => HuntErrorCode::HintAlreadyUnlocked,
+            HuntError::InsufficientScore => HuntErrorCode::InsufficientScore,
+            HuntError::TooManyCategories => HuntErrorCode::TooManyCategories,
+            HuntError::InvalidCategory => HuntErrorCode::InvalidCategory,
+            HuntError::InvalidDifficulty => HuntErrorCode::InvalidDifficulty,
+            HuntError::CorruptPlayerProgress => HuntErrorCode::CorruptPlayerProgress,
+            HuntError::HuntNotStarted => HuntErrorCode::HuntNotStarted,
+            HuntError::AttemptCooldownNotExpired => HuntErrorCode::RateLimitExceeded,
         }
     }
 }

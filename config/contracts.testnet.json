@@ -1,0 +1,11 @@
+{
+  "environment": "testnet",
+  "network": "testnet",
+  "rpcUrl": "https://soroban-testnet.stellar.org",
+  "networkPassphrase": "Test SDF Network ; September 2015",
+  "contracts": {
+    "huntyCore": "replace-with-testnet-hunty-core-contract-id",
+    "rewardManager": "replace-with-testnet-reward-manager-contract-id",
+    "nftReward": "replace-with-testnet-nft-reward-contract-id"
+  }
+}

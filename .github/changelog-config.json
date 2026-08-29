@@ -1,0 +1,56 @@
+{
+  "categories": [
+    {
+      "title": "### 🚀 Features",
+      "labels": ["feat", "feature"],
+      "rules": [{ "pattern": "^feat(\\(.+\\))?: .+", "on_property": "title" }]
+    },
+    {
+      "title": "### 🐛 Bug Fixes",
+      "labels": ["fix", "bugfix"],
+      "rules": [{ "pattern": "^fix(\\(.+\\))?: .+", "on_property": "title" }]
+    },
+    {
+      "title": "### 💥 Breaking Changes",
+      "labels": ["breaking"],
+      "rules": [{ "pattern": "^breaking(\\(.+\\))?: .+", "on_property": "title" }]
+    },
+    {
+      "title": "### ⚡ Performance",
+      "labels": ["perf"],
+      "rules": [{ "pattern": "^perf(\\(.+\\))?: .+", "on_property": "title" }]
+    },
+    {
+      "title": "### 🔧 Maintenance",
+      "labels": ["chore", "refactor", "build", "ci"],
+      "rules": [{ "pattern": "^(chore|refactor|build|ci)(\\(.+\\))?: .+", "on_property": "title" }]
+    },
+    {
+      "title": "### 📚 Documentation",
+      "labels": ["docs"],
+      "rules": [{ "pattern": "^docs(\\(.+\\))?: .+", "on_property": "title" }]
+    }
+  ],
+  "pr_template": "- ${{TITLE}} by @${{AUTHOR}} in #${{NUMBER}}",
+  "empty_template": "- no changes",
+  "label_extractor": [
+    {
+      "pattern": "^(feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert|breaking)(\\(.+\\))?(!)?:.+",
+      "on_property": "title",
+      "method": "match",
+      "target": "$1"
+    }
+  ],
+  "duplicate_filter": {
+    "pattern": "^(feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert|breaking)(\\(.+\\))?(!)?:.+",
+    "on_property": "title",
+    "method": "match"
+  },
+  "sort": "ASC",
+  "max_pull_requests": 200,
+  "max_back_track_time_days": 365,
+  "exclude_merge_branches": ["main", "master"],
+  "tag_resolver": {
+    "method": "semver"
+  }
+}

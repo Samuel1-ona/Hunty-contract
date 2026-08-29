@@ -1,0 +1,32 @@
+name: File Size Guard
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+
+jobs:
+  check-file-size:
+    name: Tracked file size limit
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Fail on oversized tracked files
+        run: |
+          chmod +x scripts/ci/check_file_size.sh
+          scripts/ci/check_file_size.sh
+
+  check-storage-keys-doc:
+    name: STORAGE_KEYS.md coverage
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Assert storage key constants are documented
+        run: |
+          chmod +x scripts/ci/check_storage_keys_doc.sh
+          scripts/ci/check_storage_keys_doc.sh

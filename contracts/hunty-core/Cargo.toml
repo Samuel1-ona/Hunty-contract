@@ -5,14 +5,16 @@ edition = "2021"
 publish = false
 
 [lib]
-crate-type = ["cdylib"]
+crate-type = ["cdylib", "rlib"]
 doctest = false
 
 [dependencies]
 soroban-sdk = { workspace = true }
-reward_manager = { path = "../reward-manager", package = "reward-manager" }
+reward-interface = { path = "../reward-interface" }
+hunty-migration = { path = "../migration", package = "hunty-migration" }
 
 [dev-dependencies]
 soroban-sdk = { workspace = true, features = ["testutils"] }
 nft_reward = { path = "../nft-reward", package = "nft-reward" }
+reward-manager = { path = "../reward-manager", package = "reward-manager" }
 
