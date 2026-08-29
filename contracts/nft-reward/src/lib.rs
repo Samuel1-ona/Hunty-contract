@@ -1,12 +1,11 @@
 #![cfg_attr(not(test), no_std)]
 #![allow(clippy::too_many_arguments)]
 use soroban_sdk::{
-    contract, contractimpl, contracttype, panic_with_error, Address, Env, Map, String, Symbol, Val,
-    Vec,
+    contract, contractimpl, contracttype, panic_with_error, symbol_short, Address, Env, Map,
+    String, Symbol, Val, Vec,
 };
-use hunty_common::audit::{
-    emit_audit_event, detail, ACTION_ADMIN_ADDED, ACTION_ADMIN_REMOVED, TOPIC_AUDIT,
-};
+use hunty_common::audit::{ACTION_ADMIN_ADDED, ACTION_ADMIN_REMOVED, TOPIC_AUDIT};
+use hunty_common::audit_emitter::{detail, emit_audit_event};
 
 #[allow(dead_code)]
 const MAX_URI_LEN: usize = 512;
@@ -520,21 +519,6 @@ impl NftReward {
         Ok(())
     }
 
-    fn compute_completion_rank(
-        env: &Env,
-        hunt_id: u64,
-    ) -> u32 {
-        let players = Storage::get_hunt_players(env, hunt_id);
-        let mut completed: u32 = 0;
-        for i in 0..players.len() {
-            let progress = players.get(i).unwrap();
-            if progress.is_completed {
-                completed += 1;
-            }
-        }
-        completed.saturating_add(1)
-    }
-
     fn mint_reward_nft_impl(
         env: Env,
         hunt_id: u64,
@@ -578,16 +562,6 @@ impl NftReward {
         let minted_at = env.ledger().timestamp();
         let nft_id = Storage::next_nft_id(&env);
 
-        let event = NftMintedEvent {
-            nft_id,
-            hunt_id,
-            owner: player_address.clone(),
-            rarity: metadata.rarity,
-            tier: metadata.tier,
-            minted_at,
-            metadata: metadata.clone(),
-        };
-
         let nft_data = NftData {
             nft_id,
             hunt_id,
@@ -607,6 +581,7 @@ impl NftReward {
         Storage::mark_hunt_minted(&env, hunt_id);
         Storage::update_collection_metadata_total_supply(&env, Storage::get_nft_counter(&env));
 
+        let total_minted = Storage::get_nft_counter(&env) as u32;
         let event = NftMintedEvent {
             nft_id,
             hunt_id,
@@ -614,15 +589,10 @@ impl NftReward {
             rarity: nft_data.metadata.rarity,
             tier: nft_data.metadata.tier,
             minted_at,
-            hunt_title: metadata.hunt_title.clone(),
-            total_minted_for_hunt: Storage::get_nft_counter(&env) as u32,
-            completion_rank: Self::compute_completion_rank(env, hunt_id),
-            collection_stats: format!(
-                "total_supply={},total_hunts={},total_owners={}",
-                Storage::get_nft_counter(&env),
-                0u64, // total_hunts would need tracking
-                0u64  // total_owners would need tracking
-            ),
+            hunt_title: nft_data.metadata.hunt_title.clone(),
+            total_minted_for_hunt: total_minted,
+            completion_rank: total_minted,
+            collection_stats: String::from_str(&env, ""),
         };
         env.events()
             .publish((Symbol::new(&env, "NftMinted"), nft_id), event);
@@ -1287,14 +1257,7 @@ impl NftReward {
     /// Returns paginated NFT IDs owned by an address.
     /// The limit is bounded to MAX_SCAN_LIMIT (1000) to prevent excessive gas consumption.
     pub fn get_player_nfts(env: Env, owner: Address, offset: u32, limit: u32) -> Vec<u64> {
-        let nfts = Storage::get_owner_nfts(&env, &owner);
-        let len = nfts.len();
-        if offset >= len {
-            return Vec::new(&env);
-        }
-        let bounded_limit = limit.min(MAX_SCAN_LIMIT);
-        let end = offset.saturating_add(bounded_limit).min(len);
-        nfts.slice(offset..end)
+        Storage::get_owner_nfts(&env, &owner, offset, limit.min(MAX_SCAN_LIMIT))
     }
 
     /// Returns paginated NFT IDs minted for a hunt.
