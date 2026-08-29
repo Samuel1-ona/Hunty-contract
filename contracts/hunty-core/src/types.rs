@@ -9,6 +9,18 @@ pub enum HuntStatus {
     Cancelled,
 }
 
+/// Controls who can view the leaderboard for a hunt.
+#[contracttype]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum LeaderboardVisibility {
+    /// Anyone can view the leaderboard (default).
+    Public,
+    /// Only players who have registered for the hunt can view the leaderboard.
+    RegisteredOnly,
+    /// Only the hunt creator can view the leaderboard.
+    CreatorOnly,
+}
+
 #[contracttype]
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct RewardConfig {
@@ -38,6 +50,8 @@ pub struct Hunt {
     pub reward_config: RewardConfig,
     pub total_clues: u32,
     pub required_clues: u32,
+    /// Controls who may call get_hunt_leaderboard / get_hunt_leaderboard_window.
+    pub leaderboard_visibility: LeaderboardVisibility,
 }
 
 /// Stored clue with SHA256 answer hash. The hash is never exposed via get_clue/list_clues or events.

@@ -2173,7 +2173,7 @@ mod test {
         env.ledger().set_timestamp(1_700_000_000);
 
         let err = with_core_contract(&env, |env, _cid| {
-            HuntyCore::get_hunt_leaderboard(env.clone(), 9999, 10).unwrap_err()
+            HuntyCore::get_hunt_leaderboard(env.clone(), 9999, 10, None).unwrap_err()
         });
 
         assert_eq!(err, HuntErrorCode::HuntNotFound);
@@ -2201,7 +2201,7 @@ mod test {
             .unwrap();
             HuntyCore::add_clue(env.clone(), hunt_id, question, answer, 1, true).unwrap();
             HuntyCore::activate_hunt(env.clone(), hunt_id, creator.clone()).unwrap();
-            HuntyCore::get_hunt_leaderboard(env.clone(), hunt_id, 10).unwrap()
+            HuntyCore::get_hunt_leaderboard(env.clone(), hunt_id, 10, None).unwrap()
         });
 
         assert_eq!(board.len(), 0);
@@ -2327,7 +2327,7 @@ mod test {
             .unwrap();
         });
         let board = as_core_contract(&env, &contract_id, |env| {
-            HuntyCore::get_hunt_leaderboard(env.clone(), hunt_id, 10).unwrap()
+            HuntyCore::get_hunt_leaderboard(env.clone(), hunt_id, 10, None).unwrap()
         });
 
         let e1 = board.get(0).unwrap();
@@ -2377,12 +2377,312 @@ mod test {
                 let p = players.get(i).unwrap();
                 HuntyCore::register_player(env.clone(), hunt_id, p.clone()).unwrap();
             }
-            HuntyCore::get_hunt_leaderboard(env.clone(), hunt_id, 2).unwrap()
+            HuntyCore::get_hunt_leaderboard(env.clone(), hunt_id, 2, None).unwrap()
         });
 
         assert_eq!(board.len(), 2);
         assert_eq!(board.get(0).unwrap().rank, 1);
         assert_eq!(board.get(1).unwrap().rank, 2);
+    }
+
+    // ===== LeaderboardVisibility tests =====
+
+    /// Helper: creates a hunt, adds one required clue, activates it, and returns hunt_id.
+    fn setup_active_hunt(env: &Env, creator: &Address) -> u64 {
+        let hunt_id = HuntyCore::create_hunt(
+            env.clone(),
+            creator.clone(),
+            String::from_str(env, "Hunt"),
+            String::from_str(env, "Desc"),
+            None,
+            None,
+        )
+        .unwrap();
+        HuntyCore::add_clue(
+            env.clone(),
+            hunt_id,
+            String::from_str(env, "Q"),
+            String::from_str(env, "a"),
+            10,
+            true,
+        )
+        .unwrap();
+        HuntyCore::activate_hunt(env.clone(), hunt_id, creator.clone()).unwrap();
+        hunt_id
+    }
+
+    #[test]
+    fn test_leaderboard_public_allows_anonymous_access() {
+        let env = Env::default();
+        env.ledger().set_timestamp(1_700_000_000);
+        env.mock_all_auths();
+
+        let creator = Address::generate(&env);
+        with_core_contract(&env, |env, _cid| {
+            let hunt_id = setup_active_hunt(env, &creator);
+            // Public (default) — None caller should succeed
+            let board = HuntyCore::get_hunt_leaderboard(env.clone(), hunt_id, 10, None).unwrap();
+            assert_eq!(board.len(), 0);
+        });
+    }
+
+    #[test]
+    fn test_set_leaderboard_visibility_only_creator_can_change() {
+        let env = Env::default();
+        env.ledger().set_timestamp(1_700_000_000);
+        env.mock_all_auths();
+
+        let creator = Address::generate(&env);
+        let other = Address::generate(&env);
+        with_core_contract(&env, |env, _cid| {
+            let hunt_id = setup_active_hunt(env, &creator);
+
+            // Non-creator should be rejected
+            let err = HuntyCore::set_leaderboard_visibility(
+                env.clone(),
+                hunt_id,
+                other.clone(),
+                crate::types::LeaderboardVisibility::RegisteredOnly,
+            )
+            .unwrap_err();
+            assert_eq!(err, HuntErrorCode::Unauthorized);
+
+            // Creator should succeed
+            HuntyCore::set_leaderboard_visibility(
+                env.clone(),
+                hunt_id,
+                creator.clone(),
+                crate::types::LeaderboardVisibility::RegisteredOnly,
+            )
+            .unwrap();
+        });
+    }
+
+    #[test]
+    fn test_leaderboard_registered_only_rejects_unregistered_caller() {
+        let env = Env::default();
+        env.ledger().set_timestamp(1_700_000_000);
+        env.mock_all_auths();
+
+        let creator = Address::generate(&env);
+        let stranger = Address::generate(&env);
+        with_core_contract(&env, |env, _cid| {
+            let hunt_id = setup_active_hunt(env, &creator);
+            HuntyCore::set_leaderboard_visibility(
+                env.clone(),
+                hunt_id,
+                creator.clone(),
+                crate::types::LeaderboardVisibility::RegisteredOnly,
+            )
+            .unwrap();
+
+            // Stranger (not registered) should get LeaderboardVisibilityUnauthorized
+            let err = HuntyCore::get_hunt_leaderboard(
+                env.clone(),
+                hunt_id,
+                10,
+                Some(stranger.clone()),
+            )
+            .unwrap_err();
+            assert_eq!(err, HuntErrorCode::LeaderboardVisibilityUnauthorized);
+        });
+    }
+
+    #[test]
+    fn test_leaderboard_registered_only_allows_registered_player() {
+        let env = Env::default();
+        env.ledger().set_timestamp(1_700_000_000);
+        env.mock_all_auths();
+
+        let creator = Address::generate(&env);
+        let player = Address::generate(&env);
+        with_core_contract(&env, |env, _cid| {
+            let hunt_id = setup_active_hunt(env, &creator);
+            HuntyCore::set_leaderboard_visibility(
+                env.clone(),
+                hunt_id,
+                creator.clone(),
+                crate::types::LeaderboardVisibility::RegisteredOnly,
+            )
+            .unwrap();
+            HuntyCore::register_player(env.clone(), hunt_id, player.clone()).unwrap();
+
+            // Registered player should be allowed
+            let board =
+                HuntyCore::get_hunt_leaderboard(env.clone(), hunt_id, 10, Some(player.clone()))
+                    .unwrap();
+            assert_eq!(board.len(), 0); // no one has scored yet
+        });
+    }
+
+    #[test]
+    fn test_leaderboard_registered_only_rejects_anonymous() {
+        let env = Env::default();
+        env.ledger().set_timestamp(1_700_000_000);
+        env.mock_all_auths();
+
+        let creator = Address::generate(&env);
+        with_core_contract(&env, |env, _cid| {
+            let hunt_id = setup_active_hunt(env, &creator);
+            HuntyCore::set_leaderboard_visibility(
+                env.clone(),
+                hunt_id,
+                creator.clone(),
+                crate::types::LeaderboardVisibility::RegisteredOnly,
+            )
+            .unwrap();
+
+            // No caller at all should be rejected
+            let err = HuntyCore::get_hunt_leaderboard(env.clone(), hunt_id, 10, None).unwrap_err();
+            assert_eq!(err, HuntErrorCode::LeaderboardVisibilityUnauthorized);
+        });
+    }
+
+    #[test]
+    fn test_leaderboard_creator_only_allows_creator() {
+        let env = Env::default();
+        env.ledger().set_timestamp(1_700_000_000);
+        env.mock_all_auths();
+
+        let creator = Address::generate(&env);
+        with_core_contract(&env, |env, _cid| {
+            let hunt_id = setup_active_hunt(env, &creator);
+            HuntyCore::set_leaderboard_visibility(
+                env.clone(),
+                hunt_id,
+                creator.clone(),
+                crate::types::LeaderboardVisibility::CreatorOnly,
+            )
+            .unwrap();
+
+            // Creator should be allowed
+            let board =
+                HuntyCore::get_hunt_leaderboard(env.clone(), hunt_id, 10, Some(creator.clone()))
+                    .unwrap();
+            assert_eq!(board.len(), 0);
+        });
+    }
+
+    #[test]
+    fn test_leaderboard_creator_only_rejects_non_creator() {
+        let env = Env::default();
+        env.ledger().set_timestamp(1_700_000_000);
+        env.mock_all_auths();
+
+        let creator = Address::generate(&env);
+        let player = Address::generate(&env);
+        with_core_contract(&env, |env, _cid| {
+            let hunt_id = setup_active_hunt(env, &creator);
+            HuntyCore::register_player(env.clone(), hunt_id, player.clone()).unwrap();
+            HuntyCore::set_leaderboard_visibility(
+                env.clone(),
+                hunt_id,
+                creator.clone(),
+                crate::types::LeaderboardVisibility::CreatorOnly,
+            )
+            .unwrap();
+
+            // Even a registered player should be rejected
+            let err =
+                HuntyCore::get_hunt_leaderboard(env.clone(), hunt_id, 10, Some(player.clone()))
+                    .unwrap_err();
+            assert_eq!(err, HuntErrorCode::LeaderboardVisibilityUnauthorized);
+        });
+    }
+
+    #[test]
+    fn test_leaderboard_window_public_allows_anonymous_access() {
+        let env = Env::default();
+        env.ledger().set_timestamp(1_700_000_000);
+        env.mock_all_auths();
+
+        let creator = Address::generate(&env);
+        with_core_contract(&env, |env, _cid| {
+            let hunt_id = setup_active_hunt(env, &creator);
+            let window =
+                HuntyCore::get_hunt_leaderboard_window(env.clone(), hunt_id, 0, 10, None)
+                    .unwrap();
+            assert!(window.finished);
+            assert_eq!(window.entries.len(), 0);
+        });
+    }
+
+    #[test]
+    fn test_leaderboard_window_registered_only_rejects_unregistered() {
+        let env = Env::default();
+        env.ledger().set_timestamp(1_700_000_000);
+        env.mock_all_auths();
+
+        let creator = Address::generate(&env);
+        let stranger = Address::generate(&env);
+        with_core_contract(&env, |env, _cid| {
+            let hunt_id = setup_active_hunt(env, &creator);
+            HuntyCore::set_leaderboard_visibility(
+                env.clone(),
+                hunt_id,
+                creator.clone(),
+                crate::types::LeaderboardVisibility::RegisteredOnly,
+            )
+            .unwrap();
+
+            let err = HuntyCore::get_hunt_leaderboard_window(
+                env.clone(),
+                hunt_id,
+                0,
+                10,
+                Some(stranger.clone()),
+            )
+            .unwrap_err();
+            assert_eq!(err, HuntErrorCode::LeaderboardVisibilityUnauthorized);
+        });
+    }
+
+    #[test]
+    fn test_leaderboard_window_creator_only_allows_creator() {
+        let env = Env::default();
+        env.ledger().set_timestamp(1_700_000_000);
+        env.mock_all_auths();
+
+        let creator = Address::generate(&env);
+        with_core_contract(&env, |env, _cid| {
+            let hunt_id = setup_active_hunt(env, &creator);
+            HuntyCore::set_leaderboard_visibility(
+                env.clone(),
+                hunt_id,
+                creator.clone(),
+                crate::types::LeaderboardVisibility::CreatorOnly,
+            )
+            .unwrap();
+
+            let window = HuntyCore::get_hunt_leaderboard_window(
+                env.clone(),
+                hunt_id,
+                0,
+                10,
+                Some(creator.clone()),
+            )
+            .unwrap();
+            assert!(window.finished);
+        });
+    }
+
+    #[test]
+    fn test_set_leaderboard_visibility_hunt_not_found() {
+        let env = Env::default();
+        env.ledger().set_timestamp(1_700_000_000);
+        env.mock_all_auths();
+
+        let caller = Address::generate(&env);
+        let err = with_core_contract(&env, |env, _cid| {
+            HuntyCore::set_leaderboard_visibility(
+                env.clone(),
+                9999,
+                caller.clone(),
+                crate::types::LeaderboardVisibility::Public,
+            )
+            .unwrap_err()
+        });
+        assert_eq!(err, HuntErrorCode::HuntNotFound);
     }
 
     #[test]
