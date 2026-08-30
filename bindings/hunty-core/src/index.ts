@@ -202,7 +202,7 @@ export interface TeamProgress {
 export interface BatchClueInput {
   answer: string;
   /**
- * Difficulty multiplier (1-10). Points earned = points * difficulty.
+ * Difficulty tier (1-5, 1 = easiest, 5 = hardest). Points earned = points * difficulty.
  */
 difficulty: u32;
   is_required: boolean;
@@ -218,7 +218,7 @@ export interface ClueAddedEvent {
   clue_id: u32;
   creator: string;
   /**
- * Difficulty multiplier (1-10).
+ * Difficulty tier (1-5, 1 = easiest, 5 = hardest).
  */
 difficulty: u32;
   hunt_id: u64;

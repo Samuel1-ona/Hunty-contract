@@ -135,7 +135,8 @@ pub struct BatchClueInput {
     pub answer: String,
     pub points: u32,
     pub is_required: bool,
-    /// Difficulty multiplier (1-10). Points earned = points * difficulty.
+    /// Difficulty tier (1-5, 1 = easiest, 5 = hardest).
+    /// Difficulty multiplies the clue's points: points earned = points * difficulty.
     pub difficulty: u32,
 }
 
@@ -584,7 +585,7 @@ pub struct ClueAddedEvent {
     pub question: String,
     pub points: u32,
     pub is_required: bool,
-    /// Difficulty multiplier (1-10).
+    /// Difficulty tier (1-5, 1 = easiest, 5 = hardest).
     pub difficulty: u32,
     /// Weight multiplier (default 1).
     pub weight: u32,
