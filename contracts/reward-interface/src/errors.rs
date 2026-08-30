@@ -1,42 +1,50 @@
 use soroban_sdk::contracterror;
 
+// NAMESPACE: reward-manager error codes occupy the range 2001–2999.
+// This mirror in reward-interface must stay in sync with
+// contracts/reward-manager/src/errors.rs so XDR discriminants match exactly.
 #[contracterror]
 #[derive(Clone, Copy, Debug, Eq, PartialEq, PartialOrd, Ord)]
 #[repr(u32)]
 pub enum RewardErrorCode {
-    NotInitialized = 1,
-    InsufficientPool = 2,
-    AlreadyDistributed = 3,
-    TransferFailed = 4,
-    InvalidAmount = 5,
-    InvalidConfig = 6,
-    NftMintFailed = 7,
-    PoolAlreadyExists = 8,
-    PoolNotFound = 9,
-    Unauthorized = 10,
-    BelowMinimumAmount = 11,
-    AlreadyInitialized = 12,
-    HuntNotFound = 13,
-    /// A recursive distribution attempt was detected during an external XLM or NFT call.
-    ReentrancyDetected = 14,
-    /// The tracked pool balance diverged from the actual XLM token balance.
-    PoolBalanceDivergence = 15,
-    /// Pool balance would overflow if this funding amount is added (pool balance limit exceeded).
-    PoolBalanceOverflow = 16,
-    /// Funding amount is below the minimum required (dust attack prevention).
-    BelowMinimumFunding = 17,
-    /// Funding amount exceeds the maximum single funding limit.
-    ExceedsMaximumFunding = 18,
-    /// Daily distribution cap for a specific pool has been exceeded.
-    DailyCapExceeded = 19,
-    /// Global daily distribution cap has been exceeded.
-    GlobalDailyCapExceeded = 20,
-    /// Contract is paused and cannot perform operations.
-    ContractPaused = 21,
-    /// Emergency withdrawal failed.
-    EmergencyWithdrawalFailed = 22,
-    /// Pool funding is paused (issue #628). Distribution may still be running.
-    FundingPaused = 23,
-    /// Reward distribution is paused (issue #628). Funding may still be open.
-    DistributionPaused = 24,
+    NotInitialized = 2001,
+    InsufficientPool = 2002,
+    AlreadyDistributed = 2003,
+    TransferFailed = 2004,
+    InvalidAmount = 2005,
+    InvalidConfig = 2006,
+    NftMintFailed = 2007,
+    PoolAlreadyExists = 2008,
+    PoolNotFound = 2009,
+    Unauthorized = 2010,
+    BelowMinimumAmount = 2011,
+    AlreadyInitialized = 2012,
+    HuntNotFound = 2013,
+    ReentrancyDetected = 2014,
+    PoolBalanceDivergence = 2015,
+    ReplayDetected = 2016,
+    PoolBalanceOverflow = 2017,
+    BelowMinimumFunding = 2018,
+    ExceedsMaximumFunding = 2019,
+    DailyCapExceeded = 2020,
+    GlobalDailyCapExceeded = 2021,
+    ContractPaused = 2022,
+    NftMintPendingNotFound = 2023,
+    DistributionNotFound = 2024,
+    SourcePoolNotEligible = 2025,
+    DestinationPoolNotFound = 2026,
+    InvalidMigration = 2027,
+    PoolFrozen = 2028,
+    DistributionRateLimited = 2029,
+    BatchTooLarge = 2030,
+    InvalidScore = 2031,
+    InvalidTokenContract = 2032,
+    VestingNotStarted = 2033,
+    VestingAlreadyClaimed = 2034,
+    NothingToVest = 2035,
+    VestingNotConfigured = 2036,
+    FundingPaused = 2037,
+    DistributionPaused = 2038,
+    TooManyFunders = 2039,
+    InvalidHuntStatus = 2040,
 }

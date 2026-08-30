@@ -592,56 +592,61 @@ export interface CreatorRemovedFromBlacklistEvent {
 }
 
 export const HuntErrorCode = {
-  1: {message:"HuntNotFound"},
-  2: {message:"ClueNotFound"},
-  3: {message:"InvalidHuntStatus"},
-  4: {message:"PlayerNotRegistered"},
-  5: {message:"ClueAlreadyCompleted"},
-  6: {message:"InvalidAnswer"},
-  7: {message:"HuntNotActive"},
-  8: {message:"Unauthorized"},
-  9: {message:"InsufficientRewardPool"},
-  10: {message:"DuplicateRegistration"},
-  11: {message:"InvalidTitle"},
-  12: {message:"InvalidDescription"},
-  13: {message:"InvalidAddress"},
-  14: {message:"TooManyClues"},
-  15: {message:"InvalidQuestion"},
-  16: {message:"RefundFailed"},
-  17: {message:"NoCluesAdded"},
-  18: {message:"HuntNotCompleted"},
-  19: {message:"RewardAlreadyClaimed"},
-  20: {message:"RewardDistributionFailed"},
-  21: {message:"NoRewardsConfigured"},
-  22: {message:"DuplicateSubmission"},
-  23: {message:"SubmissionExpired"},
-  24: {message:"BannedPlayer"},
-  25: {message:"NoRequiredClues"},
-  26: {message:"RateLimitExceeded"},
-  27: {message:"ScoreOverflow"},
-  28: {message:"RegistrationsPaused"},
-  29: {message:"AnswersPaused"},
-  30: {message:"RewardsPaused"},
-  31: {message:"HuntEndTimeInPast"},
-  32: {message:"NoPendingAdmin"},
-  33: {message:"PendingAdminMismatch"},
-  34: {message:"InvalidRarity"},
-  35: {message:"InvalidTimeBonusConfig"},
-  36: {message:"AddressBlacklisted"},
-  37: {message:"ContractPaused"},
-  38: {message:"InvalidMaxAttempts"},
-  39: {message:"InvalidWeight"},
-  40: {message:"HintNotAvailable"},
-  41: {message:"HintAlreadyUnlocked"},
-  42: {message:"InsufficientScore"},
-  43: {message:"TooManyCategories"},
-  44: {message:"InvalidCategory"},
-  45: {message:"InvalidDifficulty"},
-  46: {message:"CorruptPlayerProgress"},
-  47: {message:"HuntNotStarted"},
-  48: {message:"AdminAlreadyProposed"},
-  49: {message:"InvalidPoints"},
-  50: {message:"HuntFull"}
+  1001: {message:"HuntNotFound"},
+  1002: {message:"ClueNotFound"},
+  1003: {message:"InvalidHuntStatus"},
+  1004: {message:"PlayerNotRegistered"},
+  1005: {message:"ClueAlreadyCompleted"},
+  1006: {message:"InvalidAnswer"},
+  1007: {message:"HuntNotActive"},
+  1008: {message:"Unauthorized"},
+  1009: {message:"InsufficientRewardPool"},
+  1010: {message:"DuplicateRegistration"},
+  1011: {message:"InvalidTitle"},
+  1012: {message:"InvalidDescription"},
+  1013: {message:"InvalidAddress"},
+  1014: {message:"TooManyClues"},
+  1015: {message:"InvalidQuestion"},
+  1016: {message:"RefundFailed"},
+  1017: {message:"NoCluesAdded"},
+  1018: {message:"HuntNotCompleted"},
+  1019: {message:"RewardAlreadyClaimed"},
+  /**
+   * A RewardManager cross-contract call failed. The originating contract's
+   * error code (range 2001–2999) is published in the `reward_distribution_failed`
+   * diagnostic event emitted immediately before this error is returned.
+   */
+  1020: {message:"RewardDistributionFailed"},
+  1021: {message:"NoRewardsConfigured"},
+  1022: {message:"DuplicateSubmission"},
+  1023: {message:"SubmissionExpired"},
+  1024: {message:"BannedPlayer"},
+  1025: {message:"NoRequiredClues"},
+  1026: {message:"RateLimitExceeded"},
+  1027: {message:"ScoreOverflow"},
+  1028: {message:"RegistrationsPaused"},
+  1029: {message:"AnswersPaused"},
+  1030: {message:"RewardsPaused"},
+  1031: {message:"HuntEndTimeInPast"},
+  1032: {message:"NoPendingAdmin"},
+  1033: {message:"PendingAdminMismatch"},
+  1034: {message:"InvalidRarity"},
+  1035: {message:"InvalidTimeBonusConfig"},
+  1036: {message:"AddressBlacklisted"},
+  1037: {message:"ContractPaused"},
+  1038: {message:"InvalidMaxAttempts"},
+  1039: {message:"InvalidWeight"},
+  1040: {message:"HintNotAvailable"},
+  1041: {message:"HintAlreadyUnlocked"},
+  1042: {message:"InsufficientScore"},
+  1043: {message:"TooManyCategories"},
+  1044: {message:"InvalidCategory"},
+  1045: {message:"InvalidDifficulty"},
+  1046: {message:"CorruptPlayerProgress"},
+  1047: {message:"HuntNotStarted"},
+  1048: {message:"AdminAlreadyProposed"},
+  1049: {message:"InvalidPoints"},
+  1050: {message:"HuntFull"}
 }
 
 
@@ -809,55 +814,46 @@ xlm_amount: i128;
 }
 
 export const RewardErrorCode = {
-  1: {message:"NotInitialized"},
-  2: {message:"InsufficientPool"},
-  3: {message:"AlreadyDistributed"},
-  4: {message:"TransferFailed"},
-  5: {message:"InvalidAmount"},
-  6: {message:"InvalidConfig"},
-  7: {message:"NftMintFailed"},
-  8: {message:"PoolAlreadyExists"},
-  9: {message:"PoolNotFound"},
-  10: {message:"Unauthorized"},
-  11: {message:"BelowMinimumAmount"},
-  12: {message:"AlreadyInitialized"},
-  13: {message:"HuntNotFound"},
-  /**
-   * A recursive distribution attempt was detected during an external XLM or NFT call.
-   */
-  14: {message:"ReentrancyDetected"},
-  /**
-   * The tracked pool balance diverged from the actual XLM token balance.
-   */
-  15: {message:"PoolBalanceDivergence"},
-  /**
-   * Pool balance would overflow if this funding amount is added (pool balance limit exceeded).
-   */
-  16: {message:"PoolBalanceOverflow"},
-  /**
-   * Funding amount is below the minimum required (dust attack prevention).
-   */
-  17: {message:"BelowMinimumFunding"},
-  /**
-   * Funding amount exceeds the maximum single funding limit.
-   */
-  18: {message:"ExceedsMaximumFunding"},
-  /**
-   * Daily distribution cap for a specific pool has been exceeded.
-   */
-  19: {message:"DailyCapExceeded"},
-  /**
-   * Global daily distribution cap has been exceeded.
-   */
-  20: {message:"GlobalDailyCapExceeded"},
-  /**
-   * Contract is paused and cannot perform operations.
-   */
-  21: {message:"ContractPaused"},
-  /**
-   * Emergency withdrawal failed.
-   */
-  22: {message:"EmergencyWithdrawalFailed"}
+  2001: {message:"NotInitialized"},
+  2002: {message:"InsufficientPool"},
+  2003: {message:"AlreadyDistributed"},
+  2004: {message:"TransferFailed"},
+  2005: {message:"InvalidAmount"},
+  2006: {message:"InvalidConfig"},
+  2007: {message:"NftMintFailed"},
+  2008: {message:"PoolAlreadyExists"},
+  2009: {message:"PoolNotFound"},
+  2010: {message:"Unauthorized"},
+  2011: {message:"BelowMinimumAmount"},
+  2012: {message:"AlreadyInitialized"},
+  2013: {message:"HuntNotFound"},
+  2014: {message:"ReentrancyDetected"},
+  2015: {message:"PoolBalanceDivergence"},
+  2016: {message:"ReplayDetected"},
+  2017: {message:"PoolBalanceOverflow"},
+  2018: {message:"BelowMinimumFunding"},
+  2019: {message:"ExceedsMaximumFunding"},
+  2020: {message:"DailyCapExceeded"},
+  2021: {message:"GlobalDailyCapExceeded"},
+  2022: {message:"ContractPaused"},
+  2023: {message:"NftMintPendingNotFound"},
+  2024: {message:"DistributionNotFound"},
+  2025: {message:"SourcePoolNotEligible"},
+  2026: {message:"DestinationPoolNotFound"},
+  2027: {message:"InvalidMigration"},
+  2028: {message:"PoolFrozen"},
+  2029: {message:"DistributionRateLimited"},
+  2030: {message:"BatchTooLarge"},
+  2031: {message:"InvalidScore"},
+  2032: {message:"InvalidTokenContract"},
+  2033: {message:"VestingNotStarted"},
+  2034: {message:"VestingAlreadyClaimed"},
+  2035: {message:"NothingToVest"},
+  2036: {message:"VestingNotConfigured"},
+  2037: {message:"FundingPaused"},
+  2038: {message:"DistributionPaused"},
+  2039: {message:"TooManyFunders"},
+  2040: {message:"InvalidHuntStatus"}
 }
 
 export interface Client {

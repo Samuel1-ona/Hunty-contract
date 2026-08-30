@@ -1,118 +1,123 @@
 use soroban_sdk::contracterror;
 
+// NAMESPACE: reward-manager error codes occupy the range 2001–2999.
+//   hunty-core  uses 1001–1999 (see contracts/hunty-core/src/errors.rs).
+//   nft-reward  uses 3001–3999 (see contracts/nft-reward/src/errors.rs).
+// Keeping ranges disjoint means a numeric code in a transaction envelope is
+// unambiguous regardless of which contract frame produced it.
 #[contracterror]
 #[derive(Clone, Copy, Debug, Eq, PartialEq, PartialOrd, Ord)]
 #[repr(u32)]
 pub enum RewardErrorCode {
-    NotInitialized = 1,
-    InsufficientPool = 2,
-    AlreadyDistributed = 3,
+    NotInitialized = 2001,
+    InsufficientPool = 2002,
+    AlreadyDistributed = 2003,
 
-    TransferFailed = 4,
-    InvalidAmount = 5,
-    InvalidConfig = 6,
-    NftMintFailed = 7,
+    TransferFailed = 2004,
+    InvalidAmount = 2005,
+    InvalidConfig = 2006,
+    NftMintFailed = 2007,
 
     /// Attempted to create a pool that already exists for this hunt_id.
-    PoolAlreadyExists = 8,
+    PoolAlreadyExists = 2008,
 
     /// Pool has not been created yet via create_reward_pool().
-    PoolNotFound = 9,
+    PoolNotFound = 2009,
 
     /// Caller is not the pool creator and is not authorized to fund this pool.
-    Unauthorized = 10,
+    Unauthorized = 2010,
 
     /// Distribution amount is below the pool's minimum distribution threshold.
-    BelowMinimumAmount = 11,
+    BelowMinimumAmount = 2011,
 
     /// Contract initialization can only happen once.
-    AlreadyInitialized = 12,
+    AlreadyInitialized = 2012,
 
     /// hunt_id does not exist in HuntyCore (validated via cross-contract call).
-    HuntNotFound = 13,
+    HuntNotFound = 2013,
 
     /// A recursive distribution attempt was detected during an external XLM or NFT call.
-    ReentrancyDetected = 14,
+    ReentrancyDetected = 2014,
 
     /// The tracked pool balance diverged from the actual XLM token balance.
-    PoolBalanceDivergence = 15,
+    PoolBalanceDivergence = 2015,
 
     /// Replay attack detected: distribution nonce state inconsistency.
-    ReplayDetected = 16,
+    ReplayDetected = 2016,
 
     /// Pool balance would exceed maximum allowed limit.
-    PoolBalanceOverflow = 17,
+    PoolBalanceOverflow = 2017,
 
     /// Funding amount is below the minimum threshold (dust attack prevention).
-    BelowMinimumFunding = 18,
+    BelowMinimumFunding = 2018,
 
     /// Single funding amount exceeds the maximum allowed.
-    ExceedsMaximumFunding = 19,
+    ExceedsMaximumFunding = 2019,
 
     /// Daily distribution cap for a specific pool has been exceeded.
-    DailyCapExceeded = 20,
+    DailyCapExceeded = 2020,
 
     /// Global daily distribution cap across all pools has been exceeded.
-    GlobalDailyCapExceeded = 21,
+    GlobalDailyCapExceeded = 2021,
 
     /// Contract is paused and cannot perform this operation.
-    ContractPaused = 22,
+    ContractPaused = 2022,
 
     /// No pending failed NFT mint found for retry.
-    NftMintPendingNotFound = 23,
+    NftMintPendingNotFound = 2023,
 
     /// No distribution record exists for the given hunt/player.
-    DistributionNotFound = 24,
+    DistributionNotFound = 2024,
 
     /// The source pool is not eligible for migration: its hunt is neither
     /// expired nor cancelled.
-    SourcePoolNotEligible = 25,
+    SourcePoolNotEligible = 2025,
 
     /// The destination pool does not exist (must be created first).
-    DestinationPoolNotFound = 26,
+    DestinationPoolNotFound = 2026,
 
     /// Source and destination refer to the same hunt, or there is no balance
     /// to migrate.
-    InvalidMigration = 27,
+    InvalidMigration = 2027,
 
     /// Pool is frozen and distributions have been temporarily disabled.
-    PoolFrozen = 28,
+    PoolFrozen = 2028,
 
     /// Distribution rate limit not yet elapsed (cooldown period active).
-    DistributionRateLimited = 29,
+    DistributionRateLimited = 2029,
 
     /// Batch size exceeds maximum allowed limit.
-    BatchTooLarge = 30,
+    BatchTooLarge = 2030,
 
     /// Invalid score value provided.
-    InvalidScore = 31,
+    InvalidScore = 2031,
 
     /// Token contract validation failed.
-    InvalidTokenContract = 32,
+    InvalidTokenContract = 2032,
 
     /// No vesting record exists for the given hunt/player pair.
-    VestingNotStarted = 33,
+    VestingNotStarted = 2033,
 
     /// Player has already claimed the full vested amount.
-    VestingAlreadyClaimed = 34,
+    VestingAlreadyClaimed = 2034,
 
     /// Nothing has vested yet (elapsed time is zero or vesting just started).
-    NothingToVest = 35,
+    NothingToVest = 2035,
 
     /// The pool does not have vesting configured (vesting_period_secs == 0).
-    VestingNotConfigured = 36,
+    VestingNotConfigured = 2036,
 
     /// Pool funding is paused (issue #628). Distribution may still be running.
-    FundingPaused = 37,
+    FundingPaused = 2037,
 
     /// Reward distribution is paused (issue #628). Funding may still be open.
-    DistributionPaused = 38,
+    DistributionPaused = 2038,
 
     /// The pool already has the maximum number of distinct tracked funders;
     /// a new sponsor cannot be added until the pool is refunded.
-    TooManyFunders = 39,
+    TooManyFunders = 2039,
 
     /// The hunt is not in a terminal state (cancelled or ended), so its pool
     /// cannot be refunded yet.
-    InvalidHuntStatus = 40,
+    InvalidHuntStatus = 2040,
 }

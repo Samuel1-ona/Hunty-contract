@@ -223,27 +223,46 @@ export interface RewardConfig {
 }
 
 export const RewardErrorCode = {
-  1: {message:"NotInitialized"},
-  2: {message:"InsufficientPool"},
-  3: {message:"AlreadyDistributed"},
-  4: {message:"TransferFailed"},
-  5: {message:"InvalidAmount"},
-  6: {message:"InvalidConfig"},
-  7: {message:"NftMintFailed"},
-  8: {message:"PoolAlreadyExists"},
-  9: {message:"PoolNotFound"},
-  10: {message:"Unauthorized"},
-  11: {message:"BelowMinimumAmount"},
-  12: {message:"AlreadyInitialized"},
-  13: {message:"HuntNotFound"},
-  /**
-   * A recursive distribution attempt was detected during an external XLM or NFT call.
-   */
-  14: {message:"ReentrancyDetected"},
-  /**
-   * The tracked pool balance diverged from the actual XLM token balance.
-   */
-  15: {message:"PoolBalanceDivergence"}
+  2001: {message:"NotInitialized"},
+  2002: {message:"InsufficientPool"},
+  2003: {message:"AlreadyDistributed"},
+  2004: {message:"TransferFailed"},
+  2005: {message:"InvalidAmount"},
+  2006: {message:"InvalidConfig"},
+  2007: {message:"NftMintFailed"},
+  2008: {message:"PoolAlreadyExists"},
+  2009: {message:"PoolNotFound"},
+  2010: {message:"Unauthorized"},
+  2011: {message:"BelowMinimumAmount"},
+  2012: {message:"AlreadyInitialized"},
+  2013: {message:"HuntNotFound"},
+  2014: {message:"ReentrancyDetected"},
+  2015: {message:"PoolBalanceDivergence"},
+  2016: {message:"ReplayDetected"},
+  2017: {message:"PoolBalanceOverflow"},
+  2018: {message:"BelowMinimumFunding"},
+  2019: {message:"ExceedsMaximumFunding"},
+  2020: {message:"DailyCapExceeded"},
+  2021: {message:"GlobalDailyCapExceeded"},
+  2022: {message:"ContractPaused"},
+  2023: {message:"NftMintPendingNotFound"},
+  2024: {message:"DistributionNotFound"},
+  2025: {message:"SourcePoolNotEligible"},
+  2026: {message:"DestinationPoolNotFound"},
+  2027: {message:"InvalidMigration"},
+  2028: {message:"PoolFrozen"},
+  2029: {message:"DistributionRateLimited"},
+  2030: {message:"BatchTooLarge"},
+  2031: {message:"InvalidScore"},
+  2032: {message:"InvalidTokenContract"},
+  2033: {message:"VestingNotStarted"},
+  2034: {message:"VestingAlreadyClaimed"},
+  2035: {message:"NothingToVest"},
+  2036: {message:"VestingNotConfigured"},
+  2037: {message:"FundingPaused"},
+  2038: {message:"DistributionPaused"},
+  2039: {message:"TooManyFunders"},
+  2040: {message:"InvalidHuntStatus"}
 }
 
 export interface Client {
