@@ -27,14 +27,11 @@ use soroban_sdk::{
     contract, contractimpl, Address, Bytes, BytesN, Env, IntoVal, String, Symbol, Val, Vec,
 };
 
-const MAX_TITLE_BYTES: u32 = 200;
-// Must stay <= crate::sanitization::SANITIZE_STACK_CAP (2048). Raising these
-// above the sanitizer stack CAP without increasing SANITIZE_STACK_CAP will
-// return SanitizeError::LimitTooLarge for every call using that limit.
-const MAX_DESCRIPTION_BYTES: u32 = 2000;
-const MAX_QUESTION_LENGTH: u32 = 2000;
-const MAX_ANSWER_LENGTH: u32 = 256;
-const MAX_CATEGORY_BYTES: u32 = 64;
+const MAX_TITLE_BYTES: usize = 200;
+const MAX_DESCRIPTION_BYTES: usize = 2000;
+const MAX_QUESTION_LENGTH: usize = 2000;
+const MAX_ANSWER_LENGTH: usize = 256;
+const MAX_CATEGORY_BYTES: usize = 64;
 const MAX_CATEGORIES_PER_HUNT: u32 = 5;
 const MAX_CLUES_PER_HUNT: u32 = 100;
 /// Maximum number of leaderboard entries returned (gas and UX limit).
@@ -167,13 +164,12 @@ impl HuntyCore {
 
         // Validate and sanitize title/description at byte level
         let title =
-            crate::sanitization::StringSanitizer::sanitize(&env, &title, MAX_TITLE_BYTES, false)
+            crate::sanitization::StringSanitizer::sanitize::<MAX_TITLE_BYTES>(&env, &title, false)
                 .map_err(|_| HuntErrorCode::InvalidTitle)?;
 
-        let description = crate::sanitization::StringSanitizer::sanitize(
+        let description = crate::sanitization::StringSanitizer::sanitize::<MAX_DESCRIPTION_BYTES>(
             &env,
             &description,
-            MAX_DESCRIPTION_BYTES,
             true,
         )
         .map_err(|_| HuntErrorCode::InvalidDescription)?;
@@ -422,10 +418,9 @@ impl HuntyCore {
         }
 
         // Validate and sanitize description
-        let description = crate::sanitization::StringSanitizer::sanitize(
+        let description = crate::sanitization::StringSanitizer::sanitize::<MAX_DESCRIPTION_BYTES>(
             &env,
             &description,
-            MAX_DESCRIPTION_BYTES,
             true,
         )
         .map_err(|_| HuntErrorCode::InvalidDescription)?;
@@ -621,10 +616,9 @@ impl HuntyCore {
             return Err(HuntErrorCode::InvalidPoints);
         }
         let final_points = points;
-        let question = crate::sanitization::StringSanitizer::sanitize(
+        let question = crate::sanitization::StringSanitizer::sanitize::<MAX_QUESTION_LENGTH>(
             env,
             &question,
-            MAX_QUESTION_LENGTH,
             false,
         )
         .map_err(|_| HuntErrorCode::InvalidQuestion)?;
@@ -848,10 +842,9 @@ impl HuntyCore {
         limit: u32,
         scan_limit: u32,
     ) -> Vec<Hunt> {
-        let Ok(category) = crate::sanitization::StringSanitizer::sanitize(
+        let Ok(category) = crate::sanitization::StringSanitizer::sanitize::<MAX_CATEGORY_BYTES>(
             &env,
             &category,
-            MAX_CATEGORY_BYTES,
             false,
         ) else {
             return Vec::new(&env);
@@ -923,10 +916,9 @@ impl HuntyCore {
             Storage::get_clue_or_error(&env, hunt_id, clue_id).map_err(HuntErrorCode::from)?;
         clue.hint = match hint {
             Some(value) => Some(
-                crate::sanitization::StringSanitizer::sanitize(
+                crate::sanitization::StringSanitizer::sanitize::<MAX_QUESTION_LENGTH>(
                     &env,
                     &value,
-                    MAX_QUESTION_LENGTH,
                     false,
                 )
                 .map_err(|_| HuntErrorCode::InvalidQuestion)?,
@@ -1002,7 +994,7 @@ impl HuntyCore {
         answer: &String,
     ) -> Result<BytesN<32>, HuntError> {
         let answer =
-            crate::sanitization::StringSanitizer::sanitize(env, answer, MAX_ANSWER_LENGTH, false)
+            crate::sanitization::StringSanitizer::sanitize::<MAX_ANSWER_LENGTH>(env, answer, false)
                 .map_err(|_| HuntError::InvalidAnswer)?;
         let n = answer.len();
         if n == 0 {
@@ -1051,10 +1043,9 @@ impl HuntyCore {
         for i in 0..categories.len() {
             // SAFETY: i is within the vector bounds established by the enclosing loop
             let category = categories.get(i).unwrap();
-            let category = crate::sanitization::StringSanitizer::sanitize(
+            let category = crate::sanitization::StringSanitizer::sanitize::<MAX_CATEGORY_BYTES>(
                 env,
                 &category,
-                MAX_CATEGORY_BYTES,
                 false,
             )
             .map_err(|_| HuntErrorCode::InvalidCategory)?;
