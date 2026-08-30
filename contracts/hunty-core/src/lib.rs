@@ -2903,6 +2903,17 @@ impl HuntyCore {
     /// Returns ranked players for a hunt with pagination support (read-only).
     /// Sorted by score descending, then by completion time ascending (earlier = better).
     /// Limit is capped at 20 to control gas. Returns error if hunt does not exist.
+    ///
+    /// Access is governed by the hunt's `leaderboard_visibility` setting:
+    /// * `Public` – any caller (pass `None` for anonymous access).
+    /// * `RegisteredOnly` – caller must be a registered player for the hunt.
+    /// * `CreatorOnly` – caller must be the hunt creator.
+    ///
+    /// # Arguments
+    /// * `env` - The Soroban environment
+    /// * `hunt_id` - The hunt to query
+    /// * `limit` - Maximum entries to return (capped at `MAX_LEADERBOARD_SIZE`)
+    /// * `caller` - Optional address of the requester; required for non-Public visibility
     pub fn get_hunt_leaderboard(
         env: Env,
         hunt_id: u64,
@@ -2945,8 +2956,35 @@ impl HuntyCore {
         hunt_id: u64,
         start_index: u32,
         window_size: u32,
+        caller: Option<Address>,
     ) -> Result<crate::types::LeaderboardWindow, HuntErrorCode> {
-        let _ = Storage::get_hunt(&env, hunt_id).ok_or(HuntErrorCode::HuntNotFound)?;
+        let hunt = Storage::get_hunt(&env, hunt_id).ok_or(HuntErrorCode::HuntNotFound)?;
+
+        // Enforce visibility
+        match &hunt.leaderboard_visibility {
+            LeaderboardVisibility::Public => {
+                // No restrictions — anyone may query.
+            }
+            LeaderboardVisibility::RegisteredOnly => {
+                let addr = caller
+                    .as_ref()
+                    .ok_or(HuntErrorCode::LeaderboardVisibilityUnauthorized)?;
+                addr.require_auth();
+                if Storage::get_player_progress(&env, hunt_id, addr).is_none() {
+                    return Err(HuntErrorCode::LeaderboardVisibilityUnauthorized);
+                }
+            }
+            LeaderboardVisibility::CreatorOnly => {
+                let addr = caller
+                    .as_ref()
+                    .ok_or(HuntErrorCode::LeaderboardVisibilityUnauthorized)?;
+                addr.require_auth();
+                if *addr != hunt.creator {
+                    return Err(HuntErrorCode::LeaderboardVisibilityUnauthorized);
+                }
+            }
+        }
+
         let queried_at = env.ledger().timestamp();
         let players = Storage::get_hunt_players(&env, hunt_id);
         let total_players = players.len();

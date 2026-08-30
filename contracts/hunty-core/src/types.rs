@@ -12,6 +12,18 @@ pub enum HuntStatus {
     Archived,
 }
 
+/// Controls who can view the leaderboard for a hunt.
+#[contracttype]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum LeaderboardVisibility {
+    /// Anyone can view the leaderboard (default).
+    Public,
+    /// Only players who have registered for the hunt can view the leaderboard.
+    RegisteredOnly,
+    /// Only the hunt creator can view the leaderboard.
+    CreatorOnly,
+}
+
 #[contracttype]
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct RewardConfig {
