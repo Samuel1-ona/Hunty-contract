@@ -907,40 +907,77 @@ impl NftReward {
         Ok(updated)
     }
 
+    /// Replaces a matching `old_prefix` at the start of `uri` with `new_prefix`.
+    ///
+    /// Returns `None` — meaning "leave the URI untouched" — whenever the
+    /// operation cannot be performed *exactly*:
+    /// - `uri` does not start with `old_prefix`, or
+    /// - any of `uri` / `old_prefix` / `new_prefix` exceeds `MAX_NFT_URI_BYTES`
+    ///   (all three are bounded by that constant elsewhere in the contract;
+    ///   this defends against callers that bypass those checks), or
+    /// - the resulting URI would exceed `MAX_NFT_URI_BYTES`.
+    ///
+    /// Every early return above is an explicit, checked rejection. Unlike the
+    /// previous implementation, nothing here is silently truncated (the old
+    /// code copied at most 256 bytes into a fixed buffer but kept comparing
+    /// against the untruncated length) and nothing can index out of bounds
+    /// (the old code panicked when `old_prefix` exceeded 256 bytes, or when
+    /// `new_prefix` was long enough to overflow the 512-byte output buffer).
     fn replace_prefix(
         env: &Env,
         uri: &String,
         old_prefix: &String,
         new_prefix: &String,
     ) -> Option<String> {
+        const MAX: usize = MAX_NFT_URI_BYTES as usize;
+
         let uri_len = uri.len() as usize;
         let old_len = old_prefix.len() as usize;
         let new_len = new_prefix.len() as usize;
 
+        // Reject anything that wouldn't fit our fixed-size buffers instead of
+        // truncating the copy (old bug #1) or indexing past it (old bug #2).
+        if uri_len > MAX || old_len > MAX || new_len > MAX {
+            return None;
+        }
         if uri_len < old_len {
             return None;
         }
 
-        let mut buf_uri = [0u8; 256];
-        let mut buf_old = [0u8; 256];
-        let mut buf_new = [0u8; 256];
+        let mut buf_uri = [0u8; MAX];
+        let mut buf_old = [0u8; MAX];
 
-        uri.copy_into_slice(&mut buf_uri[..uri_len.min(256)]);
-        old_prefix.copy_into_slice(&mut buf_old[..old_len.min(256)]);
-        new_prefix.copy_into_slice(&mut buf_new[..new_len.min(256)]);
+        uri.copy_into_slice(&mut buf_uri[..uri_len]);
+        old_prefix.copy_into_slice(&mut buf_old[..old_len]);
 
-        if buf_uri[..old_len] == buf_old[..old_len] {
-            let mut final_buf = [0u8; 512];
-            final_buf[..new_len].copy_from_slice(&buf_new[..new_len]);
-            let suffix_len = uri_len - old_len;
-            final_buf[new_len..new_len + suffix_len].copy_from_slice(&buf_uri[old_len..uri_len]);
-            let total_len = new_len + suffix_len;
-            // SAFETY: `final_buf` is assembled entirely from bytes copied
-            // out of soroban_sdk::String values, so the slice is valid UTF-8.
-            let text = unsafe { core::str::from_utf8_unchecked(&final_buf[..total_len]) };
-            return Some(String::from_str(env, text));
+        if buf_uri[..old_len] != buf_old[..old_len] {
+            return None;
         }
-        None
+
+        let suffix_len = uri_len - old_len;
+        let total_len = new_len + suffix_len;
+        // Reject instead of overflowing the output buffer (old bug #3) when a
+        // longer `new_prefix` would push the result past the max URI length.
+        if total_len > MAX {
+            return None;
+        }
+
+        let mut buf_new = [0u8; MAX];
+        new_prefix.copy_into_slice(&mut buf_new[..new_len]);
+
+        let mut final_buf = [0u8; MAX];
+        final_buf[..new_len].copy_from_slice(&buf_new[..new_len]);
+        final_buf[new_len..total_len].copy_from_slice(&buf_uri[old_len..uri_len]);
+
+        // SAFETY: `final_buf` is assembled entirely from bytes copied out of
+        // soroban_sdk::String values, so the slice is valid UTF-8. The split
+        // point `old_len` is a byte-for-byte match between `uri` and
+        // `old_prefix`, both independently valid UTF-8, so it falls on a
+        // codepoint boundary in both; concatenating `new_prefix` (itself
+        // valid UTF-8) with that boundary-aligned suffix cannot produce an
+        // invalid sequence.
+        let text = unsafe { core::str::from_utf8_unchecked(&final_buf[..total_len]) };
+        Some(String::from_str(env, text))
     }
 
     /// Updates mutable metadata fields (description, image_uri). Owner only.

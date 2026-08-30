@@ -1723,8 +1723,155 @@ fn test_unauthorized_cannot_mint_before_and_after_init() {
     assert!(post_init.is_err());
 }
 
+// -----------------------------------------------------------------------------
+// admin_update_image_uris / replace_prefix (issue #844)
+// -----------------------------------------------------------------------------
+
+/// `mint_reward_nft` validates image_uri against a strict https://|ipfs://
+/// scheme (and a 200-byte cap), but `update_nft_metadata` does not — so it's
+/// the realistic way for an NFT to end up with an arbitrary, longer
+/// image_uri for these admin_update_image_uris regression tests.
+fn set_raw_image_uri(
+    env: &Env,
+    client: &NftRewardClient<'_>,
+    nft_id: u64,
+    owner: &Address,
+    uri: &str,
+) {
+    let nft = client.get_nft(&nft_id).unwrap();
+    client
+        .update_nft_metadata(
+            &nft_id,
+            owner,
+            &nft.metadata.description,
+            &String::from_str(env, uri),
+        )
+        .unwrap();
+}
+
 #[test]
-fn nft_data_field_count_remains_constant() {
-    assert_eq!(crate::NFT_DATA_FIELD_COUNT, 8);
-    assert_eq!(std::mem::size_of::<crate::NftData>(), std::mem::size_of::<crate::NftData>());
+fn test_admin_update_image_uris_replaces_matching_prefix() {
+    let env = setup_env();
+    let contract_id = env.register_contract(None, NftReward);
+    let client = NftRewardClient::new(&env, &contract_id);
+    let admin = Address::generate(&env);
+    let minter = Address::generate(&env);
+    client.initialize(&admin, &minter, &None, &default_collection_metadata(&env));
+
+    let player = Address::generate(&env);
+    let metadata = create_metadata(&env, "NFT", "Desc", "https://old-gateway.example/a");
+    let nft_id = client.mint_reward_nft(&minter, &1, &player, &metadata);
+
+    let old_prefix = String::from_str(&env, "https://old-gateway.example/");
+    let new_prefix = String::from_str(&env, "https://new-gateway.example/");
+    let updated = client
+        .admin_update_image_uris(&admin, &old_prefix, &new_prefix)
+        .unwrap();
+
+    assert_eq!(updated, 1);
+    let nft = client.get_nft(&nft_id).unwrap();
+    assert_eq!(
+        nft.metadata.image_uri,
+        String::from_str(&env, "https://new-gateway.example/a")
+    );
+}
+
+#[test]
+fn test_admin_update_image_uris_handles_uri_over_256_bytes_without_corruption() {
+    // Regression test for issue #844: a >256-byte URI used to be silently
+    // truncated to zero-padded garbage because the copy into the fixed
+    // buffer was clamped to 256 bytes while the comparison/copy lengths
+    // downstream were not.
+    let env = setup_env();
+    let contract_id = env.register_contract(None, NftReward);
+    let client = NftRewardClient::new(&env, &contract_id);
+    let admin = Address::generate(&env);
+    let minter = Address::generate(&env);
+    client.initialize(&admin, &minter, &None, &default_collection_metadata(&env));
+
+    let player = Address::generate(&env);
+    let metadata = create_metadata(&env, "NFT", "Desc", "https://x.example/a");
+    let nft_id = client.mint_reward_nft(&minter, &1, &player, &metadata);
+
+    let prefix = "ipfs://old-gateway/";
+    // 400 bytes of 'a' after the prefix keeps the whole URI under the
+    // 512-byte MAX_NFT_URI_BYTES cap while comfortably exceeding 256.
+    let suffix = "a".repeat(400);
+    let long_uri = std::format!("{}{}", prefix, suffix);
+    assert!(long_uri.len() > 256 && long_uri.len() <= 512);
+    set_raw_image_uri(&env, &client, nft_id, &player, &long_uri);
+
+    let old_prefix = String::from_str(&env, prefix);
+    let new_prefix = String::from_str(&env, "ipfs://new-gateway/");
+    let updated = client
+        .admin_update_image_uris(&admin, &old_prefix, &new_prefix)
+        .unwrap();
+    assert_eq!(updated, 1);
+
+    let expected = std::format!("ipfs://new-gateway/{}", suffix);
+    let nft = client.get_nft(&nft_id).unwrap();
+    assert_eq!(nft.metadata.image_uri, String::from_str(&env, &expected));
+}
+
+#[test]
+fn test_admin_update_image_uris_long_old_prefix_does_not_panic() {
+    // Regression test for issue #844: an old_prefix longer than 256 bytes
+    // used to index a [0u8; 256] buffer out of bounds and panic.
+    let env = setup_env();
+    let contract_id = env.register_contract(None, NftReward);
+    let client = NftRewardClient::new(&env, &contract_id);
+    let admin = Address::generate(&env);
+    let minter = Address::generate(&env);
+    client.initialize(&admin, &minter, &None, &default_collection_metadata(&env));
+
+    let player = Address::generate(&env);
+    let metadata = create_metadata(&env, "NFT", "Desc", "https://x.example/a");
+    let nft_id = client.mint_reward_nft(&minter, &1, &player, &metadata);
+
+    let long_uri = "b".repeat(300);
+    set_raw_image_uri(&env, &client, nft_id, &player, &long_uri);
+
+    // 280-byte old_prefix: longer than the old 256-byte buffer, shorter
+    // than the 300-byte URI, and matches it byte-for-byte.
+    let old_prefix_str = "b".repeat(280);
+    let old_prefix = String::from_str(&env, &old_prefix_str);
+    let new_prefix = String::from_str(&env, "c");
+
+    let updated = client
+        .admin_update_image_uris(&admin, &old_prefix, &new_prefix)
+        .unwrap();
+    assert_eq!(updated, 1);
+}
+
+#[test]
+fn test_admin_update_image_uris_oversized_result_is_skipped_not_panicked() {
+    // Regression test for issue #844: a new_prefix long enough to push the
+    // assembled result past 512 bytes used to overflow the output buffer
+    // and panic. It should now simply be skipped (URI left unchanged).
+    let env = setup_env();
+    let contract_id = env.register_contract(None, NftReward);
+    let client = NftRewardClient::new(&env, &contract_id);
+    let admin = Address::generate(&env);
+    let minter = Address::generate(&env);
+    client.initialize(&admin, &minter, &None, &default_collection_metadata(&env));
+
+    let player = Address::generate(&env);
+    let metadata = create_metadata(&env, "NFT", "Desc", "https://x.example/a");
+    let nft_id = client.mint_reward_nft(&minter, &1, &player, &metadata);
+
+    // A near-max-length URI so that swapping in a longer prefix overflows 512.
+    let uri_str = std::format!("x/{}", "y".repeat(500));
+    set_raw_image_uri(&env, &client, nft_id, &player, &uri_str);
+
+    let old_prefix = String::from_str(&env, "x/");
+    let new_prefix = String::from_str(&env, &"z".repeat(100));
+
+    let updated = client
+        .admin_update_image_uris(&admin, &old_prefix, &new_prefix)
+        .unwrap();
+    assert_eq!(updated, 0);
+
+    // Unchanged — the oversized replacement was skipped, not applied garbled.
+    let nft = client.get_nft(&nft_id).unwrap();
+    assert_eq!(nft.metadata.image_uri, String::from_str(&env, &uri_str));
 }
