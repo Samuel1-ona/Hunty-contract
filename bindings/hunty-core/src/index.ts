@@ -988,10 +988,10 @@ export interface Client {
   create_hunt: ({creator, title, description, start_time, end_time, max_submissions_per_minute, start_multiplier_bps, default_points}: {creator: string, title: string, description: string, start_time: Option<u64>, end_time: Option<u64>, max_submissions_per_minute: u32, start_multiplier_bps: Option<u32>, default_points: Option<u32>}, options?: MethodOptions) => Promise<AssembledTransaction<Result<u64>>>
 
   /**
-   * Construct and simulate a update_hunt transaction. Returns an `AssembledTransaction` object which will have a `result` field containing the result of the simulation. If this transaction changes contract state, you will need to call `signAndSend()` on the returned object.
-   * Updates a draft hunt's title and description. Only the hunt creator can update it.
+   * Construct and simulate a set_max_attempts_per_clue transaction. Returns an `AssembledTransaction` object which will have a `result` field containing the result of the simulation. If this transaction changes contract state, you will need to call `signAndSend()` on the returned object.
+   * Updates the maximum number of attempts allowed per clue and attempt cooldown duration for a draft hunt. Only the hunt creator or co-creator can update it.
    */
-  update_hunt: ({hunt_id, caller, max_attempts_per_clue, attempt_cooldown_secs}: {hunt_id: u64, caller: string, max_attempts_per_clue: u32, attempt_cooldown_secs: u32}, options?: MethodOptions) => Promise<AssembledTransaction<Result<void>>>
+  set_max_attempts_per_clue: ({hunt_id, caller, max_attempts_per_clue, attempt_cooldown_secs}: {hunt_id: u64, caller: string, max_attempts_per_clue: u32, attempt_cooldown_secs: u32}, options?: MethodOptions) => Promise<AssembledTransaction<Result<void>>>
 
   /**
    * Construct and simulate a accept_admin transaction. Returns an `AssembledTransaction` object which will have a `result` field containing the result of the simulation. If this transaction changes contract state, you will need to call `signAndSend()` on the returned object.
@@ -1672,7 +1672,7 @@ export class Client extends ContractClient {
         list_hunts: this.txFromJSON<Array<Hunt>>,
         cancel_hunt: this.txFromJSON<Result<void>>,
         create_hunt: this.txFromJSON<Result<u64>>,
-        update_hunt: this.txFromJSON<Result<void>>,
+        set_max_attempts_per_clue: this.txFromJSON<Result<void>>,
         accept_admin: this.txFromJSON<Result<void>>,
         archive_hunt: this.txFromJSON<Result<void>>,
         is_view_only: this.txFromJSON<boolean>,

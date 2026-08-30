@@ -508,14 +508,15 @@ pub fn set_time_bonus_config(env: Env, hunt_id: u64, caller: Address, time_bonus
 
 ---
 
-#### `update_hunt`
+#### `set_max_attempts_per_clue`
 
-Updates a draft hunt's title and description. Only the hunt creator can update it.
+Updates the maximum number of attempts allowed per clue and attempt cooldown duration for a draft hunt.
+Only the hunt creator or co-creator can update it.
 
 **Signature:**
 
 ```rust
-pub fn update_hunt(env: Env, hunt_id: u64, caller: Address, max_attempts_per_clue: u32, attempt_cooldown_secs: u32) -> Result<(), HuntErrorCode>
+pub fn set_max_attempts_per_clue(env: Env, hunt_id: u64, caller: Address, max_attempts_per_clue: u32, attempt_cooldown_secs: u32) -> Result<(), HuntErrorCode>
 ```
 
 **Parameters:**
