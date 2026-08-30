@@ -358,8 +358,9 @@ impl HuntyCore {
         Ok(())
     }
 
-    /// Updates a draft hunt's title and description. Only the hunt creator can update it.
-    pub fn update_hunt(
+    /// Updates the maximum number of attempts allowed per clue and attempt cooldown duration for a draft hunt.
+    /// Only the hunt creator or co-creator can update it.
+    pub fn set_max_attempts_per_clue(
         env: Env,
         hunt_id: u64,
         caller: Address,
