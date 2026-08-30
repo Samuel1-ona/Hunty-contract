@@ -1,0 +1,35 @@
+{
+  "version": 1,
+  "unit": "soroban_instructions",
+  "tolerance_percent": 10,
+  "operations": {
+    "create_hunt": {
+      "gas": null,
+      "notes": "TODO: measure with deterministic harness"
+    },
+    "add_clue": {
+      "gas": null,
+      "notes": "TODO: measure with deterministic harness"
+    },
+    "submit_answer": {
+      "gas": null,
+      "notes": "TODO: measure with deterministic harness"
+    },
+    "register_player": {
+      "gas": null,
+      "notes": "TODO: measure with deterministic harness"
+    },
+    "get_leaderboard": {
+      "gas": null,
+      "notes": "TODO: measure with deterministic harness"
+    },
+    "distribute_rewards": {
+      "gas": null,
+      "notes": "TODO: measure with deterministic harness"
+    },
+    "mint_nft": {
+      "gas": null,
+      "notes": "TODO: measure with deterministic harness"
+    }
+  }
+}

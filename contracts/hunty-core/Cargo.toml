@@ -12,7 +12,6 @@ doctest = false
 soroban-sdk = { workspace = true }
 reward-interface = { path = "../reward-interface" }
 hunty-migration = { path = "../migration", package = "hunty-migration" }
-common = { path = "../common", package = "hunty-common" }
 
 [dev-dependencies]
 soroban-sdk = { workspace = true, features = ["testutils"] }

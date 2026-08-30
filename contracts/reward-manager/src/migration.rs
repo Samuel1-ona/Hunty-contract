@@ -70,6 +70,13 @@ impl RewardManagerMigration {
         dry_run: bool,
     ) -> Result<MigrationReport, UpgradeAuthError> {
         let now = env.ledger().timestamp();
+        
+        // Reject target_version above the current schema version, as we have no
+        // implementation to reach a future version.
+        if target_version > CURRENT_SCHEMA_VERSION {
+            return Err(UpgradeAuthError::VersionMismatch);
+        }
+        
         UpgradeAuthorization::prepare_migration_run(
             env,
             admin,
@@ -93,20 +100,26 @@ impl RewardManagerMigration {
         }
         if !dry_run {
             MigrationFramework::save_rollback_point(env, current);
-            MigrationFramework::set_version(env, CURRENT_SCHEMA_VERSION);
+            // CRITICAL: Write the target_version, not CURRENT_SCHEMA_VERSION.
+            // The caller explicitly requested a migration to target_version;
+            // jumping to CURRENT_SCHEMA_VERSION skips intermediate migration steps
+            // and contradicts the reported to_version in the event.
+            MigrationFramework::set_version(env, target_version);
             UpgradeAuthorization::finalize_migration_run(
                 env,
                 admin,
                 current,
-                CURRENT_SCHEMA_VERSION,
+                target_version,
                 now,
             );
         }
+        // Report the actual version we wrote, not the target_version parameter.
+        let written_version = if dry_run { current } else { target_version };
         Ok(MigrationFramework::build_report(
             env,
             current,
-            target_version,
-            1,
+            written_version,
+            if current < target_version { 1 } else { 0 },
             dry_run,
             true,
             "reward-manager migration complete",

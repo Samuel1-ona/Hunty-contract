@@ -35,4 +35,8 @@ pub enum RewardErrorCode {
     ContractPaused = 21,
     /// Emergency withdrawal failed.
     EmergencyWithdrawalFailed = 22,
+    /// Pool funding is paused (issue #628). Distribution may still be running.
+    FundingPaused = 23,
+    /// Reward distribution is paused (issue #628). Funding may still be open.
+    DistributionPaused = 24,
 }

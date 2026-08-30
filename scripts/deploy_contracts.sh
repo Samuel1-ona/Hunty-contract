@@ -74,3 +74,8 @@ echo "HuntyCore      : $HUNTY_CORE_ID"
 echo "RewardManager  : $REWARD_MANAGER_ID"
 echo "NftReward      : $NFT_REWARD_ID"
 echo "Wrote config/contracts.${ENVIRONMENT}.json"
+
+# Validate the updated config does not contain placeholders
+echo ""
+echo "Validating config placeholders..."
+bash scripts/validate_placeholders.sh

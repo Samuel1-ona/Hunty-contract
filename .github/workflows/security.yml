@@ -24,16 +24,16 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
         with:
           components: clippy
-          targets: wasm32-unknown-unknown,wasm32v1-none
+          targets: wasm32-unknown-unknown
 
       - name: Cache cargo registry and build
-        uses: actions/cache@v4
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
             ~/.cargo/registry
@@ -53,7 +53,7 @@ jobs:
           echo "" >> security-reports/summary.md
 
       - name: Install scanning tools
-        uses: taiki-e/install-action@v2
+        uses: taiki-e/install-action@b6ff580856c41316412a0b9b60540fbc6f8c82cc # v2
         with:
           tool: cargo-audit,wasm-tools
 
@@ -227,7 +227,7 @@ jobs:
       # ------------------------------------------------------------------
       - name: Upload security report artifacts
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: security-scan-report
           path: security-reports/
@@ -246,7 +246,7 @@ jobs:
         # Fork PRs often lack pull-requests:write; do not fail the scan for that.
         if: always() && github.event_name == 'pull_request'
         continue-on-error: true
-        uses: marocchino/sticky-pull-request-comment@v2
+        uses: marocchino/sticky-pull-request-comment@5770ad5eb8f42dd2c4f34da00c94c5381e49af88 # v2
         with:
           header: hunty-security-scan
           path: security-reports/summary.md

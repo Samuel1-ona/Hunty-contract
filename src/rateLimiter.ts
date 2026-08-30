@@ -1,23 +1,26 @@
-import { RateLimitConfig, AddressMintRecord, RateLimitConfigUpdate } from './types';
+import { RateLimitConfig, RateLimitConfigUpdate } from './types';
 import { MintRateLimitError } from './errors';
+import { MemoryMintStore, MintRecordStore } from './mintStore';
 
 export class MintRateLimiter {
-  private records: Map<string, AddressMintRecord> = new Map();
+  private store: MintRecordStore;
   private config: RateLimitConfig;
   private adminSecret: string;
 
-  constructor(config: RateLimitConfig, adminSecret: string) {
+  constructor(
+    config: RateLimitConfig,
+    adminSecret: string,
+    store: MintRecordStore = new MemoryMintStore(),
+  ) {
     this.config = { ...config };
     this.adminSecret = adminSecret;
+    this.store = store;
   }
 
-  check(address: string): void {
+  async check(address: string): Promise<void> {
     const now = Date.now();
-    const record = this.records.get(address);
-    const timestamps = record?.timestamps ?? [];
-
     const cutoff = now - this.config.windowMs;
-    const recentMints = timestamps.filter(t => t > cutoff);
+    const recentMints = await this.store.getRecent(address, cutoff);
 
     if (recentMints.length >= this.config.maxMints) {
       const oldestRecent = Math.min(...recentMints);
@@ -26,24 +29,41 @@ export class MintRateLimiter {
     }
   }
 
-  recordMint(address: string): void {
-    const now = Date.now();
-    const record = this.records.get(address) ?? { timestamps: [] };
-    const cutoff = now - this.config.windowMs;
-    record.timestamps = [...record.timestamps.filter(t => t > cutoff), now];
-    this.records.set(address, record);
-  }
-
-  mint(address: string): void {
-    this.check(address);
-    this.recordMint(address);
-  }
-
-  getMintCount(address: string): number {
+  async recordMint(address: string): Promise<void> {
     const now = Date.now();
     const cutoff = now - this.config.windowMs;
-    const record = this.records.get(address);
-    return record ? record.timestamps.filter(t => t > cutoff).length : 0;
+    const result = await this.store.tryRecord(
+      address,
+      now,
+      cutoff,
+      this.config.maxMints,
+    );
+    if (!result.allowed) {
+      const cooldownMs = result.oldestRecent + this.config.windowMs - now;
+      throw new MintRateLimitError(cooldownMs);
+    }
+  }
+
+  async mint(address: string): Promise<void> {
+    const now = Date.now();
+    const cutoff = now - this.config.windowMs;
+    const result = await this.store.tryRecord(
+      address,
+      now,
+      cutoff,
+      this.config.maxMints,
+    );
+    if (!result.allowed) {
+      const cooldownMs = result.oldestRecent + this.config.windowMs - now;
+      throw new MintRateLimitError(cooldownMs);
+    }
+  }
+
+  async getMintCount(address: string): Promise<number> {
+    const now = Date.now();
+    const cutoff = now - this.config.windowMs;
+    const recent = await this.store.getRecent(address, cutoff);
+    return recent.length;
   }
 
   getConfig(): RateLimitConfig {

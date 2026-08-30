@@ -3,6 +3,9 @@
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Rust](https://img.shields.io/badge/rust-1.70+-orange.svg)](https://www.rust-lang.org/)
 [![Soroban](https://img.shields.io/badge/soroban-22.0+-purple.svg)](https://soroban.stellar.org/)
+[![CI](https://github.com/Samuel1-ona/Hunty-contract/actions/workflows/ci.yml/badge.svg)](https://github.com/Samuel1-ona/Hunty-contract/actions/workflows/ci.yml)
+[![WASM Size](https://github.com/Samuel1-ona/Hunty-contract/actions/workflows/wasm-size.yml/badge.svg)](https://github.com/Samuel1-ona/Hunty-contract/actions/workflows/wasm-size.yml)
+[![Coverage](https://img.shields.io/badge/coverage-checked_in_CI-blue)](https://github.com/Samuel1-ona/Hunty-contract/actions/workflows/ci.yml)
 
 Hunty is a decentralized scavenger hunt game built on Stellar/Soroban. Create thrilling scavenger hunts with multiple clues and challenges, engage players in immersive treasure hunts, and reward them with XLM tokens or exclusive NFTs.
 
@@ -281,11 +284,12 @@ flowchart TD
 
 ## Architecture
 
-Hunty consists of three main smart contracts:
+Hunty consists of three main smart contracts and an off-chain rate-limiting microservice:
 
 1. **HuntyCore** - Main game logic, hunt management, and clue verification
 2. **RewardManager** - Coordinates reward distribution (XLM and NFT)
 3. **NftReward** - Handles NFT minting and transfer for completion rewards
+4. **Off-Chain Mint Rate Limiter** (`src/`) - Express microservice protecting the NFT minting path against per-address abuse and spam
 
 ### Contract Responsibilities
 
@@ -308,6 +312,16 @@ Hunty consists of three main smart contracts:
 - Stores NFT metadata including hunt information
 - Manages NFT ownership and transfers
 - Provides query functions for NFT information
+
+**Off-Chain Mint Rate Limiter Microservice (`src/`):**
+- Serves as an off-chain API layer (`hunty-mint-rate-limiter`) sitting in front of the on-chain NFT reward minting pipeline.
+- Enforces sliding-window rate limits per Stellar wallet address (`maxMints` per `windowMs`) to prevent automated minting abuse, bot spam, and gas exhaustion on the network.
+- Exposes administrative and operational endpoints:
+  - `POST /mint` - Evaluates rate limits for a given player address `{ address }` before initiating the Soroban `NftReward` mint.
+  - `GET /mint/count/:address` - Returns active window mint count for an address.
+  - `GET /health` - Health check returning service status, network environment, RPC endpoint, and contract IDs (`huntyCoreId`, `rewardManagerId`, `nftRewardId`).
+  - `GET /environment` - Renders visual environment badge for non-production environments (`testnet`, `staging`).
+  - `GET /admin/config` & `PATCH /admin/config` - Query and dynamically update rate limit settings at runtime (requires `x-admin-secret` authentication header).
 
 ## Quick Start
 
@@ -357,6 +371,8 @@ The working files (`.env`, `.env.testnet`, `.env.staging`, `.env.mainnet`, and a
 > credentials. Rotate `ADMIN_SECRET` immediately if one is ever pushed.
 
 Required variables are validated when the API starts. Startup fails fast with a clear error if a value is missing, invalid, or still contains a `replace-with-...` placeholder.
+
+The mint rate-limiter API (`src/rateLimiter.ts`) **gates minting with shared Redis state** (`REDIS_URL`). Per-address mint timestamps are stored in Redis so limits survive process restarts and stay correct when multiple API instances run behind a load balancer. An in-memory `Map` is only used inside unit tests.
 
 ```bash
 # Development/testnet
@@ -450,9 +466,19 @@ hunty-contract/
 │       │   ├── lib.rs
 │       │   └── test.rs
 │       └── Cargo.toml
+├── src/                     # Off-chain Mint Rate Limiter Express service (TypeScript)
+│   ├── index.ts             # Express server setup and route definitions
+│   ├── rateLimiter.ts       # Sliding-window rate limiter implementation
+│   ├── config.ts            # Environment and contract configuration loader
+│   ├── errors.ts            # Custom rate limit error definitions
+│   └── types.ts             # TypeScript interface definitions
+├── scripts/                 # Deployment and environment helper scripts
+│   ├── deploy_contracts.sh # Multi-environment deployment script
+│   └── with-env.mjs         # Environment loader CLI helper
 ├── CONTRIBUTING.md          # Contribution guidelines
 ├── DEVELOPMENT.md          # Development guide
 ├── GITHUB_ISSUES.md         # List of issues for developers
+├── package.json             # Node.js dependencies & scripts (hunty-mint-rate-limiter)
 ├── Cargo.toml               # Workspace configuration
 └── README.md
 ```
@@ -497,6 +523,23 @@ We welcome contributions! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for guid
 - **Atomic Operations**: Reward distributions are atomic - either everything succeeds or nothing happens
 - **Transparent Progress**: All progress is publicly verifiable on the blockchain
 - **Secure Rewards**: Reward pools are validated before distribution to prevent over-spending
+
+### Admin Governance
+
+Admin assignment is split across exactly two paths, both authorization-gated. There is no
+unguarded shortcut, so an uninitialized contract cannot be taken over by the first caller after
+deployment.
+
+- **`initialize_admin`** – Sets the admin for the very first time. The supplied address must
+  authenticate (`require_auth`), and the call is rejected if an admin is already set. There is no
+  other way to assign the initial admin.
+- **`propose_new_admin` + `accept_admin`** – Two-step rotation of an existing admin. The current
+  admin (authenticated) proposes a successor, then the proposed address must call `accept_admin`
+  and authenticate to complete the transfer. This prevents accidental lockout.
+
+The old single-step `set_admin` entrypoint was removed because it skipped authorization when the
+contract was uninitialized. The storage-level `set_admin` writer is an internal helper used only by
+the two authorized paths above and is never exposed as a public method.
 
 ## Roadmap
 

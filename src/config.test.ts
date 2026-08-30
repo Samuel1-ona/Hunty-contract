@@ -5,6 +5,7 @@ const validEnv = {
   APP_ENV: 'staging',
   PORT: '3000',
   ADMIN_SECRET: 'secret',
+  REDIS_URL: 'redis://127.0.0.1:6379',
   MAX_MINTS: '3',
   MINT_WINDOW_MS: '60000',
   STELLAR_NETWORK: 'testnet',
@@ -20,6 +21,7 @@ describe('loadConfig', () => {
     expect(loadConfig(validEnv)).toMatchObject({
       environment: 'staging',
       port: 3000,
+      redisUrl: 'redis://127.0.0.1:6379',
       rateLimit: { maxMints: 3, windowMs: 60000 },
       contracts: {
         huntyCoreId: validEnv.HUNTY_CORE_ID,
@@ -27,6 +29,12 @@ describe('loadConfig', () => {
         nftRewardId: validEnv.NFT_REWARD_ID,
       },
     });
+  });
+
+  it('requires REDIS_URL for shared mint rate-limit state', () => {
+    const env = { ...validEnv };
+    delete (env as { REDIS_URL?: string }).REDIS_URL;
+    expect(() => loadConfig(env)).toThrow('Missing required environment variable: REDIS_URL');
   });
 
   it('fails fast when a required value is missing', () => {

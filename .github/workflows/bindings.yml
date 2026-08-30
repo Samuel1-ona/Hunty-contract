@@ -9,19 +9,18 @@ jobs:
   bindings:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
         with:
-          targets: wasm32-unknown-unknown,wasm32v1-none
+          targets: wasm32-unknown-unknown
 
       - name: Install Stellar CLI
         run: cargo install --locked stellar-cli
-        uses: stellar/stellar-cli@v27.0.0
 
       - name: Build contracts
-        run: stellar contract build
+        run: cargo build --workspace --target wasm32-unknown-unknown --release
 
       - name: Generate TypeScript bindings
         run: make bindings
@@ -30,7 +29,7 @@ jobs:
         run: git diff --exit-code bindings
 
       - name: Upload bindings artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: contract-bindings
           path: bindings/

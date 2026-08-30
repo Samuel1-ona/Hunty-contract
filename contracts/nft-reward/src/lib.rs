@@ -1,23 +1,25 @@
 #![cfg_attr(not(test), no_std)]
+#![allow(clippy::too_many_arguments)]
 use soroban_sdk::{
-    contract, contractimpl, contracttype, panic_with_error, symbol_short, Address, Env, Map,
-    String, Symbol, Val, Vec,
-    contract, contractimpl, contracttype, panic_with_error, Address, Env, Map, String, Symbol,
-    Val, Vec,
-    contract, contract, contractimpl, contractimpl, contracttype, contracttype, panic_with_error,
-    panic_with_error, symbol_short, symbol_short, Address, Address, Env, Env, Map, Map, String,
-    String, Symbol, Symbol, Val, Val, Vec, Vec,
+    contract, contractimpl, contracttype, panic_with_error, Address, Env, Map, String, Symbol, Val,
+    Vec,
+};
+use hunty_common::audit::{
+    emit_audit_event, detail, ACTION_ADMIN_ADDED, ACTION_ADMIN_REMOVED, TOPIC_AUDIT,
 };
 
-const MAX_URI_LEN: usize = 512;
 const MAX_NFT_TITLE_BYTES: u32 = 128;
 const MAX_NFT_DESCRIPTION_BYTES: u32 = 1024;
 const MAX_NFT_URI_BYTES: u32 = 512;
 const MAX_EXTENSION_FIELDS: u32 = 10;
 const MAX_EXTENSION_KEY_BYTES: u32 = 64;
 const MAX_EXTENSION_VALUE_BYTES: u32 = 512;
-/// Maximum number of NFTs to return in a single scan query (pagination cap).
-const MAX_SCAN_LIMIT: u32 = 1000;
+/// Maximum NFTs returned by a single scan/list query.
+///
+/// Matches hunty-core's `MAX_LEADERBOARD_SCAN_SIZE` / `MAX_HUNT_SEARCH_SCAN_SIZE`
+/// (200). `MAX_BATCH_SIZE` (50) is the tighter write-batch cap used elsewhere;
+/// 200 is the read-scan cap so listing stays inside a similar gas budget.
+const MAX_SCAN_LIMIT: u32 = 200;
 
 /// Core display metadata for an NFT (title, description, image URI).
 /// Supports off-chain storage references to keep gas costs low.
@@ -67,16 +69,26 @@ fn image_uri_is_valid(uri: &String) -> bool {
     // Accept non-empty URIs that start with https:// or ipfs://
     // soroban_sdk::String has no as_str(); compare via UTF-8 text when possible.
     let len = uri.len();
-    if len == 0 || len > 200 {
+    if len == 0 || len > MAX_NFT_URI_BYTES {
         return false;
     }
-    let mut buf = [0u8; 200];
+    let mut buf = [0u8; MAX_NFT_URI_BYTES as usize];
     uri.copy_into_slice(&mut buf[..len as usize]);
-    if let Ok(text) = core::str::from_utf8(&buf[..len as usize]) {
-        text.starts_with("https://") || text.starts_with("ipfs://")
-    } else {
-        false
+    // SAFETY: `buf` is populated from a soroban_sdk::String via
+    // copy_into_slice, so the bytes are guaranteed to be valid UTF-8.
+    let text = unsafe { core::str::from_utf8_unchecked(&buf[..len as usize]) };
+
+    if text.starts_with("https://") {
+        // Require at least one non-whitespace character after the scheme.
+        let authority = &text[8..];
+        return !authority.is_empty() && !authority.bytes().all(|b| b == b' ');
     }
+    if text.starts_with("ipfs://") {
+        // Require CID of at least 46 chars (IPFS v0 base58) after "ipfs://".
+        let cid = &text[7..];
+        return cid.len() >= 46;
+    }
+    false
 }
 
 /// Complete metadata returned by get_nft_metadata (includes NftData-derived fields).
@@ -120,6 +132,9 @@ pub struct NftCore {
 /// ScVal map. Use per-NFT auxiliary keys for new metadata instead.
 #[contracttype]
 #[derive(Clone, Debug, PartialEq, Eq)]
+
+/// Expected number of fields in NftData — do not change without migration
+pub const NFT_DATA_FIELD_COUNT: usize = 8;
 pub struct NftData {
     pub nft_id: u64,
     pub hunt_id: u64,
@@ -141,6 +156,10 @@ pub struct NftMintedEvent {
     pub rarity: u32,
     pub tier: u32,
     pub minted_at: u64,
+    pub hunt_title: String,
+    pub total_minted_for_hunt: u32,
+    pub completion_rank: u32,
+    pub collection_stats: String,
 }
 
 /// Event emitted when an operator approval changes.
@@ -176,6 +195,11 @@ pub struct AdminImageUrisUpdatedEvent {
     pub old_prefix: String,
     pub new_prefix: String,
     pub updated_count: u32,
+    /// Start index of this batch (as passed in).
+    pub offset: u32,
+    /// Index to pass as `offset` for the next batch. Equal to the total NFT
+    /// count when this was the final batch.
+    pub next_offset: u32,
 }
 
 /// Event emitted when an NFT extension is set.
@@ -205,11 +229,48 @@ pub struct NftBurnedEvent {
     pub owner: Address,
 }
 
+/// Event emitted on contract initialization with admin, minter, and max supply details.
+#[contracttype]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ContractInitializedEvent {
+    pub admin: Address,
+    pub minter: Address,
+    pub max_supply: Option<u64>,
+    pub timestamp: u64,
+}
+
+/// Event emitted when an authorized contract is added.
+#[contracttype]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct AuthorizedContractAddedEvent {
+    pub admin: Address,
+    pub contract: Address,
+    pub timestamp: u64,
+}
+
+/// Event emitted when an authorized contract is removed.
+#[contracttype]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct AuthorizedContractRemovedEvent {
+    pub admin: Address,
+    pub contract: Address,
+    pub timestamp: u64,
+}
+
+/// Event emitted when the reward manager contract is set.
+#[contracttype]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RewardManagerSetEvent {
+    pub admin: Address,
+    pub reward_manager: Address,
+    pub timestamp: u64,
+}
+
 mod errors;
 pub use errors::NftErrorCode;
 mod migration;
 mod sanitization;
-mod storage;
+pub mod storage;
 #[cfg(test)]
 mod test;
 use storage::Storage;
@@ -233,16 +294,39 @@ impl NftReward {
         max_supply: Option<u64>,
         collection_metadata: CollectionMetadata,
     ) -> Result<(), crate::errors::NftErrorCode> {
+        // Require the admin to authorize initialization to prevent an attacker from
+        // becoming admin by racing the first transaction after deployment.
+        admin.require_auth();
+
         if Storage::is_initialized(&env) {
             return Err(crate::errors::NftErrorCode::AlreadyInitialized);
         }
 
+        if let Some(0) = max_supply {
+            return Err(crate::errors::NftErrorCode::InvalidMaxSupply);
+        }
+
         Storage::save_admin(&env, &admin);
         Storage::add_minter(&env, &minter);
+        // Ensure the initial minter is also enrolled as an authorized contract
+        Storage::add_authorized_contract(&env, &minter);
         Storage::set_max_supply(&env, max_supply);
         Storage::save_collection_metadata(&env, &collection_metadata);
         Storage::mark_initialized(&env);
         Storage::set_contract_version(&env, CONTRACT_VERSION);
+
+        // Emit initialization event
+        let timestamp = env.ledger().timestamp();
+        env.events().publish(
+            (symbol_short!("INIT"), admin.clone()),
+            ContractInitializedEvent {
+                admin: admin.clone(),
+                minter: minter.clone(),
+                max_supply,
+                timestamp,
+            },
+        );
+
         Ok(())
     }
 
@@ -250,18 +334,25 @@ impl NftReward {
         admin.require_auth();
         let stored_admin =
             Storage::get_admin(env).ok_or(crate::errors::NftErrorCode::NotInitialized)?;
-        if stored_admin != admin.clone() {
+            if stored_admin != *admin {
             return Err(crate::errors::NftErrorCode::Unauthorized);
         }
         Ok(())
     }
 
     fn require_authorized_caller(env: &Env, caller: &Address) {
-        if Storage::has_authorized_contracts(env) {
-            caller.require_auth();
-            if !Storage::is_authorized_contract(env, caller) {
-                panic_with_error!(env, crate::errors::NftErrorCode::Unauthorized);
+        // Check the stored reward_manager address first.
+        if let Some(reward_manager) = Storage::get_reward_manager(env) {
+            if reward_manager == *caller {
+                caller.require_auth();
+                return;
             }
+        }
+        // Always require the caller to authorize the operation.
+        caller.require_auth();
+        // Fail-closed: caller must be explicitly authorized.
+        if !Storage::is_authorized_contract(env, caller) {
+            panic_with_error!(env, crate::errors::NftErrorCode::Unauthorized);
         }
     }
 
@@ -281,13 +372,16 @@ impl NftReward {
     /// The unique NFT ID of the minted NFT
     pub fn mint_reward_nft(
         env: Env,
-        _minter: Address,
+        minter: Address,
         hunt_id: u64,
         player_address: Address,
         metadata: NftMetadata,
     ) -> u64 {
         Self::require_authorized_caller(&env, &minter);
-        Self::mint_reward_nft_impl(env, hunt_id, player_address, metadata, true)
+        // This direct entrypoint has no rank context; pass 0 so callers that
+        // care about rank should use `mint_reward_nft_from_map` with the
+        // "completion_rank" key set.
+        Self::mint_reward_nft_impl(env, hunt_id, player_address, metadata, true, 0)
     }
 
     /// Mints a reward NFT from a generic metadata map. This is the entrypoint
@@ -308,34 +402,45 @@ impl NftReward {
     /// - "royalty_bps": u32 (optional, basis points for royalty percentage)
     /// - "transferable": bool
     /// - "extensions": Map<String, String> (optional, arbitrary key-value metadata)
+    ///
+    /// # Errors
+    /// Returns `NftErrorCode::InvalidMetadata` when a key is **present** but holds
+    /// a value of the wrong type. An **absent** key silently takes its documented default.
     pub fn mint_reward_nft_from_map(
         env: Env,
-        _minter: Address,
+        minter: Address,
         hunt_id: u64,
         player_address: Address,
         metadata: Map<Symbol, Val>,
-    ) -> u64 {
+    ) -> Result<u64, crate::errors::NftErrorCode> {
         Self::require_authorized_caller(&env, &minter);
         use soroban_sdk::TryFromVal;
 
-        let title = metadata
-            .get(Symbol::new(&env, "title"))
-            .and_then(|v| String::try_from_val(&env, &v).ok())
-            .unwrap_or_else(|| String::from_str(&env, ""));
-
-        let description = metadata
-            .get(Symbol::new(&env, "description"))
-            .and_then(|v| String::try_from_val(&env, &v).ok())
-            .unwrap_or_else(|| String::from_str(&env, ""));
-
-        let image_uri = metadata
-            .get(Symbol::new(&env, "image_uri"))
-            .and_then(|v| String::try_from_val(&env, &v).ok())
-            .unwrap_or_else(|| String::from_str(&env, ""));
-
-        if !image_uri_is_valid(&image_uri) {
-            panic!("Invalid NFT image_uri: must be non-empty");
+        macro_rules! extract_field {
+            ($key:expr, $ty:ty, $default:expr) => {
+                match metadata.get(Symbol::new(&env, $key)) {
+                    None => $default,
+                    Some(v) => <$ty>::try_from_val(&env, &v)
+                        .map_err(|_| crate::errors::NftErrorCode::InvalidMetadata)?,
+                }
+            };
         }
+
+        macro_rules! extract_optional_field {
+            ($key:expr, $ty:ty) => {
+                match metadata.get(Symbol::new(&env, $key)) {
+                    None => None,
+                    Some(v) => Some(
+                        <$ty>::try_from_val(&env, &v)
+                            .map_err(|_| crate::errors::NftErrorCode::InvalidMetadata)?,
+                    ),
+                }
+            };
+        }
+
+        let title = extract_field!("title", String, String::from_str(&env, ""));
+        let description = extract_field!("description", String, String::from_str(&env, ""));
+        let image_uri = extract_field!("image_uri", String, String::from_str(&env, ""));
 
         let hunt_title = metadata
             .get(Symbol::new(&env, "hunt_title"))
@@ -347,10 +452,6 @@ impl NftReward {
             .and_then(|v| u32::try_from_val(&env, &v).ok())
             .unwrap_or(0u32);
 
-        if rarity > 5 {
-            panic!("InvalidRarity");
-        }
-
         let tier = metadata
             .get(Symbol::new(&env, "tier"))
             .and_then(|v| u32::try_from_val(&env, &v).ok())
@@ -361,20 +462,24 @@ impl NftReward {
             .and_then(|v| Address::try_from_val(&env, &v).ok())
             .or_else(|| Some(player_address.clone()));
 
-        let royalty_bps = metadata
-            .get(Symbol::new(&env, "royalty_bps"))
-            .and_then(|v| u32::try_from_val(&env, &v).ok());
+        let creator = match metadata.get(Symbol::new(&env, "creator")) {
+            None => Some(player_address.clone()),
+            Some(v) => Some(
+                Address::try_from_val(&env, &v)
+                    .map_err(|_| crate::errors::NftErrorCode::InvalidMetadata)?,
+            ),
+        };
 
-        let transferable = metadata
-            .get(Symbol::new(&env, "transferable"))
-            .and_then(|v| bool::try_from_val(&env, &v).ok())
-            .unwrap_or(false);
+        let royalty_bps: Option<u32> = extract_optional_field!("royalty_bps", u32);
+        let transferable = extract_field!("transferable", bool, false);
+
+        // Extract the authoritative completion rank threaded from hunty-core.
+        // Defaults to 0 when absent (e.g., direct test calls that omit the key).
+        let completion_rank = extract_field!("completion_rank", u32, 0u32);
 
         // Parse extensions from metadata map
-        let extensions = metadata
-            .get(Symbol::new(&env, "extensions"))
-            .and_then(|v| Map::<String, String>::try_from_val(&env, &v).ok())
-            .unwrap_or_else(|| Map::new(&env));
+        let extensions: Map<String, String> =
+            extract_field!("extensions", Map<String, String>, Map::new(&env));
 
         let meta = NftMetadata {
             title,
@@ -387,7 +492,14 @@ impl NftReward {
             royalty_bps,
             extensions,
         };
-        Self::mint_reward_nft_impl(env, hunt_id, player_address, meta, transferable)
+        Ok(Self::mint_reward_nft_impl(env, hunt_id, player_address, meta, transferable, completion_rank))
+    }
+
+    fn validate_image_uri(env: &Env, value: &String) -> Result<(), NftErrorCode> {
+        if !image_uri_is_valid(value) {
+            return Err(NftErrorCode::InvalidMetadata);
+        }
+        Ok(())
     }
 
     fn sanitize_metadata_field(
@@ -403,7 +515,7 @@ impl NftReward {
     }
 
     fn validate_extensions(
-        env: &Env,
+        _env: &Env,
         extensions: &Map<String, String>,
     ) -> Result<(), NftErrorCode> {
         let count = extensions.len();
@@ -427,9 +539,13 @@ impl NftReward {
         player_address: Address,
         metadata: NftMetadata,
         transferable: bool,
+        completion_rank: u32,
     ) -> u64 {
         if metadata.rarity > 5 {
             panic_with_error!(&env, crate::errors::NftErrorCode::InvalidRarity);
+        }
+        if let Err(e) = Self::validate_image_uri(&env, &metadata.image_uri) {
+            panic_with_error!(&env, e);
         }
 
         // Validate extensions
@@ -451,24 +567,32 @@ impl NftReward {
         metadata.hunt_title =
             Self::sanitize_metadata_field(&env, &metadata.hunt_title, MAX_NFT_TITLE_BYTES, true);
 
-        // 0 is treated as "unlimited" — only enforce if max_supply is Some(n) with n > 0.
         if let Some(max_supply) = Storage::get_max_supply(&env) {
-            if max_supply > 0 {
-                let current_supply = Storage::get_nft_counter(&env);
-                if current_supply >= max_supply {
-                    panic_with_error!(&env, crate::errors::NftErrorCode::MaxSupplyReached);
-                }
+            let current_supply = Storage::get_nft_counter(&env);
+            if current_supply >= max_supply {
+                panic_with_error!(&env, crate::errors::NftErrorCode::MaxSupplyReached);
             }
         }
 
         let minted_at = env.ledger().timestamp();
         let nft_id = Storage::next_nft_id(&env);
 
+        let event = NftMintedEvent {
+            nft_id,
+            hunt_id,
+            owner: player_address.clone(),
+            rarity: metadata.rarity,
+            tier: metadata.tier,
+            minted_at,
+            metadata: metadata.clone(),
+        };
+
         let nft_data = NftData {
             nft_id,
             hunt_id,
             owner: player_address.clone(),
-            metadata: metadata.clone(),
+            completion_player: player_address.clone(),
+            metadata,
             transferable,
             minted_at,
             locked: false,
@@ -477,9 +601,12 @@ impl NftReward {
         Storage::save_nft(&env, &nft_data);
         Storage::set_nft_version(&env, nft_id, METADATA_SCHEMA_VERSION);
         Storage::add_nft_to_owner(&env, &player_address, nft_id);
+        Storage::increment_owner_hunt_count(&env, &player_address, hunt_id);
         Storage::add_nft_to_hunt(&env, hunt_id, nft_id);
         Storage::mark_hunt_minted(&env, hunt_id);
-        Storage::update_collection_metadata_total_supply(&env, Storage::get_nft_counter(&env));
+        // Read the counter once and reuse it for both the supply update and the event.
+        let total_supply = Storage::get_nft_counter(&env);
+        Storage::update_collection_metadata_total_supply(&env, total_supply);
 
         let event = NftMintedEvent {
             nft_id,
@@ -487,11 +614,18 @@ impl NftReward {
             owner: player_address,
             rarity: nft_data.metadata.rarity,
             tier: nft_data.metadata.tier,
-            metadata,
-            rarity: metadata.rarity,
-            tier: metadata.tier,
-            metadata: metadata.clone(),
             minted_at,
+            hunt_title: metadata.hunt_title.clone(),
+            total_minted_for_hunt: total_supply as u32,
+            // Use the authoritative rank threaded from hunty-core (frozen at
+            // completion time), not a live re-count of minted NFTs.
+            completion_rank,
+            collection_stats: format!(
+                "total_supply={},total_hunts={},total_owners={}",
+                total_supply,
+                0u64, // total_hunts would need tracking
+                0u64  // total_owners would need tracking
+            ),
         };
         env.events()
             .publish((Symbol::new(&env, "NftMinted"), nft_id), event);
@@ -665,6 +799,18 @@ impl NftReward {
     ) -> Result<(), crate::errors::NftErrorCode> {
         Self::require_admin(&env, &admin)?;
         Storage::save_reward_manager(&env, &reward_manager);
+
+        // Emit event for audit trail
+        let timestamp = env.ledger().timestamp();
+        env.events().publish(
+            (symbol_short!("RWD_MGR"), admin.clone()),
+            RewardManagerSetEvent {
+                admin: admin.clone(),
+                reward_manager: reward_manager.clone(),
+                timestamp,
+            },
+        );
+
         Ok(())
     }
 
@@ -676,6 +822,18 @@ impl NftReward {
     ) -> Result<(), crate::errors::NftErrorCode> {
         Self::require_admin(&env, &admin)?;
         Storage::add_authorized_contract(&env, &contract);
+
+        // Emit event for audit trail
+        let timestamp = env.ledger().timestamp();
+        env.events().publish(
+            (symbol_short!("AUTH_ADD"), admin.clone()),
+            AuthorizedContractAddedEvent {
+                admin: admin.clone(),
+                contract: contract.clone(),
+                timestamp,
+            },
+        );
+
         Ok(())
     }
 
@@ -687,11 +845,35 @@ impl NftReward {
     ) -> Result<(), crate::errors::NftErrorCode> {
         Self::require_admin(&env, &admin)?;
         Storage::remove_authorized_contract(&env, &contract);
+
+        // Emit event for audit trail
+        let timestamp = env.ledger().timestamp();
+        env.events().publish(
+            (symbol_short!("AUTH_REM"), admin.clone()),
+            AuthorizedContractRemovedEvent {
+                admin: admin.clone(),
+                contract: contract.clone(),
+                timestamp,
+            },
+        );
+
         Ok(())
     }
-
     /// Batch-updates image URIs for all NFTs whose `image_uri` starts with `old_prefix`,
     /// replacing it with `new_prefix`. Useful for migrating between IPFS gateways or CDNs.
+    ///
+    /// Paginated like every other collection scan in this contract
+    /// (`list_all_nfts`, `get_player_nfts`, `get_nfts_by_hunt`): a single call
+    /// only ever touches up to `MAX_SCAN_LIMIT` NFTs starting at `offset`, so
+    /// it can't exceed the invocation resource budget regardless of
+    /// collection size. Drive a full migration by repeatedly calling this
+    /// with `offset` set to the previous call's `next_offset` until
+    /// `next_offset` stops advancing (or equals the collection size).
+    ///
+    /// The operation is idempotent: re-running a batch over an
+    /// already-migrated range updates nothing (those URIs already start with
+    /// `new_prefix`, not `old_prefix`), so a retried or overlapping batch is
+    /// harmless.
     ///
     /// # Authorization
     /// Only the configured admin can call this function.
@@ -700,28 +882,53 @@ impl NftReward {
     /// * `admin` - The admin address (must match the stored admin)
     /// * `old_prefix` - The prefix to match (e.g. "ipfs://oldgateway/")
     /// * `new_prefix` - The replacement prefix (e.g. "ipfs://newgateway/")
+    /// * `offset` - The starting index for this batch (0-based)
+    /// * `limit` - The maximum number of NFTs to scan in this batch (capped at MAX_SCAN_LIMIT)
     ///
     /// # Returns
-    /// The number of NFTs whose image URIs were updated.
+    /// `(updated_count, next_offset)` — how many image URIs were updated in
+    /// this batch, and the offset to resume from for the next one.
     pub fn admin_update_image_uris(
         env: Env,
         admin: Address,
         old_prefix: String,
         new_prefix: String,
-    ) -> Result<u32, crate::errors::NftErrorCode> {
+        offset: u32,
+        limit: u32,
+    ) -> Result<(u32, u32), crate::errors::NftErrorCode> {
         Self::require_admin(&env, &admin)?;
 
         let all_ids = Storage::get_all_nft_ids(&env);
-        let mut updated: u32 = 0;
+        let total_count = all_ids.len();
 
-        for nft_id in all_ids.iter() {
+        if offset >= total_count {
+            let event = AdminImageUrisUpdatedEvent {
+                old_prefix,
+                new_prefix,
+                updated_count: 0,
+                offset,
+                next_offset: offset,
+            };
+            env.events()
+                .publish((Symbol::new(&env, "AdminImageUrisUpdated"),), event);
+            return Ok((0, offset));
+        }
+
+        let bounded_limit = limit.min(MAX_SCAN_LIMIT);
+        let end = offset.saturating_add(bounded_limit).min(total_count);
+
+        let mut updated: u32 = 0;
+        for i in offset..end {
+            let Some(nft_id) = all_ids.get(i) else {
+                continue;
+            };
             if let Some(mut nft) = Storage::get_nft(&env, nft_id) {
                 if let Some(new_uri) =
                     Self::replace_prefix(&env, &nft.metadata.image_uri, &old_prefix, &new_prefix)
                 {
                     nft.metadata.image_uri = new_uri;
                     Storage::save_nft(&env, &nft);
-                    updated += 1;
+                    updated = updated.saturating_add(1);
                 }
             }
         }
@@ -732,45 +939,85 @@ impl NftReward {
                 old_prefix,
                 new_prefix,
                 updated_count: updated,
+                offset,
+                next_offset: end,
             },
         );
 
-        Ok(updated)
+        Ok((updated, end))
     }
 
+    /// Replaces a matching `old_prefix` at the start of `uri` with `new_prefix`.
+    ///
+    /// Returns `None` — meaning "leave the URI untouched" — whenever the
+    /// operation cannot be performed *exactly*:
+    /// - `uri` does not start with `old_prefix`, or
+    /// - any of `uri` / `old_prefix` / `new_prefix` exceeds `MAX_NFT_URI_BYTES`
+    ///   (all three are bounded by that constant elsewhere in the contract;
+    ///   this defends against callers that bypass those checks), or
+    /// - the resulting URI would exceed `MAX_NFT_URI_BYTES`.
+    ///
+    /// Every early return above is an explicit, checked rejection. Unlike the
+    /// previous implementation, nothing here is silently truncated (the old
+    /// code copied at most 256 bytes into a fixed buffer but kept comparing
+    /// against the untruncated length) and nothing can index out of bounds
+    /// (the old code panicked when `old_prefix` exceeded 256 bytes, or when
+    /// `new_prefix` was long enough to overflow the 512-byte output buffer).
     fn replace_prefix(
         env: &Env,
         uri: &String,
         old_prefix: &String,
         new_prefix: &String,
     ) -> Option<String> {
+        const MAX: usize = MAX_NFT_URI_BYTES as usize;
+
         let uri_len = uri.len() as usize;
         let old_len = old_prefix.len() as usize;
         let new_len = new_prefix.len() as usize;
 
+        // Reject anything that wouldn't fit our fixed-size buffers instead of
+        // truncating the copy (old bug #1) or indexing past it (old bug #2).
+        if uri_len > MAX || old_len > MAX || new_len > MAX {
+            return None;
+        }
         if uri_len < old_len {
             return None;
         }
 
-        let mut buf_uri = [0u8; 256];
-        let mut buf_old = [0u8; 256];
-        let mut buf_new = [0u8; 256];
+        let mut buf_uri = [0u8; MAX];
+        let mut buf_old = [0u8; MAX];
 
-        uri.copy_into_slice(&mut buf_uri[..uri_len.min(256)]);
-        old_prefix.copy_into_slice(&mut buf_old[..old_len.min(256)]);
-        new_prefix.copy_into_slice(&mut buf_new[..new_len.min(256)]);
+        uri.copy_into_slice(&mut buf_uri[..uri_len]);
+        old_prefix.copy_into_slice(&mut buf_old[..old_len]);
 
-        if buf_uri[..old_len] == buf_old[..old_len] {
-            let mut final_buf = [0u8; 512];
-            final_buf[..new_len].copy_from_slice(&buf_new[..new_len]);
-            let suffix_len = uri_len - old_len;
-            final_buf[new_len..new_len + suffix_len].copy_from_slice(&buf_uri[old_len..uri_len]);
-            let total_len = new_len + suffix_len;
-            if let Ok(text) = core::str::from_utf8(&final_buf[..total_len]) {
-                return Some(String::from_str(env, text));
-            }
+        if buf_uri[..old_len] != buf_old[..old_len] {
+            return None;
         }
-        None
+
+        let suffix_len = uri_len - old_len;
+        let total_len = new_len + suffix_len;
+        // Reject instead of overflowing the output buffer (old bug #3) when a
+        // longer `new_prefix` would push the result past the max URI length.
+        if total_len > MAX {
+            return None;
+        }
+
+        let mut buf_new = [0u8; MAX];
+        new_prefix.copy_into_slice(&mut buf_new[..new_len]);
+
+        let mut final_buf = [0u8; MAX];
+        final_buf[..new_len].copy_from_slice(&buf_new[..new_len]);
+        final_buf[new_len..total_len].copy_from_slice(&buf_uri[old_len..uri_len]);
+
+        // SAFETY: `final_buf` is assembled entirely from bytes copied out of
+        // soroban_sdk::String values, so the slice is valid UTF-8. The split
+        // point `old_len` is a byte-for-byte match between `uri` and
+        // `old_prefix`, both independently valid UTF-8, so it falls on a
+        // codepoint boundary in both; concatenating `new_prefix` (itself
+        // valid UTF-8) with that boundary-aligned suffix cannot produce an
+        // invalid sequence.
+        let text = unsafe { core::str::from_utf8_unchecked(&final_buf[..total_len]) };
+        Some(String::from_str(env, text))
     }
 
     /// Updates mutable metadata fields (description, image_uri). Owner only.
@@ -813,16 +1060,9 @@ impl NftReward {
         Storage::get_nft_counter(&env)
     }
 
-    /// Returns the total count of NFTs currently in the contract.
-    /// Equivalent to total_supply() but with a dedicated function name for clarity.
-    pub fn get_total_nft_count(env: Env) -> u64 {
-        Storage::get_nft_counter(&env)
-    }
-
     /// Returns the configured maximum total supply of NFTs.
     ///
     /// - `None`  → no cap was set (unlimited minting)
-    /// - `Some(0)` → unlimited (explicit zero treated as unlimited)
     /// - `Some(n)` → at most `n` NFTs may ever be minted
     pub fn get_max_supply(env: Env) -> Option<u64> {
         Storage::get_max_supply(&env)
@@ -830,14 +1070,15 @@ impl NftReward {
 
     /// Updates the maximum total supply cap. Admin only.
     ///
-    /// - Pass `None` or `Some(0)` to remove the cap (unlimited).
-    /// - Pass `Some(n)` where `n >= current total_supply` to set a new cap.
-    ///   Attempting to set a cap lower than the already-minted count is
-    ///   rejected with `Unauthorized` to prevent bricking the contract.
+    /// - Pass `None` to remove the cap (unlimited).
+    /// - Pass `Some(n)` where `n > 0` and `n >= current total_supply` to set a new cap.
+    ///   Attempting to set a cap of 0 or lower than the already-minted count is
+    ///   rejected with `InvalidMaxSupply` to prevent bricking the contract.
     ///
     /// # Errors
     /// * `NotInitialized` - Contract has not been initialized yet
-    /// * `Unauthorized`   - Caller is not the admin, or new cap < minted supply
+    /// * `Unauthorized`   - Caller is not the admin
+    /// * `InvalidMaxSupply` - Attempting to set cap to Some(0) or below already-minted supply
     pub fn set_max_supply(
         env: Env,
         admin: Address,
@@ -845,13 +1086,14 @@ impl NftReward {
     ) -> Result<(), crate::errors::NftErrorCode> {
         Self::require_admin(&env, &admin)?;
 
-        // Guard: never allow setting a cap below what's already minted.
+        // Guard: never allow setting a cap of 0 or below what's already minted.
         if let Some(cap) = new_max {
-            if cap > 0 {
-                let minted = Storage::get_nft_counter(&env);
-                if cap < minted {
-                    return Err(crate::errors::NftErrorCode::Unauthorized);
-                }
+            if cap == 0 {
+                return Err(crate::errors::NftErrorCode::InvalidMaxSupply);
+            }
+            let minted = Storage::get_nft_counter(&env);
+            if cap < minted {
+                return Err(crate::errors::NftErrorCode::InvalidMaxSupply);
             }
         }
 
@@ -861,7 +1103,7 @@ impl NftReward {
 
     /// Returns the number of NFTs that can still be minted.
     ///
-    /// - `None`  → unlimited (no cap configured, or cap was set to 0)
+    /// - `None`  → unlimited (no cap configured)
     /// - `Some(n)` → exactly `n` more NFTs may be minted before the cap is hit
     ///
     /// Once the cap is reached this returns `Some(0)`, and any subsequent mint
@@ -869,7 +1111,6 @@ impl NftReward {
     pub fn get_remaining_supply(env: Env) -> Option<u64> {
         match Storage::get_max_supply(&env) {
             None => None,
-            Some(max) if max == 0 => None, // explicit 0 ⟹ unlimited
             Some(max) => {
                 let minted = Storage::get_nft_counter(&env);
                 Some(max.saturating_sub(minted))
@@ -880,7 +1121,7 @@ impl NftReward {
     /// Lists all NFTs minted by the contract with pagination support.
     ///
     /// Returns a vector of NftData structs, paginated by offset and limit.
-    /// The limit is bounded to MAX_SCAN_LIMIT (1000) to prevent excessive gas consumption.
+    /// The limit is bounded to MAX_SCAN_LIMIT (200) to prevent excessive gas consumption.
     ///
     /// # Arguments
     /// * `env` - The Soroban environment
@@ -1082,10 +1323,13 @@ impl NftReward {
             return Err(crate::errors::NftErrorCode::NotOperator);
         }
 
+        let hunt_id = nft.hunt_id;
         Storage::remove_nft_from_owner(&env, &from_address, nft_id);
+        Storage::decrement_owner_hunt_count(&env, &from_address, hunt_id);
         nft.owner = to_address.clone();
         Storage::save_nft(&env, &nft);
         Storage::add_nft_to_owner(&env, &to_address, nft_id);
+        Storage::increment_owner_hunt_count(&env, &to_address, hunt_id);
 
         env.events().publish(
             (Symbol::new(&env, "NftTransferred"), nft_id),
@@ -1104,11 +1348,6 @@ impl NftReward {
         Storage::get_nft(&env, nft_id).map(|nft| nft.owner)
     }
 
-    /// Alias for owner_of. Returns the owner of an NFT.
-    pub fn get_nft_owner(env: Env, nft_id: u64) -> Option<Address> {
-        Storage::get_nft(&env, nft_id).map(|nft| nft.owner)
-    }
-
     /// Verifies whether `address` is the current owner of `nft_id`.
     /// Returns `true` when the NFT exists and the stored owner equals `address`.
     pub fn verify_ownership(env: Env, address: Address, nft_id: u64) -> bool {
@@ -1120,41 +1359,72 @@ impl NftReward {
     }
 
     /// Returns `true` if `address` owns any NFT minted for `hunt_id`.
-    /// Scans the owner's indexed NFT IDs and checks each NFT's `hunt_id`.
+    /// Performs an O(1) indexed lookup via the stored (owner, hunt_id) count mapping.
     pub fn has_hunt_nft(env: Env, address: Address, hunt_id: u64) -> bool {
-        let nfts = Storage::get_owner_nfts(&env, &address);
-        let len = nfts.len();
-        for i in 0..len {
-            if let Some(id) = nfts.get(i) {
-                if let Some(nft) = Storage::get_nft(&env, id) {
-                    if nft.hunt_id == hunt_id {
-                        return true;
-                    }
-                }
-            }
-        }
-        false
+        Storage::has_hunt_nft(&env, &address, hunt_id)
     }
 
     /// Returns paginated NFT IDs owned by an address.
+    /// The limit is bounded to MAX_SCAN_LIMIT (1000) to prevent excessive gas consumption.
     pub fn get_player_nfts(env: Env, owner: Address, offset: u32, limit: u32) -> Vec<u64> {
         let nfts = Storage::get_owner_nfts(&env, &owner);
         let len = nfts.len();
         if offset >= len {
             return Vec::new(&env);
         }
-        let end = offset.saturating_add(limit).min(len);
+        let bounded_limit = limit.min(MAX_SCAN_LIMIT);
+        let end = offset.saturating_add(bounded_limit).min(len);
         nfts.slice(offset..end)
     }
 
     /// Returns paginated NFT IDs minted for a hunt.
+    /// The limit is bounded to MAX_SCAN_LIMIT (1000) to prevent excessive gas consumption.
     pub fn get_nfts_by_hunt(env: Env, hunt_id: u64, offset: u32, limit: u32) -> Vec<u64> {
-        Storage::get_hunt_nfts(&env, hunt_id, offset, limit)
+        Storage::get_hunt_nfts(&env, hunt_id, offset, limit.min(MAX_SCAN_LIMIT))
     }
 
     /// Returns the total number of NFTs minted for a hunt.
     pub fn get_hunt_nft_count(env: Env, hunt_id: u64) -> u32 {
         Storage::get_hunt_nft_count(&env, hunt_id)
+    }
+
+    /// Grants `operator` the ability to manage all NFTs owned by `owner`.
+    ///
+    /// # Authorization
+    /// `owner` must authorize this call.
+    pub fn set_operator(env: Env, owner: Address, operator: Address) {
+        owner.require_auth();
+        Storage::set_operator(&env, &owner, &operator);
+        env.events().publish(
+            (Symbol::new(&env, "OperatorChanged"),),
+            OperatorChangedEvent {
+                owner,
+                operator,
+                approved: true,
+            },
+        );
+    }
+
+    /// Revokes operator approval for `operator` over `owner`'s NFTs.
+    ///
+    /// # Authorization
+    /// `owner` must authorize this call.
+    pub fn remove_operator(env: Env, owner: Address, operator: Address) {
+        owner.require_auth();
+        Storage::remove_operator(&env, &owner, &operator);
+        env.events().publish(
+            (Symbol::new(&env, "OperatorChanged"),),
+            OperatorChangedEvent {
+                owner,
+                operator,
+                approved: false,
+            },
+        );
+    }
+
+    /// Returns true if `operator` is approved to manage all NFTs of `owner`.
+    pub fn is_operator(env: Env, owner: Address, operator: Address) -> bool {
+        Storage::is_operator(&env, &owner, &operator)
     }
 
     /// Burns (permanently destroys) an NFT, removing it from storage and the owner's list.
@@ -1187,6 +1457,7 @@ impl NftReward {
         Storage::remove_nft(&env, nft_id);
         Storage::remove_nft_from_hunt(&env, hunt_id, nft_id);
         Storage::remove_nft_from_owner(&env, &owner, nft_id);
+        Storage::decrement_owner_hunt_count(&env, &owner, hunt_id);
 
         env.events().publish(
             (Symbol::new(&env, "NftBurned"), nft_id),
@@ -1197,9 +1468,91 @@ impl NftReward {
             },
         );
 
-        env.events()
-            .publish((Symbol::new(&env, "NftBurned"), nft_id), (nft_id, owner));
-
         Ok(())
+    }
+
+    // -----------------------------------------------------------------------------
+    // Schema Migration
+    // -----------------------------------------------------------------------------
+
+    pub fn get_schema_version(env: Env) -> u32 {
+        migration::NftRewardMigration::get_schema_version(&env)
+    }
+
+    pub fn initialize_schema(env: Env, admin: Address) {
+        admin.require_auth();
+        migration::NftRewardMigration::initialize_schema(&env, &admin);
+    }
+
+    pub fn propose_upgrade(
+        env: Env,
+        admin: Address,
+        target_version: u32,
+    ) -> Result<hunty_migration::UpgradeProposal, hunty_migration::UpgradeAuthError> {
+        let proposal =
+            migration::NftRewardMigration::propose_upgrade(&env, &admin, target_version)?;
+        env.events().publish(
+            migration::NftRewardMigration::upgrade_proposed_topic(&env),
+            migration::NftRewardMigration::upgrade_proposed_event(&proposal),
+        );
+        Ok(proposal)
+    }
+
+    pub fn set_upgrade_timelock(
+        env: Env,
+        admin: Address,
+        delay_seconds: u64,
+    ) -> Result<(), hunty_migration::UpgradeAuthError> {
+        migration::NftRewardMigration::set_upgrade_timelock(&env, &admin, delay_seconds)
+    }
+
+    pub fn get_upgrade_proposal(env: Env) -> Option<hunty_migration::UpgradeProposal> {
+        migration::NftRewardMigration::get_upgrade_proposal(&env)
+    }
+
+    pub fn get_upgrade_timelock(env: Env) -> u64 {
+        migration::NftRewardMigration::get_upgrade_timelock(&env)
+    }
+
+    pub fn get_upgrade_history(
+        env: Env,
+        offset: u32,
+        limit: u32,
+    ) -> soroban_sdk::Vec<hunty_migration::UpgradeHistoryEntry> {
+        migration::NftRewardMigration::get_upgrade_history(&env, offset, limit.min(MAX_SCAN_LIMIT))
+    }
+
+    pub fn run_migration(
+        env: Env,
+        admin: Address,
+        target_version: u32,
+        dry_run: bool,
+    ) -> Result<migration::MigrationReport, hunty_migration::UpgradeAuthError> {
+        let from_version = migration::NftRewardMigration::get_schema_version(&env);
+        let report = migration::NftRewardMigration::run_migration(
+            &env,
+            &admin,
+            target_version,
+            dry_run,
+        )?;
+        if !dry_run && report.succeeded && report.from_version < report.to_version {
+            env.events().publish(
+                migration::NftRewardMigration::upgrade_executed_topic(&env),
+                migration::NftRewardMigration::upgrade_executed_event(
+                    from_version,
+                    report.to_version,
+                    env.ledger().timestamp(),
+                    admin,
+                ),
+            );
+        }
+        Ok(report)
+    }
+
+    pub fn rollback_migration(
+        env: Env,
+        admin: Address,
+    ) -> Result<migration::MigrationReport, hunty_migration::UpgradeAuthError> {
+        migration::NftRewardMigration::rollback_migration(&env, &admin)
     }
 }

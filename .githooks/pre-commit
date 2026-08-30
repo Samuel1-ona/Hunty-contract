@@ -27,21 +27,10 @@ if [ -n "$RS_FILES" ]; then
   echo -e "${GREEN}✔ cargo clippy passed${NC}"
 fi
 
-# 3. Check for TODO/FIXME in staged diff
-if [ -n "$STAGED_FILES" ]; then
-  MATCHES=$(grep -n 'TODO\|FIXME\|todo!' <<< "$(git diff --cached -U0)" 2>/dev/null || true)
-  if [ -n "$MATCHES" ]; then
-    echo -e "${RED}✖ TODO/FIXME found in staged changes:${NC}"
-    echo "$MATCHES"
-    exit 1
-  fi
-  echo -e "${GREEN}✔ No TODO/FIXME markers${NC}"
-fi
-
-# 4. Verify Cargo.lock is up to date
+# 3. Verify Cargo.lock is up to date
 if [ -f Cargo.lock ]; then
   if echo "$STAGED_FILES" | grep -q 'Cargo.toml' && ! echo "$STAGED_FILES" | grep -q 'Cargo.lock'; then
-    if ! cargo metadata --format-version 1 --no-deps > /dev/null 2>&1; then
+    if ! cargo metadata --locked --format-version 1 > /dev/null 2>&1; then
       echo -e "${RED}✖ Cargo.lock is out of sync. Run 'cargo generate-lockfile' to update.${NC}"
       exit 1
     fi

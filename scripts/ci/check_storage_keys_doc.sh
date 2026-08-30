@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
-# Fails if any `const *_KEY` under contracts/ is missing from STORAGE_KEYS.md.
+# Fails if any `const *_KEY` under contracts/ is missing from docs/STORAGE_KEYS.md.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-DOC="${ROOT}/STORAGE_KEYS.md"
+DOC="${ROOT}/docs/STORAGE_KEYS.md"
 CONTRACTS="${ROOT}/contracts"
 
 if [[ ! -f "$DOC" ]]; then
-  echo "ERROR: STORAGE_KEYS.md not found at $DOC"
+  echo "ERROR: docs/STORAGE_KEYS.md not found at $DOC"
   exit 1
 fi
 
@@ -29,14 +29,14 @@ while IFS= read -r key; do
   [[ -z "$key" ]] && continue
   count=$((count + 1))
   if ! grep -qF "$key" "$DOC"; then
-    echo "MISSING from STORAGE_KEYS.md: $key"
+    echo "MISSING from docs/STORAGE_KEYS.md: $key"
     missing=1
   fi
 done <<< "$keys"
 
 if [[ "$missing" -ne 0 ]]; then
-  echo "Storage key documentation is incomplete. Update STORAGE_KEYS.md."
+  echo "Storage key documentation is incomplete. Update docs/STORAGE_KEYS.md."
   exit 1
 fi
 
-echo "OK: all ${count} *_KEY constants are documented in STORAGE_KEYS.md."
+echo "OK: all ${count} *_KEY constants are documented in docs/STORAGE_KEYS.md."

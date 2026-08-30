@@ -14,7 +14,7 @@ jobs:
     name: Generate Changelog
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
 
@@ -26,7 +26,7 @@ jobs:
 
       - name: Build changelog
         id: build_changelog
-        uses: mikepenz/release-changelog-builder-action@v4
+        uses: mikepenz/release-changelog-builder-action@32e3c96f29a6532607f638797455e9e98cfc703d # v4
         with:
           fromTag: ${{ steps.prev_tag.outputs.tag }}
           toTag: ${{ github.ref_name }}
@@ -53,7 +53,7 @@ jobs:
           ' CHANGELOG.md > CHANGELOG.tmp && mv CHANGELOG.tmp CHANGELOG.md
 
       - name: Commit updated CHANGELOG.md
-        uses: stefanzweifel/git-auto-commit-action@v5
+        uses: stefanzweifel/git-auto-commit-action@4a55954c782fc1ea30b9056cd3e7a2b40ca8887d # v7.2.0
         with:
           commit_message: "docs: update CHANGELOG.md for ${{ github.ref_name }}"
           file_pattern: CHANGELOG.md
@@ -61,7 +61,7 @@ jobs:
           commit_user_email: github-actions[bot]@users.noreply.github.com
 
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
         with:
           tag_name: ${{ github.ref_name }}
           name: Release ${{ github.ref_name }}

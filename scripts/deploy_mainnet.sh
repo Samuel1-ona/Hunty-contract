@@ -64,6 +64,9 @@ log "Admin  : $ADMIN_ADDRESS"
 log "RPC    : $RPC_URL"
 log "Signers: ${#SIGNERS[@]}"
 
+log "Validating config placeholders..."
+bash scripts/validate_placeholders.sh
+
 read -r -p "Confirm pre-deploy-checklist is complete? [yes/no] " CONFIRM
 [[ "$CONFIRM" == "yes" ]] || die "Aborted — complete the checklist first."
 

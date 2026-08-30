@@ -1,16 +1,41 @@
 import express from 'express';
+import rateLimit from 'express-rate-limit';
 import { MintRateLimiter } from './rateLimiter';
 import { MintRateLimitError } from './errors';
 import { loadConfig, publicConfig } from './config';
+import { createMintStore } from './mintStore';
 
 const app = express();
-app.use(express.json());
+app.use(express.json({ limit: '10kb' }));
+
+const globalLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 100,
+  standardHeaders: true,
+  legacyHeaders: false,
+
+});
+
+app.use('/mint', globalLimiter);
 
 const config = loadConfig();
-const limiter = new MintRateLimiter(config.rateLimit, config.adminSecret);
+
+let limiter: MintRateLimiter;
+
+async function bootstrap(): Promise<void> {
+  const store = await createMintStore(config.redisUrl);
+  limiter = new MintRateLimiter(config.rateLimit, config.adminSecret, store);
+
+  app.listen(config.port, () => {
+    console.log(
+      `Mint rate limiter API running on port ${config.port} (${config.environment}) with Redis-backed shared state`,
+    );
+  });
+}
 
 app.get('/health', (_req, res) => {
   res.json({ status: 'ok', ...publicConfig(config) });
+  
 });
 
 app.get('/environment', (_req, res) => {
@@ -30,15 +55,15 @@ app.get('/environment', (_req, res) => {
 </html>`);
 });
 
-app.post('/mint', (req, res) => {
+app.post('/mint', async (req, res) => {
   const { address } = req.body;
-  if (!address || typeof address !== 'string') {
-    res.status(400).json({ error: 'address is required' });
+  if (!address || typeof address !== 'string' || !/^G[A-Z2-7]{55}$/.test(address)) {
+    res.status(400).json({ error: 'invalid address' });
     return;
   }
   try {
-    limiter.mint(address);
-    res.json({ minted: true, mintsInWindow: limiter.getMintCount(address) });
+    await limiter.mint(address);
+    res.json({ minted: true, mintsInWindow: await limiter.getMintCount(address) });
   } catch (err) {
     if (err instanceof MintRateLimitError) {
       res.status(429).json({
@@ -51,8 +76,8 @@ app.post('/mint', (req, res) => {
   }
 });
 
-app.get('/mint/count/:address', (req, res) => {
-  const count = limiter.getMintCount(req.params.address);
+app.get('/mint/count/:address', async (req, res) => {
+  const count = await limiter.getMintCount(req.params.address);
   res.json({ address: req.params.address, mintsInWindow: count });
 });
 
@@ -67,7 +92,7 @@ app.get('/admin/config', (req, res) => {
 
 app.patch('/admin/config', (req, res) => {
   const secret = req.headers['x-admin-secret'] as string;
-  if (!secret) {
+  if (!secret || secret !== config.adminSecret) {
     res.status(403).json({ error: 'Unauthorized' });
     return;
   }
@@ -79,8 +104,17 @@ app.patch('/admin/config', (req, res) => {
   }
 });
 
-app.listen(config.port, () => {
-  console.log(`Mint rate limiter API running on port ${config.port} (${config.environment})`);
+app.use((err: Error, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
+  console.error(err);
+  res.status(500).json({ error: 'Internal server error' });
 });
 
-export { app, limiter, config };
+void bootstrap().catch((err) => {
+  console.error('Failed to start mint rate limiter API:', err);
+  process.exit(1);
+});
+
+export { app, config, limiter };
+export function getLimiter(): MintRateLimiter {
+  return limiter;
+}

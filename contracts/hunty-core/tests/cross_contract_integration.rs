@@ -969,3 +969,104 @@ fn test_cross_contract_call_failure_recovery() {
     let player_balance = token_client.balance(&player);
     assert!(player_balance > 0, "Player should receive XLM reward");
 }
+
+#[test]
+fn test_issue_833_cross_contract_nft_image_uri_verification() {
+    let env = Env::default();
+    env.ledger().set_timestamp(1_700_000_000);
+    env.mock_all_auths();
+
+    let creator = Address::generate(&env);
+    let player = Address::generate(&env);
+
+    let (core_id, reward_manager_id, nft_reward_id, token_address, admin) =
+        setup_environment(&env);
+
+    let expected_uri = String::from_str(&env, "ipfs://bafybeigdyrzt5sfp7udm7hu76uh7y26nf3efuylqabf3oclgtqy55fbzdi");
+
+    let hunt_id = as_core_contract(&env, &core_id, |env| {
+        let hunt_id = HuntyCore::create_hunt(
+            env.clone(),
+            creator.clone(),
+            String::from_str(env, "NFT URI Cross Contract Hunt"),
+            String::from_str(env, "Testing non-empty NFT image URI propagation"),
+            None,
+            None,
+            0,
+            None,
+        )
+        .unwrap();
+
+        HuntyCore::add_clue(
+            env.clone(),
+            hunt_id,
+            String::from_str(env, "Question"),
+            String::from_str(env, "Answer"),
+            10,
+            true,
+        )
+        .unwrap();
+
+        // Configure hunt with valid nft_image_uri
+        let mut hunt = hunty_core::Storage::get_hunt(env, hunt_id).unwrap();
+        hunt.reward_config = hunty_core::types::RewardConfig::new(
+            env,
+            0,
+            true, // nft_enabled
+            Some(nft_reward_id.clone()),
+            1,
+            0,
+            0,
+            Some(expected_uri.clone()),
+        );
+        hunty_core::Storage::save_hunt(env, &hunt);
+
+        HuntyCore::activate_hunt(env.clone(), hunt_id, creator.clone()).unwrap();
+        HuntyCore::set_reward_manager(env.clone(), admin.clone(), reward_manager_id.clone());
+
+        hunt_id
+    });
+
+    env.as_contract(&reward_manager_id, || {
+        RewardManager::create_reward_pool_with_nft(
+            env.clone(),
+            creator.clone(),
+            hunt_id,
+            token_address.clone(),
+            0,
+            Some(nft_reward_id.clone()),
+            0,
+            true,
+        )
+        .unwrap();
+    });
+
+    as_core_contract(&env, &core_id, |env| {
+        HuntyCore::register_player(env.clone(), hunt_id, player.clone()).unwrap();
+        HuntyCore::submit_answer(
+            env.clone(),
+            hunt_id,
+            player.clone(),
+            0,
+            String::from_str(env, "Answer"),
+        )
+        .unwrap();
+    });
+
+    // Complete hunt — triggers reward distribution and NFT mint
+    let result = as_core_contract(&env, &core_id, |env| {
+        HuntyCore::complete_hunt(env.clone(), hunt_id, player.clone())
+    });
+
+    assert!(result.is_ok(), "Hunt completion with valid NFT URI must succeed");
+
+    // Confirm resulting NFT has non-empty valid image URI matching configured URI
+    env.as_contract(&nft_reward_id, || {
+        let nft_count = NftReward::get_total_supply(env.clone());
+        assert_eq!(nft_count, 1, "One NFT should be minted");
+
+        let nft_metadata = NftReward::get_nft_metadata(env.clone(), 0).unwrap();
+        assert_eq!(nft_metadata.image_uri, expected_uri, "NFT image URI must match configured non-empty URI");
+    });
+}
+

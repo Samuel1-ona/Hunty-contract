@@ -12,6 +12,7 @@ export interface AppConfig {
   environment: AppEnvironment;
   port: number;
   adminSecret: string;
+  redisUrl: string;
   rateLimit: RateLimitConfig;
   stellar: {
     network: string;
@@ -53,6 +54,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     environment: environment as AppEnvironment,
     port: parsePositiveInteger(env, 'PORT'),
     adminSecret: requireEnv(env, 'ADMIN_SECRET'),
+    redisUrl: requireEnv(env, 'REDIS_URL'),
     rateLimit: {
       maxMints: parsePositiveInteger(env, 'MAX_MINTS'),
       windowMs: parsePositiveInteger(env, 'MINT_WINDOW_MS'),

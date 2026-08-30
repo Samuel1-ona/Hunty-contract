@@ -1,7 +1,8 @@
 use soroban_sdk::{symbol_short, Address, Env, Vec};
 
 use crate::types::{
-    DistributionRecord, PoolAuditEntry, PoolDistribution, ResolutionStatus, RewardPoolConfig,
+    DistributionProof, DistributionRecord, PoolAuditEntry, PoolDistribution, ResolutionStatus,
+    RewardPoolConfig, VestingRecord,
 };
 
 pub struct Storage;
@@ -10,6 +11,7 @@ pub struct Storage;
 impl Storage {
     // Shortened storage prefixes for reward-manager
     const ADMIN_KEY: soroban_sdk::Symbol = symbol_short!("ADMI");
+    const PENDING_ADMIN_KEY: soroban_sdk::Symbol = symbol_short!("PADMI");
     const XLM_TOKEN_KEY: soroban_sdk::Symbol = symbol_short!("X");
     const NFT_CONTRACT_KEY: soroban_sdk::Symbol = symbol_short!("NFTA");
     /// Ring-buffer capacity for the per-pool audit log.
@@ -30,6 +32,7 @@ impl Storage {
     const POOL_CFG_KEY: soroban_sdk::Symbol = symbol_short!("PCFG");
     const POOL_DEP_KEY: soroban_sdk::Symbol = symbol_short!("PDEP");
     const POOL_DST_KEY: soroban_sdk::Symbol = symbol_short!("PDST");
+    const POOL_RFD_KEY: soroban_sdk::Symbol = symbol_short!("PRFD");
     const POOL_DIST_COUNT_KEY: soroban_sdk::Symbol = symbol_short!("PDCNT");
     const POOL_LAST_DIST_TS_KEY: soroban_sdk::Symbol = symbol_short!("PLDTS");
     const POOL_DISTRIBUTIONS_KEY: soroban_sdk::Symbol = symbol_short!("PLDIST");
@@ -40,8 +43,21 @@ impl Storage {
     const AUDIT_COUNT_KEY: soroban_sdk::Symbol = symbol_short!("AUDC");
     const AUDIT_LOG_KEY: soroban_sdk::Symbol = symbol_short!("AUDL");
     const PAUSED_KEY: soroban_sdk::Symbol = symbol_short!("PAUSE");
+    // Granular pause flags (issue #628), mirroring the per-operation pauses
+    // hunty-core already exposes. The global PAUSED_KEY above still overrides
+    // both, so an emergency stop remains a single call.
+    const PAUSE_FUNDING_KEY: soroban_sdk::Symbol = symbol_short!("PAUSE_FD");
+    const PAUSE_DIST_KEY: soroban_sdk::Symbol = symbol_short!("PAUSE_DS");
     const EMERGENCY_LOG_KEY: soroban_sdk::Symbol = symbol_short!("EMLOG");
-    const PENDING_NFT_KEY: soroban_sdk::Symbol = symbol_short!("PNFT");
+    /// List of distinct addresses that have funded a pool and not yet been refunded.
+    const POOL_FUNDERS_KEY: soroban_sdk::Symbol = symbol_short!("PFNDRS");
+    /// Per-(hunt_id, funder) cumulative amount contributed and not yet refunded.
+    const POOL_FUNDER_CONTRIB_KEY: soroban_sdk::Symbol = symbol_short!("PFCONT");
+
+    pub const PENDING_NFT_KEY: soroban_sdk::Symbol = symbol_short!("PNFT");
+
+    // ========== Vesting ==========
+    const VESTING_KEY: soroban_sdk::Symbol = symbol_short!("VEST");
 
     // ========== Admin ==========
 
@@ -51,6 +67,20 @@ impl Storage {
 
     pub fn get_admin(env: &Env) -> Option<Address> {
         env.storage().persistent().get(&Self::ADMIN_KEY)
+    }
+
+    pub fn set_pending_admin(env: &Env, address: &Address) {
+        env.storage()
+            .persistent()
+            .set(&Self::PENDING_ADMIN_KEY, address);
+    }
+
+    pub fn get_pending_admin(env: &Env) -> Option<Address> {
+        env.storage().persistent().get(&Self::PENDING_ADMIN_KEY)
+    }
+
+    pub fn clear_pending_admin(env: &Env) {
+        env.storage().persistent().remove(&Self::PENDING_ADMIN_KEY);
     }
 
     // ========== XLM Token Address ==========
@@ -179,17 +209,6 @@ impl Storage {
             }
         }
         result
-    }
-
-    /// Returns the total count of distributions for a pool.
-    pub fn get_pool_distribution_count(env: &Env, hunt_id: u64) -> u32 {
-        let key = Self::pool_distributions_key(hunt_id);
-        let distributions: Vec<PoolDistribution> = env
-            .storage()
-            .persistent()
-            .get(&key)
-            .unwrap_or_else(|| Vec::new(env));
-        distributions.len()
     }
 
     fn distribution_record_key(
@@ -321,6 +340,16 @@ impl Storage {
 
     pub fn get_pool_total_distributed(env: &Env, hunt_id: u64) -> i128 {
         let key = Self::pool_dst_key(hunt_id);
+        env.storage().persistent().get(&key).unwrap_or(0)
+    }
+
+    pub fn set_pool_total_refunded(env: &Env, hunt_id: u64, amount: i128) {
+        let key = Self::pool_rfd_key(hunt_id);
+        env.storage().persistent().set(&key, &amount);
+    }
+
+    pub fn get_pool_total_refunded(env: &Env, hunt_id: u64) -> i128 {
+        let key = Self::pool_rfd_key(hunt_id);
         env.storage().persistent().get(&key).unwrap_or(0)
     }
 
@@ -481,8 +510,62 @@ impl Storage {
         (Self::POOL_DST_KEY, hunt_id)
     }
 
+    fn pool_rfd_key(hunt_id: u64) -> (soroban_sdk::Symbol, u64) {
+        (Self::POOL_RFD_KEY, hunt_id)
+    }
+
     fn pool_distributions_key(hunt_id: u64) -> (soroban_sdk::Symbol, u64) {
         (Self::POOL_DISTRIBUTIONS_KEY, hunt_id)
+    }
+
+    // ========== Pool Funders (sponsorship tracking) ==========
+
+    /// Returns the distinct addresses that have funded a pool and have not yet
+    /// been refunded, in the order they first contributed.
+    pub fn get_pool_funders(env: &Env, hunt_id: u64) -> Vec<Address> {
+        let key = Self::pool_funders_key(hunt_id);
+        env.storage()
+            .persistent()
+            .get(&key)
+            .unwrap_or_else(|| Vec::new(env))
+    }
+
+    pub fn set_pool_funders(env: &Env, hunt_id: u64, funders: &Vec<Address>) {
+        let key = Self::pool_funders_key(hunt_id);
+        env.storage().persistent().set(&key, funders);
+    }
+
+    pub fn remove_pool_funders(env: &Env, hunt_id: u64) {
+        let key = Self::pool_funders_key(hunt_id);
+        env.storage().persistent().remove(&key);
+    }
+
+    /// Cumulative amount `funder` has contributed to a pool that has not yet
+    /// been refunded. 0 if they have never funded it or were already refunded.
+    pub fn get_pool_funder_contribution(env: &Env, hunt_id: u64, funder: &Address) -> i128 {
+        let key = Self::pool_funder_contribution_key(hunt_id, funder);
+        env.storage().persistent().get(&key).unwrap_or(0)
+    }
+
+    pub fn set_pool_funder_contribution(env: &Env, hunt_id: u64, funder: &Address, amount: i128) {
+        let key = Self::pool_funder_contribution_key(hunt_id, funder);
+        env.storage().persistent().set(&key, &amount);
+    }
+
+    pub fn remove_pool_funder_contribution(env: &Env, hunt_id: u64, funder: &Address) {
+        let key = Self::pool_funder_contribution_key(hunt_id, funder);
+        env.storage().persistent().remove(&key);
+    }
+
+    fn pool_funders_key(hunt_id: u64) -> (soroban_sdk::Symbol, u64) {
+        (Self::POOL_FUNDERS_KEY, hunt_id)
+    }
+
+    fn pool_funder_contribution_key(
+        hunt_id: u64,
+        funder: &Address,
+    ) -> (soroban_sdk::Symbol, u64, Address) {
+        (Self::POOL_FUNDER_CONTRIB_KEY, hunt_id, funder.clone())
     }
 
     // ========== Audit Log ==========
@@ -525,6 +608,59 @@ impl Storage {
             .instance()
             .get(&Self::PAUSED_KEY)
             .unwrap_or(false)
+    }
+
+    // ---- Granular pause flags (issue #628) ----
+    //
+    // `hunty-core` can pause registrations, answers and rewards independently.
+    // reward-manager had a single flag, so stopping a suspect distribution also
+    // stopped creators topping their pools up. These split the two halves.
+
+    pub fn set_funding_paused(env: &Env, paused: bool) {
+        env.storage()
+            .instance()
+            .set(&Self::PAUSE_FUNDING_KEY, &paused);
+    }
+
+    /// True when funding is blocked, either by its own flag or by the global stop.
+    pub fn is_funding_paused(env: &Env) -> bool {
+        Self::is_paused(env)
+            || env
+                .storage()
+                .instance()
+                .get(&Self::PAUSE_FUNDING_KEY)
+                .unwrap_or(false)
+    }
+
+    pub fn set_distribution_paused(env: &Env, paused: bool) {
+        env.storage().instance().set(&Self::PAUSE_DIST_KEY, &paused);
+    }
+
+    /// True when distribution is blocked, either by its own flag or by the
+    /// global stop.
+    pub fn is_distribution_paused(env: &Env) -> bool {
+        Self::is_paused(env)
+            || env
+                .storage()
+                .instance()
+                .get(&Self::PAUSE_DIST_KEY)
+                .unwrap_or(false)
+    }
+
+    /// The two granular flags on their own, ignoring the global stop. Used by
+    /// `get_pause_state` so an operator can tell a granular pause apart from an
+    /// emergency stop.
+    pub fn raw_pause_flags(env: &Env) -> (bool, bool) {
+        (
+            env.storage()
+                .instance()
+                .get(&Self::PAUSE_FUNDING_KEY)
+                .unwrap_or(false),
+            env.storage()
+                .instance()
+                .get(&Self::PAUSE_DIST_KEY)
+                .unwrap_or(false),
+        )
     }
 
     pub fn log_emergency_withdrawal(env: &Env, log_entry: &crate::EmergencyWithdrawalLogEntry) {
@@ -576,8 +712,28 @@ impl Storage {
         env.storage().persistent().remove(&key);
     }
 
-    fn pending_nft_key(hunt_id: u64, player: &Address) -> (soroban_sdk::Symbol, u64, Address) {
+    pub fn pending_nft_key(hunt_id: u64, player: &Address) -> (soroban_sdk::Symbol, u64, Address) {
         (Self::PENDING_NFT_KEY, hunt_id, player.clone())
+    }
+
+    // ========== Vesting Records ==========
+
+    /// Stores a vesting record for a (hunt_id, player) pair.
+    /// Called at distribution time when vesting_period_secs > 0.
+    pub fn set_vesting_record(env: &Env, hunt_id: u64, player: &Address, record: &VestingRecord) {
+        let key = Self::vesting_key(hunt_id, player);
+        env.storage().persistent().set(&key, record);
+    }
+
+    /// Returns the vesting record for a (hunt_id, player) pair, or None if it
+    /// does not exist (i.e. no vesting is pending for this player).
+    pub fn get_vesting_record(env: &Env, hunt_id: u64, player: &Address) -> Option<VestingRecord> {
+        let key = Self::vesting_key(hunt_id, player);
+        env.storage().persistent().get(&key)
+    }
+
+    fn vesting_key(hunt_id: u64, player: &Address) -> (soroban_sdk::Symbol, u64, Address) {
+        (Self::VESTING_KEY, hunt_id, player.clone())
     }
 
     // --- Contract version ---

@@ -23,7 +23,7 @@
                   "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAITA4"
                 },
                 {
-                  "string": "Updated desc"
+                  "string": "Updated description"
                 },
                 {
                   "string": "ipfs://new"
@@ -558,7 +558,7 @@
                         "symbol": "transferable"
                       },
                       "val": {
-                        "bool": false
+                        "bool": true
                       }
                     }
                   ]
@@ -663,7 +663,7 @@
                         "symbol": "description"
                       },
                       "val": {
-                        "string": "Updated desc"
+                        "string": "Updated description"
                       }
                     },
                     {
@@ -903,6 +903,45 @@
                         },
                         "val": {
                           "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4"
+                        }
+                      },
+                      {
+                        "key": {
+                          "symbol": "COLL"
+                        },
+                        "val": {
+                          "map": [
+                            {
+                              "key": {
+                                "symbol": "creator"
+                              },
+                              "val": "void"
+                            },
+                            {
+                              "key": {
+                                "symbol": "description"
+                              },
+                              "val": {
+                                "string": "Reward NFTs for completed hunts"
+                              }
+                            },
+                            {
+                              "key": {
+                                "symbol": "name"
+                              },
+                              "val": {
+                                "string": "Hunty Rewards"
+                              }
+                            },
+                            {
+                              "key": {
+                                "symbol": "total_supply"
+                              },
+                              "val": {
+                                "u64": 1
+                              }
+                            }
+                          ]
                         }
                       },
                       {

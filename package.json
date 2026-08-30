@@ -1,7 +1,13 @@
 {
-  "name": "dripswave-mint-rate-limiter",
+  "name": "hunty-contract",
   "version": "1.0.0",
   "description": "Rate limiter for NFT minting per address",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Samuel1-ona/Hunty-contract.git"
+  },
+  "private": true,
   "main": "dist/index.js",
   "scripts": {
     "build": "tsc",
@@ -20,13 +26,15 @@
     "lint": "tsc --noEmit"
   },
   "dependencies": {
-    "express": "^4.18.2"
+    "express": "^5.2.1",
+    "redis": "^6.2.1"
   },
   "devDependencies": {
-    "@types/express": "^4.17.21",
-    "@types/node": "^20.10.0",
-    "tsx": "^4.6.2",
-    "typescript": "^5.3.2",
-    "vitest": "^1.1.0"
+    "@types/express": "^5.0.6",
+    "@types/express-rate-limit": "^6.0.2",
+    "@types/node": "^26.2.0",
+    "tsx": "^4.23.12",
+    "typescript": "^7.0.2",
+    "vitest": "^4.1.11"
   }
 }

@@ -40,6 +40,9 @@ mkdir -p "$DEPLOY_DIR"
 # ── Step 1: Set up deployer keys ─────────────────────────────────────────────
 log "=== Hunty Testnet Deployment ==="
 
+log "Validating config placeholders..."
+bash scripts/validate_placeholders.sh
+
 # Check if deployer key exists, if not generate it (which automatically funds it)
 if ! stellar keys address deployer &>/dev/null; then
   log "Generating and funding testnet deployer key..."

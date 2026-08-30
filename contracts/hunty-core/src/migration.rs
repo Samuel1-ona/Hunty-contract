@@ -1,6 +1,6 @@
 use crate::storage::Storage;
 use hunty_migration::{
-    MigrationFramework, UpgradeAuthorization, UpgradeAuthError, UpgradeExecutedEvent,
+    MigrationFramework, UpgradeAuthError, UpgradeAuthorization, UpgradeExecutedEvent,
     UpgradeHistoryEntry, UpgradeProposal, UpgradeProposedEvent,
 };
 use soroban_sdk::{Address, Env, Symbol};
@@ -10,6 +10,9 @@ pub use hunty_migration::MigrationReport;
 /// Per-contract migration steps for HuntyCore storage layouts.
 pub struct HuntyCoreMigration;
 
+// Upgrade lifecycle helpers are exercised by the migration framework and
+// integration tests rather than this crate's entry points.
+#[allow(dead_code)]
 impl HuntyCoreMigration {
     pub fn get_schema_version(env: &Env) -> u32 {
         MigrationFramework::detect_version(env)
@@ -27,7 +30,11 @@ impl HuntyCoreMigration {
         admin: &Address,
         target_version: u32,
     ) -> Result<UpgradeProposal, UpgradeAuthError> {
-        UpgradeAuthorization::require_admin(env, admin, UpgradeAuthorization::get_upgrade_admin(env))?;
+        UpgradeAuthorization::require_admin(
+            env,
+            admin,
+            UpgradeAuthorization::get_upgrade_admin(env),
+        )?;
         let now = env.ledger().timestamp();
         let proposal = UpgradeAuthorization::propose_upgrade(env, admin, target_version, now);
         Ok(proposal)
@@ -38,7 +45,11 @@ impl HuntyCoreMigration {
         admin: &Address,
         delay_seconds: u64,
     ) -> Result<(), UpgradeAuthError> {
-        UpgradeAuthorization::require_admin(env, admin, UpgradeAuthorization::get_upgrade_admin(env))?;
+        UpgradeAuthorization::require_admin(
+            env,
+            admin,
+            UpgradeAuthorization::get_upgrade_admin(env),
+        )?;
         UpgradeAuthorization::set_timelock_seconds(env, delay_seconds);
         Ok(())
     }
@@ -51,7 +62,11 @@ impl HuntyCoreMigration {
         UpgradeAuthorization::get_timelock_seconds(env)
     }
 
-    pub fn get_upgrade_history(env: &Env, offset: u32, limit: u32) -> soroban_sdk::Vec<UpgradeHistoryEntry> {
+    pub fn get_upgrade_history(
+        env: &Env,
+        offset: u32,
+        limit: u32,
+    ) -> soroban_sdk::Vec<UpgradeHistoryEntry> {
         UpgradeAuthorization::get_history(env, offset, limit)
     }
 
@@ -100,12 +115,10 @@ impl HuntyCoreMigration {
                     }
                     current = 1;
                 }
-                1 => {
-                    if !dry_run {
-                        Self::migrate_v1_to_v2(env);
-                    }
-                    current = 2;
-                }
+                // v1 -> v2: not yet implemented.
+                // Add the arm here (and the migrate_v1_to_v2 fn below) once
+                // the new storage layout is defined. Until then the `_ =>`
+                // catchall correctly refuses to bump the version counter.
                 2 => {
                     if !dry_run {
                         Self::migrate_v2_to_v3(env);
@@ -149,9 +162,17 @@ impl HuntyCoreMigration {
     }
 
     /// Restores the schema version saved before the last migration.
-    pub fn rollback_migration(env: &Env, admin: &Address) -> Result<MigrationReport, UpgradeAuthError> {
-        UpgradeAuthorization::require_admin(env, admin, UpgradeAuthorization::get_upgrade_admin(env))?;
-        let previous = MigrationFramework::rollback_version(env).ok_or(UpgradeAuthError::NoProposal)?;
+    pub fn rollback_migration(
+        env: &Env,
+        admin: &Address,
+    ) -> Result<MigrationReport, UpgradeAuthError> {
+        UpgradeAuthorization::require_admin(
+            env,
+            admin,
+            UpgradeAuthorization::get_upgrade_admin(env),
+        )?;
+        let previous =
+            MigrationFramework::rollback_version(env).ok_or(UpgradeAuthError::NoProposal)?;
         let current = MigrationFramework::detect_version(env);
         MigrationFramework::set_version(env, previous);
         MigrationFramework::clear_rollback(env);
@@ -210,8 +231,13 @@ impl HuntyCoreMigration {
         }
     }
 
-    /// v1 -> v2: placeholder for future layout changes (no-op for now).
-    fn migrate_v1_to_v2(_env: &Env) {}
+    // v1 -> v2: NOT YET IMPLEMENTED.
+    // Define migrate_v1_to_v2(env: &Env) here and add the corresponding
+    // `1 => { ... current = 2; }` arm to run_migration once the new
+    // storage layout and transformation logic are ready.
+    // Until then this step intentionally does not exist so run_migration
+    // rejects any attempt to target version 2 (or higher) rather than
+    // silently bumping the stored schema counter without touching any data.
 
     /// v2 -> v3: populate required clue IDs list for on-demand clue loading.
     /// Iterates all hunts and saves the list of required clue IDs in separate storage,
@@ -231,13 +257,14 @@ impl HuntyCoreMigration {
             let all_clues = Storage::list_clues_for_hunt(env, hunt_id, 0, clue_count);
             let mut required_ids: Vec<u32> = Vec::new(env);
             for i in 0..all_clues.len() {
+                // SAFETY: i is in [0, all_clues.len()) — loop bound guarantees existence
                 let clue = all_clues.get(i).unwrap();
                 if clue.is_required {
                     required_ids.push_back(clue.clue_id);
                 }
             }
             // Only save if there are required clues to avoid unnecessary storage writes
-            if required_ids.len() > 0 {
+            if !required_ids.is_empty() {
                 Storage::set_required_clues(env, hunt_id, &required_ids);
             }
         }
@@ -256,6 +283,7 @@ impl HuntyCoreMigration {
             }
             let all_clues = Storage::list_clues_for_hunt(env, hunt_id, 0, clue_count);
             for i in 0..all_clues.len() {
+                // SAFETY: i is in [0, all_clues.len()) — loop bound guarantees existence
                 let clue = all_clues.get(i).unwrap();
                 Storage::save_clue(env, hunt_id, &clue);
             }

@@ -1,13 +1,18 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { MintRateLimiter } from './rateLimiter';
 import { MintRateLimitError } from './errors';
+import { MemoryMintStore } from './mintStore';
 
 describe('MintRateLimiter', () => {
   let limiter: MintRateLimiter;
 
   beforeEach(() => {
     vi.useFakeTimers();
-    limiter = new MintRateLimiter({ maxMints: 3, windowMs: 60_000 }, 'secret');
+    limiter = new MintRateLimiter(
+      { maxMints: 3, windowMs: 60_000 },
+      'secret',
+      new MemoryMintStore(),
+    );
   });
 
   afterEach(() => {
@@ -15,24 +20,25 @@ describe('MintRateLimiter', () => {
   });
 
   describe('mint', () => {
-    it('allows minting within the limit', () => {
-      limiter.mint('addr1');
-      expect(limiter.getMintCount('addr1')).toBe(1);
+    it('allows minting within the limit', async () => {
+      await limiter.mint('addr1');
+      expect(await limiter.getMintCount('addr1')).toBe(1);
     });
 
-    it('blocks minting when limit is exceeded', () => {
-      limiter.mint('addr1');
-      limiter.mint('addr1');
-      limiter.mint('addr1');
-      expect(() => limiter.mint('addr1')).toThrow(MintRateLimitError);
+    it('blocks minting when limit is exceeded', async () => {
+      await limiter.mint('addr1');
+      await limiter.mint('addr1');
+      await limiter.mint('addr1');
+      await expect(limiter.mint('addr1')).rejects.toThrow(MintRateLimitError);
     });
 
-    it('returns cooldown time in the error', () => {
-      limiter.mint('addr1');
-      limiter.mint('addr1');
-      limiter.mint('addr1');
+    it('returns cooldown time in the error', async () => {
+      await limiter.mint('addr1');
+      await limiter.mint('addr1');
+      await limiter.mint('addr1');
       try {
-        limiter.mint('addr1');
+        await limiter.mint('addr1');
+        expect.fail('expected MintRateLimitError');
       } catch (err) {
         expect(err).toBeInstanceOf(MintRateLimitError);
         const typed = err as MintRateLimitError;
@@ -42,46 +48,59 @@ describe('MintRateLimiter', () => {
       }
     });
 
-    it('allows minting again after the window expires', () => {
-      limiter.mint('addr1');
-      limiter.mint('addr1');
-      limiter.mint('addr1');
-      expect(() => limiter.mint('addr1')).toThrow(MintRateLimitError);
+    it('allows minting again after the window expires', async () => {
+      await limiter.mint('addr1');
+      await limiter.mint('addr1');
+      await limiter.mint('addr1');
+      await expect(limiter.mint('addr1')).rejects.toThrow(MintRateLimitError);
       vi.advanceTimersByTime(60_001);
-      expect(() => limiter.mint('addr1')).not.toThrow();
-      expect(limiter.getMintCount('addr1')).toBe(1);
+      await expect(limiter.mint('addr1')).resolves.toBeUndefined();
+      expect(await limiter.getMintCount('addr1')).toBe(1);
     });
   });
 
   describe('per-address tracking', () => {
-    it('tracks mints independently per address', () => {
-      limiter.mint('addr1');
-      limiter.mint('addr1');
-      limiter.mint('addr2');
-      expect(limiter.getMintCount('addr1')).toBe(2);
-      expect(limiter.getMintCount('addr2')).toBe(1);
+    it('tracks mints independently per address', async () => {
+      await limiter.mint('addr1');
+      await limiter.mint('addr1');
+      await limiter.mint('addr2');
+      expect(await limiter.getMintCount('addr1')).toBe(2);
+      expect(await limiter.getMintCount('addr2')).toBe(1);
     });
 
-    it('allows different addresses to mint independently', () => {
-      limiter.mint('addr1');
-      limiter.mint('addr1');
-      limiter.mint('addr1');
-      expect(() => limiter.mint('addr2')).not.toThrow();
+    it('allows different addresses to mint independently', async () => {
+      await limiter.mint('addr1');
+      await limiter.mint('addr1');
+      await limiter.mint('addr1');
+      await expect(limiter.mint('addr2')).resolves.toBeUndefined();
     });
   });
 
   describe('getMintCount', () => {
-    it('returns 0 for addresses with no mints', () => {
-      expect(limiter.getMintCount('unknown')).toBe(0);
+    it('returns 0 for addresses with no mints', async () => {
+      expect(await limiter.getMintCount('unknown')).toBe(0);
     });
 
-    it('only counts mints within the current window', () => {
-      limiter.mint('addr1');
+    it('only counts mints within the current window', async () => {
+      await limiter.mint('addr1');
       vi.advanceTimersByTime(30_000);
-      limiter.mint('addr1');
-      expect(limiter.getMintCount('addr1')).toBe(2);
+      await limiter.mint('addr1');
+      expect(await limiter.getMintCount('addr1')).toBe(2);
       vi.advanceTimersByTime(31_000);
-      expect(limiter.getMintCount('addr1')).toBe(1);
+      expect(await limiter.getMintCount('addr1')).toBe(1);
+    });
+  });
+
+  describe('shared store', () => {
+    it('shares mint history across limiter instances using the same store', async () => {
+      const shared = new MemoryMintStore();
+      const a = new MintRateLimiter({ maxMints: 2, windowMs: 60_000 }, 'secret', shared);
+      const b = new MintRateLimiter({ maxMints: 2, windowMs: 60_000 }, 'secret', shared);
+
+      await a.mint('addr1');
+      await a.mint('addr1');
+      await expect(b.mint('addr1')).rejects.toThrow(MintRateLimitError);
+      expect(await b.getMintCount('addr1')).toBe(2);
     });
   });
 
@@ -112,13 +131,49 @@ describe('MintRateLimiter', () => {
       expect(() => limiter.updateConfig({ windowMs: 500 }, 'secret')).toThrow('windowMs must be at least 1000');
     });
 
-    it('applies updated limits immediately', () => {
-      limiter.mint('addr1');
-      limiter.mint('addr1');
-      limiter.mint('addr1');
-      expect(() => limiter.mint('addr1')).toThrow(MintRateLimitError);
+    it('applies updated limits immediately', async () => {
+      await limiter.mint('addr1');
+      await limiter.mint('addr1');
+      await limiter.mint('addr1');
+      await expect(limiter.mint('addr1')).rejects.toThrow(MintRateLimitError);
       limiter.updateConfig({ maxMints: 5 }, 'secret');
-      expect(() => limiter.mint('addr1')).not.toThrow();
+      await expect(limiter.mint('addr1')).resolves.toBeUndefined();
+    });
+  });
+
+  describe('memory cleanup', () => {
+    it('removes stale records after window expires', async () => {
+      await limiter.mint('addr1');
+      await limiter.mint('addr2');
+      await limiter.mint('addr3');
+      expect(await limiter.getMintCount('addr1')).toBe(1);
+      expect(await limiter.getMintCount('addr2')).toBe(1);
+      expect(await limiter.getMintCount('addr3')).toBe(1);
+      
+      // Advance time past the window
+      vi.advanceTimersByTime(60_001);
+      
+      // Trigger cleanup by minting a new address
+      await limiter.mint('addr4');
+      
+      // Old addresses should now return 0 (records were cleaned up)
+      expect(await limiter.getMintCount('addr1')).toBe(0);
+      expect(await limiter.getMintCount('addr2')).toBe(0);
+      expect(await limiter.getMintCount('addr3')).toBe(0);
+      expect(await limiter.getMintCount('addr4')).toBe(1);
+    });
+
+    it('cleans up records with some expired timestamps', async () => {
+      await limiter.mint('addr1');
+      vi.advanceTimersByTime(30_000);
+      await limiter.mint('addr1');
+      vi.advanceTimersByTime(31_000);
+      
+      // Trigger cleanup
+      await limiter.mint('addr2');
+      
+      // addr1 should have only the recent timestamp
+      expect(await limiter.getMintCount('addr1')).toBe(1);
     });
   });
 });

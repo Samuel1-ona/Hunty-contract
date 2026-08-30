@@ -42,13 +42,6 @@ impl Monitoring {
         }
     }
 
-    #[allow(dead_code)]
-    pub fn record_large_withdrawal(env: &Env, amount: i128) {
-        if amount > 1_000_000_000 {
-            Self::raise_alert(env, "large_withdrawal");
-        }
-    }
-
     fn raise_alert(env: &Env, _kind: &str) {
         let alerts: u32 = env.storage().instance().get(&ALERTS_KEY).unwrap_or(0);
         env.storage().instance().set(&ALERTS_KEY, &(alerts + 1));

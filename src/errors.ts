@@ -5,5 +5,6 @@ export class MintRateLimitError extends Error {
     super(`Rate limit exceeded. Try again in ${Math.ceil(cooldownMs / 1000)} seconds.`);
     this.name = 'MintRateLimitError';
     this.cooldownMs = cooldownMs;
+    
   }
 }

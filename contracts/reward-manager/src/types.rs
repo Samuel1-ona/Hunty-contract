@@ -93,8 +93,14 @@ pub struct DistributionRecord {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct RewardPoolConfig {
     /// Address of the hunt creator who owns this pool.
-    /// Only the creator is authorized to fund it.
+    /// Anyone may fund the pool (see `fund_reward_pool`); the creator is the
+    /// only address authorized to manage its configuration and to trigger
+    /// `refund_pool`, which pays out the remaining balance pro rata across
+    /// every address that funded it.
     pub creator: Address,
+    /// Addresses allowed to distribute rewards for this pool.
+    /// Only the creator can manage this list.
+    pub delegates: Vec<Address>,
     /// Minimum XLM amount per distribution. 0 means no minimum enforced.
     pub min_distribution_amount: i128,
     /// Optional time-based reward tiers. When empty, the per-winner amount
@@ -116,6 +122,19 @@ pub struct RewardPoolConfig {
     pub min_distribution_interval_secs: u64,
     /// Distribution mode (Fixed or Proportional).
     pub distribution_mode: DistributionMode,
+    /// Optional vesting period in seconds. When > 0, XLM rewards are not
+    /// transferred immediately at distribution time. Instead, a `VestingRecord`
+    /// is created and the player must call `claim_vested` to receive tokens
+    /// proportionally as time elapses. 0 means vesting is disabled (instant payout).
+    pub vesting_period_secs: u64,
+    /// Unix timestamp after which claims are no longer allowed (0 = disabled).
+    pub claim_deadline: u64,
+    /// Creator royalty basis points (0-10000) for NFT secondary market sales.
+    /// Only applied when minting reward NFTs from this pool.
+    pub nft_royalty_bps: u32,
+    /// Whether reward NFTs minted from this pool are transferable.
+    /// If false, NFTs are soulbound to the initial recipient.
+    pub nft_transferable: bool,
 }
 
 /// Full status of a reward pool, returned by get_reward_pool().
@@ -149,6 +168,9 @@ pub struct PendingNftMint {
     pub nft_hunt_title: soroban_sdk::String,
     pub nft_rarity: u32,
     pub nft_tier: u32,
+    /// Frozen completion rank from hunty-core; preserved so a retry emits the
+    /// same rank that would have been recorded on the first attempt.
+    pub completion_rank: u32,
 }
 
 /// Result of a pool validation check, returned by validate_pool().
@@ -176,9 +198,9 @@ pub enum PoolOperation {
     Unfreeze,
     /// Unused balance was migrated out to (or into) another hunt's pool.
     Migrate,
+    /// Pool balance was refunded to the pool creator.
+    Refund,
 }
-
-/// Resolution status for admin-resolved distributions.
 
 /// Comprehensive statistics for a reward pool, returned by get_pool_statistics().
 #[contracttype]
@@ -227,4 +249,62 @@ pub struct PoolDistribution {
     pub xlm_amount: i128,
     pub nft_id: Option<u64>,
     pub timestamp: u64,
+}
+
+/// On-chain storage record for a time-locked vesting reward.
+///
+/// Created by `distribute_rewards` when `vesting_period_secs > 0`.
+/// Tokens are NOT transferred immediately; the player must call
+/// `claim_vested` to receive their proportional share as time elapses.
+#[contracttype]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct VestingRecord {
+    /// Ledger timestamp when vesting began (i.e. when distribute_rewards was called).
+    pub start_time: u64,
+    /// Total XLM amount (in stroops) locked in this vesting schedule.
+    pub total_amount: i128,
+    /// Cumulative XLM amount already claimed by the player.
+    pub claimed_amount: i128,
+    /// Vesting period in seconds (copied from the pool config at distribution time).
+    pub vesting_period_secs: u64,
+}
+
+/// Read-only view of a player's vesting status for a specific hunt.
+/// Returned by `get_vesting_status`.
+#[contracttype]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct VestingStatus {
+    /// Ledger timestamp when vesting began.
+    pub start_time: u64,
+    /// Full vesting duration in seconds.
+    pub vesting_period_secs: u64,
+    /// Total XLM locked under this schedule.
+    pub total_amount: i128,
+    /// Cumulative XLM already claimed.
+    pub claimed_amount: i128,
+    /// XLM that has vested so far: `total_amount * min(elapsed / vesting_period_secs, 1)`.
+    pub vested_amount: i128,
+    /// XLM available to claim right now: `vested_amount - claimed_amount`.
+    pub claimable_amount: i128,
+    /// True once `claimed_amount >= total_amount`.
+    pub fully_vested: bool,
+}
+
+/// Statistical summary of distributions across a reward pool,
+/// returned by get_distribution_analytics().
+#[contracttype]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct DistributionAnalytics {
+    /// Number of distributions included in the analytics window.
+    pub count: u64,
+    /// Total XLM distributed in the analytics window (stroops).
+    pub total: i128,
+    /// Average (mean) XLM amount per distribution (stroops). 0 if count is 0.
+    pub average: i128,
+    /// Median XLM amount across distributions (stroops). 0 if count is 0.
+    pub median: i128,
+    /// Minimum XLM amount in a single distribution (stroops). 0 if count is 0.
+    pub min: i128,
+    /// Maximum XLM amount in a single distribution (stroops). 0 if count is 0.
+    pub max: i128,
 }
