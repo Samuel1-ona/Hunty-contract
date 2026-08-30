@@ -49,6 +49,8 @@ const DEFAULT_PAGE_SIZE: u32 = 20;
 pub(crate) const ANSWER_SUBMISSION_WINDOW_SECS: u64 = 300;
 /// Small forward-skew allowance so near-simultaneous signing and inclusion does not fail.
 const ANSWER_SUBMISSION_FUTURE_SKEW_SECS: u64 = 30;
+/// Minimum allowed duration between hunt creation and a non-zero end time (ledger seconds).
+pub(crate) const MIN_HUNT_DURATION: u64 = 3600;
 /// Maximum number of members allowed in a team.
 #[allow(dead_code)]
 const MAX_TEAM_SIZE: u32 = 10;
@@ -166,6 +168,11 @@ impl HuntyCore {
         let current_time = env.ledger().timestamp();
         rate_limit::RateLimiter::check_and_increment(&env, &creator, current_time)?;
 
+        let end_time_val = end_time.unwrap_or(0);
+        if end_time_val != 0 && end_time_val < current_time.saturating_add(MIN_HUNT_DURATION) {
+            return Err(HuntErrorCode::HuntEndTimeInPast);
+        }
+
         // Generate unique hunt ID
         let hunt_id = Storage::next_hunt_id(&env);
 
@@ -193,7 +200,7 @@ impl HuntyCore {
             created_at: current_time,
             activated_at: 0, // Will be set when hunt is activated
             start_time: start_time.unwrap_or(0),
-            end_time: end_time.unwrap_or(0),
+            end_time: end_time_val,
             reward_config,
             time_bonus_start_bps: None,
             time_bonus_min_bps: None,
