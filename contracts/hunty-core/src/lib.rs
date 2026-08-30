@@ -1,3 +1,6 @@
+#![no_std]
+#![allow(clippy::too_many_arguments)]
+
 mod errors;
 mod migration;
 mod monitoring;
@@ -6,16 +9,14 @@ mod sanitization;
 mod storage;
 pub mod types;
 
-#![no_std]
-#![allow(clippy::too_many_arguments)]
 use crate::errors::{HuntError, HuntErrorCode};
 use crate::storage::Storage;
 use crate::types::{
     AnswerIncorrectEvent, AnswerPreviewedEvent, BatchClueInput, Clue, ClueAddedEvent, ClueAliasesAddedEvent,
-    ClueCompletedEvent, ClueInfo, CreatorBlacklistedEvent, CreatorRemovedFromBlacklistEvent, Hunt,
+    ClueCompletedEvent, ClueInfo, CreatorBlacklistedEvent, CreatorRemovedFromBlacklistEvent, GcReport, Hunt,
     HuntActivatedEvent, HuntArchivedEvent, HuntCache, HuntCancelledEvent, HuntClonedEvent,
     HuntClosedEvent, HuntCompletedEvent, HuntCreatedEvent, HuntDeactivatedEvent,
-    HuntDescriptionUpdatedEvent, HuntReactivatedEvent, HuntStatistics, HuntStatus,
+    HuntDescriptionUpdatedEvent, HuntGarbageCollectedEvent, HuntReactivatedEvent, HuntStatistics, HuntStatus,
     HuntStatusChangedEvent, InviteCodeGeneratedEvent, InviteCodeRevokedEvent, LeaderboardEntry,
     LeaderboardIndexEntry, LeaderboardResult, PlayerProgress, PlayerRegisteredEvent,
     PlayerRegisteredWithInviteEvent, RewardClaimedEvent, RewardConfig, RewardManagerSetEvent,
@@ -176,6 +177,7 @@ impl HuntyCore {
             0,     // max_winners: 0 initially
             0,     // nft_rarity: zero initially
             0,     // nft_tier: zero initially
+            None,  // nft_image_uri: None initially
         );
 
         // Create the hunt with Draft status
@@ -1168,6 +1170,26 @@ impl HuntyCore {
         v <= 5
     }
 
+    fn validate_nft_image_uri(uri: &String) -> bool {
+        let len = uri.len();
+        if len == 0 || len > 200 {
+            return false;
+        }
+        let mut buf = [0u8; 200];
+        uri.copy_into_slice(&mut buf[..len as usize]);
+        let text = unsafe { core::str::from_utf8_unchecked(&buf[..len as usize]) };
+
+        if text.starts_with("https://") {
+            let authority = &text[8..];
+            return !authority.is_empty() && !authority.bytes().all(|b| b == b' ');
+        }
+        if text.starts_with("ipfs://") {
+            let cid = &text[7..];
+            return cid.len() >= 46;
+        }
+        false
+    }
+
     /// Resolves the XLM amount for the completing player.
     ///
     /// If the hunt's rewardManager-configured pool has a non-empty
@@ -1240,23 +1262,37 @@ impl HuntyCore {
             if cache.required_clues == 0 {
                 return Err(HuntErrorCode::NoRequiredClues);
             }
-            if Storage::get_reward_manager(&env).is_some() && cache.max_winners == 0 {
+
+            debug_assert_eq!(cache.max_winners, hunt.reward_config.max_winners);
+
+            let reward_manager = Storage::get_reward_manager(&env);
+
+            if reward_manager.is_some() && hunt.reward_config.max_winners == 0 {
                 return Err(HuntErrorCode::NoRewardsConfigured);
             }
 
-            // Check rewards are configured if reward manager is set
-            if Storage::get_reward_manager(&env).is_some() && hunt.reward_config.max_winners == 0 {
-                return Err(HuntErrorCode::NoRewardsConfigured);
+            if hunt.reward_config.nft_enabled {
+                if !Self::validate_rarity(hunt.reward_config.nft_rarity) {
+                    return Err(HuntErrorCode::InvalidRarity);
+                }
+                match hunt.reward_config.nft_image_uri.as_ref() {
+                    Some(uri) => {
+                        if !Self::validate_nft_image_uri(uri) {
+                            return Err(HuntErrorCode::NoRewardsConfigured);
+                        }
+                    }
+                    None => return Err(HuntErrorCode::NoRewardsConfigured),
+                }
             }
 
             // Check reward pool has sufficient balance if reward manager is configured
-            if let Some(reward_manager_addr) = Storage::get_reward_manager(&env) {
+            if let Some(ref reward_manager_addr) = reward_manager {
                 let mut balance_args: Vec<Val> = Vec::new(&env);
                 balance_args.push_back(hunt_id.into_val(&env));
 
                 // Query the pool balance from the reward manager
                 let pool_balance = match env.try_invoke_contract::<i128, RewardErrorCode>(
-                    &reward_manager_addr,
+                    reward_manager_addr,
                     &Symbol::new(&env, "get_pool_balance"),
                     balance_args.clone(),
                 ) {
@@ -1268,7 +1304,7 @@ impl HuntyCore {
                 // Query the minimum distribution amount for this pool
                 let min_distribution_amount = match env
                     .try_invoke_contract::<i128, RewardErrorCode>(
-                        &reward_manager_addr,
+                        reward_manager_addr,
                         &Symbol::new(&env, "get_min_distribution_amount"),
                         balance_args,
                     ) {
@@ -1640,6 +1676,36 @@ impl HuntyCore {
         Ok(hunt)
     }
 
+    /// Convenience helper used in tests to set reward configuration on a hunt.
+    /// Sets nft_image_uri to a placeholder when nft_enabled is true.
+    pub fn set_reward_config(
+        env: Env,
+        hunt_id: u64,
+        max_winners: u32,
+        xlm_pool: i128,
+        nft_enabled: bool,
+        nft_contract: Option<Address>,
+    ) -> Result<(), HuntErrorCode> {
+        let mut hunt = Storage::get_hunt(&env, hunt_id).ok_or(HuntErrorCode::HuntNotFound)?;
+        let uri = if nft_enabled {
+            Some(String::from_str(&env, "https://example.com/nft.png"))
+        } else {
+            None
+        };
+        hunt.reward_config = RewardConfig::new(
+            &env,
+            xlm_pool,
+            nft_enabled,
+            nft_contract,
+            max_winners,
+            0,
+            0,
+            uri,
+        );
+        Storage::save_hunt(&env, &hunt);
+        Ok(())
+    }
+
     /// Sets the RewardManager contract address for cross-contract reward distribution.
     pub fn set_reward_manager(
         env: Env,
@@ -1758,6 +1824,11 @@ impl HuntyCore {
             return Err(HuntErrorCode::NoRewardsConfigured);
         }
 
+        // #832: Enforce max_winners cap before any reward movement
+        if hunt.reward_config.claimed_count >= hunt.reward_config.max_winners {
+            return Err(HuntErrorCode::InsufficientRewardPool);
+        }
+
         // Distribute the reward, mark the player as claimed, and emit the event.
         Self::distribute_player_reward(&env, &mut hunt, &mut progress)?;
 
@@ -1794,7 +1865,8 @@ impl HuntyCore {
         // =======================================================================
         let nft_awarded = hunt.reward_config.nft_enabled;
 
-        if !Self::validate_rarity(hunt.reward_config.nft_rarity) {
+        // #834: Only validate rarity when NFT rewards are actually enabled
+        if nft_awarded && !Self::validate_rarity(hunt.reward_config.nft_rarity) {
             return Err(HuntErrorCode::InvalidRarity);
         }
 
@@ -1805,16 +1877,22 @@ impl HuntyCore {
             } else {
                 None
             };
+            // #833: Thread nft_image_uri from hunt.reward_config into the cross-contract call
             let (nft_contract, nft_title, nft_desc, nft_uri, nft_hunt_title) = if nft_awarded {
                 hunt.reward_config
                     .nft_contract
                     .clone()
                     .map(|nft_contract| {
+                        let uri = hunt
+                            .reward_config
+                            .nft_image_uri
+                            .clone()
+                            .unwrap_or_else(|| String::from_str(env, ""));
                         (
                             Some(nft_contract),
                             hunt.title.clone(),
                             hunt.description.clone(),
-                            String::from_str(env, ""),
+                            uri,
                             hunt.title.clone(),
                         )
                     })
@@ -1868,8 +1946,12 @@ impl HuntyCore {
         progress.reward_claimed = true;
         Storage::save_player_progress(env, progress);
 
-        // Update hunt reward config (persisted by the caller)
-        hunt.reward_config.claimed_count = hunt.reward_config.claimed_count.saturating_add(1);
+        // #832: Use checked_add for claimed_count to guard against overflow
+        hunt.reward_config.claimed_count = hunt
+            .reward_config
+            .claimed_count
+            .checked_add(1)
+            .ok_or(HuntErrorCode::InsufficientRewardPool)?;
 
         // Once every reward slot has been claimed, the hunt itself is done.
         // The status change is persisted by the caller along with claimed_count.
@@ -3457,18 +3539,3 @@ impl HuntyCore {
         );
     }
 }
-
-mod errors;
-mod migration;
-mod monitoring;
-mod rate_limit;
-mod sanitization;
-mod storage;
-pub mod types;
-
-// #[cfg(test)]
-// mod test;
-
-#[cfg(test)]
-mod preview_answer_security_test;
-
