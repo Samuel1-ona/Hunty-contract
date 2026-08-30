@@ -523,6 +523,83 @@ mod test {
     }
 
     #[test]
+    fn test_wrong_answers_consume_rate_limit_budget() {
+        let env = Env::default();
+        env.ledger().set_timestamp(1_700_000_000);
+        let creator = Address::generate(&env);
+        let player = Address::generate(&env);
+        let contract_id = env.register(HuntyCore, ());
+
+        env.mock_all_auths();
+        let hunt_id = as_core_contract(&env, &contract_id, |env| {
+            HuntyCore::create_hunt(
+                env.clone(),
+                creator.clone(),
+                String::from_str(env, "Rate Limited Hunt"),
+                String::from_str(env, "Wrong answers must consume rate limit budget"),
+                None,
+                None,
+                3,
+                None,
+                None,
+            )
+            .unwrap()
+        });
+
+        env.mock_all_auths();
+        as_core_contract(&env, &contract_id, |env| {
+            HuntyCore::add_clue(
+                env.clone(),
+                hunt_id,
+                String::from_str(env, "Question?"),
+                String::from_str(env, "correct"),
+                10,
+                true,
+                None,
+                None,
+            )
+            .unwrap();
+            HuntyCore::activate_hunt(env.clone(), hunt_id, creator.clone()).unwrap();
+            HuntyCore::register_player(env.clone(), hunt_id, player.clone()).unwrap();
+        });
+
+        for nonce in 1..=3 {
+            env.mock_all_auths();
+            let result = as_core_contract(&env, &contract_id, |env| {
+                HuntyCore::submit_answer(
+                    env.clone(),
+                    hunt_id,
+                    1,
+                    player.clone(),
+                    String::from_str(env, "wrong"),
+                    nonce,
+                    env.ledger().timestamp(),
+                )
+            });
+            assert_eq!(result, Err(HuntErrorCode::InvalidAnswer));
+        }
+
+        let progress = as_core_contract(&env, &contract_id, |env| {
+            Storage::get_player_progress(env, hunt_id, &player).unwrap()
+        });
+        assert_eq!(progress.recent_submissions.len(), 3);
+
+        env.mock_all_auths();
+        let result = as_core_contract(&env, &contract_id, |env| {
+            HuntyCore::submit_answer(
+                env.clone(),
+                hunt_id,
+                1,
+                player.clone(),
+                String::from_str(env, "wrong"),
+                4,
+                env.ledger().timestamp(),
+            )
+        });
+        assert_eq!(result, Err(HuntErrorCode::RateLimitExceeded));
+    }
+
+    #[test]
     fn test_hunt_created_event_topics_and_data() {
         let env = Env::default();
         env.ledger().set_timestamp(1_700_000_000);

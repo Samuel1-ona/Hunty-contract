@@ -2696,6 +2696,7 @@ impl HuntyCore {
                 let _cooldown_remaining = 60u64.saturating_sub(elapsed);
                 return Err(HuntErrorCode::from(HuntError::RateLimitExceeded));
             }
+            progress.recent_submissions.push_back(current_time);
         }
 
         if hunt.attempt_cooldown_secs > 0 {
@@ -2823,6 +2824,7 @@ impl HuntyCore {
                 let _cooldown_remaining = 60u64.saturating_sub(elapsed);
                 return Err(HuntErrorCode::from(HuntError::RateLimitExceeded));
             }
+            progress.recent_submissions.push_back(current_time);
         }
 
         let answer_correct = Self::is_answer_correct(&clue, &answer_hash);
