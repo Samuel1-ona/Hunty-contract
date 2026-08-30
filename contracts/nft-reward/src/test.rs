@@ -1996,3 +1996,69 @@ fn test_admin_update_image_uris_oversized_result_is_skipped_not_panicked() {
     let nft = client.get_nft(&nft_id).unwrap();
     assert_eq!(nft.metadata.image_uri, String::from_str(&env, &uri_str));
 }
+
+/// Acceptance test for issue #856:
+/// Two players mint for the same hunt with distinct `completion_rank` values
+/// supplied via the metadata map.  Asserts that:
+/// - the first minter gets rank 1 in the emitted `NftMintedEvent`,
+/// - the second minter gets rank 2, and
+/// - `get_nft_count_for_hunt` is irrelevant to the stored ranks (i.e. the
+///   counter growing does not clobber an already-emitted rank).
+#[test]
+fn test_completion_rank_is_distinct_per_player() {
+    let env = setup_env();
+    let (client, minter) = setup_nft_reward(&env, None);
+
+    let player1 = Address::generate(&env);
+    let player2 = Address::generate(&env);
+    let hunt_id: u64 = 42;
+
+    // Build a minimal metadata map for the first player, rank = 1.
+    let mut meta1: Map<Symbol, Val> = Map::new(&env);
+    meta1.set(Symbol::new(&env, "title"), String::from_str(&env, "Hunt Winner").into_val(&env));
+    meta1.set(Symbol::new(&env, "description"), String::from_str(&env, "First finisher").into_val(&env));
+    meta1.set(Symbol::new(&env, "image_uri"), String::from_str(&env, "ipfs://rank1").into_val(&env));
+    meta1.set(Symbol::new(&env, "completion_rank"), 1u32.into_val(&env));
+
+    let nft1 = client.mint_reward_nft_from_map(&minter, &hunt_id, &player1, &meta1)
+        .expect("first mint should succeed");
+
+    // Build metadata map for the second player, rank = 2.
+    let mut meta2: Map<Symbol, Val> = Map::new(&env);
+    meta2.set(Symbol::new(&env, "title"), String::from_str(&env, "Hunt Runner-up").into_val(&env));
+    meta2.set(Symbol::new(&env, "description"), String::from_str(&env, "Second finisher").into_val(&env));
+    meta2.set(Symbol::new(&env, "image_uri"), String::from_str(&env, "ipfs://rank2").into_val(&env));
+    meta2.set(Symbol::new(&env, "completion_rank"), 2u32.into_val(&env));
+
+    let nft2 = client.mint_reward_nft_from_map(&minter, &hunt_id, &player2, &meta2)
+        .expect("second mint should succeed");
+
+    // Collect the two NftMinted events (the last two events in the log).
+    let all_events = env.events().all();
+    assert!(all_events.len() >= 2, "expected at least 2 NftMinted events");
+
+    let event_count = all_events.len();
+    let (_, _, data1): (Address, soroban_sdk::Vec<Val>, Val) =
+        all_events.get(event_count - 2).unwrap();
+    let (_, _, data2): (Address, soroban_sdk::Vec<Val>, Val) =
+        all_events.get(event_count - 1).unwrap();
+
+    let ev1 = NftMintedEvent::try_from_val(&env, &data1).unwrap();
+    let ev2 = NftMintedEvent::try_from_val(&env, &data2).unwrap();
+
+    // Basic sanity checks.
+    assert_eq!(ev1.nft_id, nft1);
+    assert_eq!(ev2.nft_id, nft2);
+
+    // Core assertion: ranks are frozen at the values supplied by hunty-core,
+    // not at the live hunt-NFT counter.
+    assert_eq!(ev1.completion_rank, 1, "first player should have rank 1");
+    assert_eq!(ev2.completion_rank, 2, "second player should have rank 2");
+    assert_ne!(ev1.completion_rank, ev2.completion_rank, "ranks must be distinct");
+
+    // total_minted_for_hunt reflects the collection counter, not the rank.
+    assert_ne!(
+        ev2.total_minted_for_hunt, ev2.completion_rank,
+        "total_minted_for_hunt and completion_rank are different concepts"
+    );
+}

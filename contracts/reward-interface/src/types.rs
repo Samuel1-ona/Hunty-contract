@@ -12,6 +12,9 @@ pub struct RewardConfig {
     pub nft_hunt_title: String,
     pub nft_rarity: u32,
     pub nft_tier: u32,
+    /// The player's finishing position for this hunt, set by hunty-core at
+    /// completion time and threaded here so the NFT can record an immutable rank.
+    pub completion_rank: u32,
 }
 
 impl RewardConfig {

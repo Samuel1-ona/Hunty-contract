@@ -380,7 +380,10 @@ impl NftReward {
         metadata: NftMetadata,
     ) -> u64 {
         Self::require_authorized_caller(&env, &minter);
-        Self::mint_reward_nft_impl(env, hunt_id, player_address, metadata, true)
+        // This direct entrypoint has no rank context; pass 0 so callers that
+        // care about rank should use `mint_reward_nft_from_map` with the
+        // "completion_rank" key set.
+        Self::mint_reward_nft_impl(env, hunt_id, player_address, metadata, true, 0)
     }
 
     /// Mints a reward NFT from a generic metadata map. This is the entrypoint
@@ -472,6 +475,10 @@ impl NftReward {
         let royalty_bps: Option<u32> = extract_optional_field!("royalty_bps", u32);
         let transferable = extract_field!("transferable", bool, false);
 
+        // Extract the authoritative completion rank threaded from hunty-core.
+        // Defaults to 0 when absent (e.g., direct test calls that omit the key).
+        let completion_rank = extract_field!("completion_rank", u32, 0u32);
+
         // Parse extensions from metadata map
         let extensions: Map<String, String> =
             extract_field!("extensions", Map<String, String>, Map::new(&env));
@@ -487,7 +494,7 @@ impl NftReward {
             royalty_bps,
             extensions,
         };
-        Ok(Self::mint_reward_nft_impl(env, hunt_id, player_address, meta, transferable))
+        Ok(Self::mint_reward_nft_impl(env, hunt_id, player_address, meta, transferable, completion_rank))
     }
 
     fn validate_image_uri(env: &Env, value: &String) -> Result<(), NftErrorCode> {
@@ -528,27 +535,13 @@ impl NftReward {
         Ok(())
     }
 
-    fn compute_completion_rank(
-        env: &Env,
-        hunt_id: u64,
-    ) -> u32 {
-        let players = Storage::get_hunt_players(env, hunt_id);
-        let mut completed: u32 = 0;
-        for i in 0..players.len() {
-            let progress = players.get(i).unwrap();
-            if progress.is_completed {
-                completed += 1;
-            }
-        }
-        completed.saturating_add(1)
-    }
-
     fn mint_reward_nft_impl(
         env: Env,
         hunt_id: u64,
         player_address: Address,
         metadata: NftMetadata,
         transferable: bool,
+        completion_rank: u32,
     ) -> u64 {
         if metadata.rarity > 5 {
             panic_with_error!(&env, crate::errors::NftErrorCode::InvalidRarity);
@@ -613,7 +606,9 @@ impl NftReward {
         Storage::increment_owner_hunt_count(&env, &player_address, hunt_id);
         Storage::add_nft_to_hunt(&env, hunt_id, nft_id);
         Storage::mark_hunt_minted(&env, hunt_id);
-        Storage::update_collection_metadata_total_supply(&env, Storage::get_nft_counter(&env));
+        // Read the counter once and reuse it for both the supply update and the event.
+        let total_supply = Storage::get_nft_counter(&env);
+        Storage::update_collection_metadata_total_supply(&env, total_supply);
 
         let event = NftMintedEvent {
             nft_id,
@@ -623,11 +618,13 @@ impl NftReward {
             tier: nft_data.metadata.tier,
             minted_at,
             hunt_title: metadata.hunt_title.clone(),
-            total_minted_for_hunt: Storage::get_nft_counter(&env) as u32,
-            completion_rank: Self::compute_completion_rank(env, hunt_id),
+            total_minted_for_hunt: total_supply as u32,
+            // Use the authoritative rank threaded from hunty-core (frozen at
+            // completion time), not a live re-count of minted NFTs.
+            completion_rank,
             collection_stats: format!(
                 "total_supply={},total_hunts={},total_owners={}",
-                Storage::get_nft_counter(&env),
+                total_supply,
                 0u64, // total_hunts would need tracking
                 0u64  // total_owners would need tracking
             ),

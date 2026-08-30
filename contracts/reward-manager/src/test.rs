@@ -125,6 +125,7 @@ mod test {
             nft_hunt_title: soroban_sdk::String::from_str(env, ""),
             nft_rarity: 0,
             nft_tier: 0,
+            completion_rank: 0,
         }
     }
 
@@ -1689,6 +1690,7 @@ mod test {
                 nft_hunt_title: soroban_sdk::String::from_str(&env, ""),
                 nft_rarity: 0,
                 nft_tier: 0,
+                completion_rank: 0,
             };
             let result = RewardManager::distribute_rewards(env.clone(), 1, player.clone(), config);
             assert_eq!(result, Err(RewardErrorCode::InvalidConfig));
@@ -1726,6 +1728,7 @@ mod test {
                 nft_hunt_title: soroban_sdk::String::from_str(&env, ""),
                 nft_rarity: 0,
                 nft_tier: 0,
+                completion_rank: 0,
             };
             let result = RewardManager::distribute_rewards(env.clone(), 1, player.clone(), config);
             assert_eq!(result, Err(RewardErrorCode::InvalidConfig));
@@ -1765,6 +1768,7 @@ mod test {
                 nft_hunt_title: soroban_sdk::String::from_str(&env, "hunt"),
                 nft_rarity: 0,
                 nft_tier: 0,
+                completion_rank: 0,
             };
 
             // Distribution should succeed even though NFT mint fails
@@ -1818,6 +1822,7 @@ mod test {
                 nft_hunt_title: soroban_sdk::String::from_str(&env, "hunt"),
                 nft_rarity: 0,
                 nft_tier: 0,
+                completion_rank: 0,
             };
 
             // Distribution should succeed (no XLM to block on NFT failure)
@@ -1907,6 +1912,7 @@ mod test {
                 nft_hunt_title: soroban_sdk::String::from_str(&env, "hunt"),
                 nft_rarity: 0,
                 nft_tier: 0,
+                completion_rank: 0,
             };
 
             // Distribution succeeds despite NFT failure
@@ -3786,6 +3792,7 @@ mod test {
             nft_hunt_title: soroban_sdk::String::from_str(&env, "Summit Hunt"),
             nft_rarity: 3,
             nft_tier: 2,
+            completion_rank: 1,
         };
 
         env.as_contract(&contract_id, || {

@@ -1843,6 +1843,7 @@ impl HuntyCore {
                 nft_hunt_title,
                 nft_rarity: hunt.reward_config.nft_rarity,
                 nft_tier: hunt.reward_config.nft_tier,
+                completion_rank: progress.completion_rank,
             };
 
             // Only call RewardManager when there is at least one reward type
@@ -2486,6 +2487,9 @@ impl HuntyCore {
             let rank = hunt_mut.completed_count;
             Storage::save_hunt(env, &hunt_mut);
             Storage::increment_player_completed_hunt_count(env, player);
+            // Freeze the rank on the player's progress record so it is
+            // available as an authoritative value at reward-claim time.
+            progress.completion_rank = rank;
             let hunt_completed_event = HuntCompletedEvent {
                 hunt_id,
                 player: player.clone(),

@@ -21,6 +21,7 @@ impl NftHandler {
     /// * `hunt_creator` - The creator of the hunt (for NFT creator attribution)
     /// * `royalty_bps` - Creator royalty basis points for secondary market sales
     /// * `transferable` - Whether the NFT is transferable
+    /// * `completion_rank` - The player's finishing position, frozen at completion time
     ///
     /// # Returns
     /// The unique NFT ID of the minted NFT
@@ -39,6 +40,7 @@ impl NftHandler {
         hunt_creator: &Address,
         royalty_bps: u32,
         transferable: bool,
+        completion_rank: u32,
     ) -> Result<u64, RewardErrorCode> {
         let mut metadata: Map<soroban_sdk::Symbol, soroban_sdk::Val> = Map::new(env);
         metadata.set(soroban_sdk::Symbol::new(env, "title"), title.into_val(env));
@@ -70,6 +72,10 @@ impl NftHandler {
         metadata.set(
             soroban_sdk::Symbol::new(env, "transferable"),
             transferable.into_val(env),
+        );
+        metadata.set(
+            soroban_sdk::Symbol::new(env, "completion_rank"),
+            completion_rank.into_val(env),
         );
 
         let mut args = soroban_sdk::Vec::new(env);
