@@ -8,8 +8,6 @@ use hunty_common::audit::{
     emit_audit_event, detail, ACTION_ADMIN_ADDED, ACTION_ADMIN_REMOVED, TOPIC_AUDIT,
 };
 
-#[allow(dead_code)]
-const MAX_URI_LEN: usize = 512;
 const MAX_NFT_TITLE_BYTES: u32 = 128;
 const MAX_NFT_DESCRIPTION_BYTES: u32 = 1024;
 const MAX_NFT_URI_BYTES: u32 = 512;
@@ -71,10 +69,10 @@ fn image_uri_is_valid(uri: &String) -> bool {
     // Accept non-empty URIs that start with https:// or ipfs://
     // soroban_sdk::String has no as_str(); compare via UTF-8 text when possible.
     let len = uri.len();
-    if len == 0 || len > 200 {
+    if len == 0 || len > MAX_NFT_URI_BYTES {
         return false;
     }
-    let mut buf = [0u8; 200];
+    let mut buf = [0u8; MAX_NFT_URI_BYTES as usize];
     uri.copy_into_slice(&mut buf[..len as usize]);
     // SAFETY: `buf` is populated from a soroban_sdk::String via
     // copy_into_slice, so the bytes are guaranteed to be valid UTF-8.

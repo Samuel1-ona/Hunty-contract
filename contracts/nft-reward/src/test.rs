@@ -4,7 +4,7 @@ extern crate std;
 
 use crate::{
     CollectionMetadata, NftErrorCode, NftMetadata, NftMintedEvent, NftReward, NftRewardClient,
-    MAX_SCAN_LIMIT, METADATA_SCHEMA_VERSION,
+    MAX_NFT_URI_BYTES, MAX_SCAN_LIMIT, METADATA_SCHEMA_VERSION,
 };
 use soroban_sdk::{
     testutils::{Address as _, Events as _, Ledger as _},
@@ -255,6 +255,36 @@ fn test_mint_reward_nft_rejects_empty_image_uri_consistently() {
         .try_mint_reward_nft_from_map(&minter, &1, &player, &map)
         .unwrap_err();
     assert_eq!(map_err, Ok(NftErrorCode::InvalidMetadata));
+}
+
+#[test]
+fn test_mint_reward_nft_enforces_single_uri_length_limit() {
+    let env = setup_env();
+    let (client, minter) = setup_nft_reward(&env, None);
+    let player = Address::generate(&env);
+
+    let prefix = "ipfs://";
+    let at_limit = format!("{}{}", prefix, "a".repeat(MAX_NFT_URI_BYTES as usize - prefix.len()));
+    let over_limit = format!("{}{}", prefix, "a".repeat(MAX_NFT_URI_BYTES as usize - prefix.len() + 1));
+
+    client
+        .mint_reward_nft(
+            &minter,
+            &1,
+            &player,
+            &create_metadata(&env, "At Limit", "Valid boundary", &at_limit),
+        )
+        .unwrap();
+
+    let err = client
+        .try_mint_reward_nft(
+            &minter,
+            &2,
+            &player,
+            &create_metadata(&env, "Over Limit", "Too long", &over_limit),
+        )
+        .unwrap_err();
+    assert_eq!(err, Ok(NftErrorCode::InvalidMetadata));
 }
 
 #[test]
