@@ -22,6 +22,7 @@ mod test {
 
     use super::*;
     use crate::ANSWER_SUBMISSION_WINDOW_SECS;
+    use crate::MIN_HUNT_DURATION;
     use soroban_sdk::{Address, Env, IntoVal, String, Symbol, TryIntoVal, Vec};
     // Bring Soroban testutils traits into scope (generate addresses, set ledger info, register contracts).
     use crate::errors::{HuntError, HuntErrorCode};
@@ -1039,6 +1040,40 @@ mod test {
             )
         });
         assert_eq!(result_past, Err(HuntErrorCode::HuntEndTimeInPast));
+
+        let end_time_too_short = 1_700_000_000 + MIN_HUNT_DURATION - 1;
+        let result_too_short = with_core_contract(&env, |env, _cid| {
+            HuntyCore::create_hunt(
+                env.clone(),
+                creator.clone(),
+                title.clone(),
+                description.clone(),
+                None,
+                Some(end_time_too_short),
+                0,
+                None,
+                None,
+            )
+        });
+        assert_eq!(result_too_short, Err(HuntErrorCode::HuntEndTimeInPast));
+
+        let end_time_min = 1_700_000_000 + MIN_HUNT_DURATION;
+        let hunt = with_core_contract(&env, |env, _cid| {
+            let hunt_id = HuntyCore::create_hunt(
+                env.clone(),
+                creator.clone(),
+                title.clone(),
+                description.clone(),
+                None,
+                Some(end_time_min),
+                0,
+                None,
+                None,
+            )
+            .unwrap();
+            Storage::get_hunt(env, hunt_id).unwrap()
+        });
+        assert_eq!(hunt.end_time, end_time_min);
     }
 
     #[test]
@@ -5356,7 +5391,7 @@ mod test {
             let player = Address::generate(&env);
             let question = String::from_str(&env, "Q");
             let answer = String::from_str(&env, "a");
-            let end_time = 1_700_000_001; // One second after "now"
+            let end_time = 1_700_000_000 + MIN_HUNT_DURATION;
 
             let err = with_core_contract(&env, |env, _cid| {
                 let hunt_id = HuntyCore::create_hunt(
@@ -5384,7 +5419,7 @@ mod test {
                 .unwrap();
                 HuntyCore::activate_hunt(env.clone(), hunt_id, creator.clone()).unwrap();
                 // Move time past end_time
-                env.ledger().set_timestamp(1_700_000_002);
+                env.ledger().set_timestamp(1_700_000_000 + MIN_HUNT_DURATION + 1);
                 HuntyCore::register_player(env.clone(), hunt_id, player.clone()).unwrap_err()
             });
 
@@ -5401,7 +5436,7 @@ mod test {
             let player = Address::generate(&env);
             let question = String::from_str(&env, "Q");
             let answer = String::from_str(&env, "a");
-            let end_time = 1_700_000_001; // One second after "now"
+            let end_time = 1_700_000_000 + MIN_HUNT_DURATION;
 
             let (hunt_id, core_id) = with_core_contract(&env, |env, cid| {
                 let hunt_id = HuntyCore::create_hunt(
@@ -5433,7 +5468,7 @@ mod test {
             });
 
             // Move time past end_time
-            env.ledger().set_timestamp(1_700_000_002);
+            env.ledger().set_timestamp(1_700_000_000 + MIN_HUNT_DURATION + 1);
             env.mock_all_auths();
 
             let err = as_core_contract(&env, &core_id, |env| {
