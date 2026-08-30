@@ -197,6 +197,11 @@ pub struct AdminImageUrisUpdatedEvent {
     pub old_prefix: String,
     pub new_prefix: String,
     pub updated_count: u32,
+    /// Start index of this batch (as passed in).
+    pub offset: u32,
+    /// Index to pass as `offset` for the next batch. Equal to the total NFT
+    /// count when this was the final batch.
+    pub next_offset: u32,
 }
 
 /// Event emitted when an NFT extension is set.
@@ -862,6 +867,19 @@ impl NftReward {
     /// Batch-updates image URIs for all NFTs whose `image_uri` starts with `old_prefix`,
     /// replacing it with `new_prefix`. Useful for migrating between IPFS gateways or CDNs.
     ///
+    /// Paginated like every other collection scan in this contract
+    /// (`list_all_nfts`, `get_player_nfts`, `get_nfts_by_hunt`): a single call
+    /// only ever touches up to `MAX_SCAN_LIMIT` NFTs starting at `offset`, so
+    /// it can't exceed the invocation resource budget regardless of
+    /// collection size. Drive a full migration by repeatedly calling this
+    /// with `offset` set to the previous call's `next_offset` until
+    /// `next_offset` stops advancing (or equals the collection size).
+    ///
+    /// The operation is idempotent: re-running a batch over an
+    /// already-migrated range updates nothing (those URIs already start with
+    /// `new_prefix`, not `old_prefix`), so a retried or overlapping batch is
+    /// harmless.
+    ///
     /// # Authorization
     /// Only the configured admin can call this function.
     ///
@@ -869,28 +887,53 @@ impl NftReward {
     /// * `admin` - The admin address (must match the stored admin)
     /// * `old_prefix` - The prefix to match (e.g. "ipfs://oldgateway/")
     /// * `new_prefix` - The replacement prefix (e.g. "ipfs://newgateway/")
+    /// * `offset` - The starting index for this batch (0-based)
+    /// * `limit` - The maximum number of NFTs to scan in this batch (capped at MAX_SCAN_LIMIT)
     ///
     /// # Returns
-    /// The number of NFTs whose image URIs were updated.
+    /// `(updated_count, next_offset)` — how many image URIs were updated in
+    /// this batch, and the offset to resume from for the next one.
     pub fn admin_update_image_uris(
         env: Env,
         admin: Address,
         old_prefix: String,
         new_prefix: String,
-    ) -> Result<u32, crate::errors::NftErrorCode> {
+        offset: u32,
+        limit: u32,
+    ) -> Result<(u32, u32), crate::errors::NftErrorCode> {
         Self::require_admin(&env, &admin)?;
 
         let all_ids = Storage::get_all_nft_ids(&env);
-        let mut updated: u32 = 0;
+        let total_count = all_ids.len();
 
-        for nft_id in all_ids.iter() {
+        if offset >= total_count {
+            let event = AdminImageUrisUpdatedEvent {
+                old_prefix,
+                new_prefix,
+                updated_count: 0,
+                offset,
+                next_offset: offset,
+            };
+            env.events()
+                .publish((Symbol::new(&env, "AdminImageUrisUpdated"),), event);
+            return Ok((0, offset));
+        }
+
+        let bounded_limit = limit.min(MAX_SCAN_LIMIT);
+        let end = offset.saturating_add(bounded_limit).min(total_count);
+
+        let mut updated: u32 = 0;
+        for i in offset..end {
+            let Some(nft_id) = all_ids.get(i) else {
+                continue;
+            };
             if let Some(mut nft) = Storage::get_nft(&env, nft_id) {
                 if let Some(new_uri) =
                     Self::replace_prefix(&env, &nft.metadata.image_uri, &old_prefix, &new_prefix)
                 {
                     nft.metadata.image_uri = new_uri;
                     Storage::save_nft(&env, &nft);
-                    updated += 1;
+                    updated = updated.saturating_add(1);
                 }
             }
         }
@@ -901,10 +944,12 @@ impl NftReward {
                 old_prefix,
                 new_prefix,
                 updated_count: updated,
+                offset,
+                next_offset: end,
             },
         );
 
-        Ok(updated)
+        Ok((updated, end))
     }
 
     /// Replaces a matching `old_prefix` at the start of `uri` with `new_prefix`.

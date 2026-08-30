@@ -5355,6 +5355,19 @@ pub fn remove_authorized_contract(env: Env, admin: Address, contract: Address) -
 Batch-updates image URIs for all NFTs whose `image_uri` starts with `old_prefix`,
 replacing it with `new_prefix`. Useful for migrating between IPFS gateways or CDNs.
 
+Paginated like every other collection scan in this contract
+(`list_all_nfts`, `get_player_nfts`, `get_nfts_by_hunt`): a single call
+only ever touches up to `MAX_SCAN_LIMIT` NFTs starting at `offset`, so
+it can't exceed the invocation resource budget regardless of
+collection size. Drive a full migration by repeatedly calling this
+with `offset` set to the previous call's `next_offset` until
+`next_offset` stops advancing (or equals the collection size).
+
+The operation is idempotent: re-running a batch over an
+already-migrated range updates nothing (those URIs already start with
+`new_prefix`, not `old_prefix`), so a retried or overlapping batch is
+harmless.
+
 # Authorization
 Only the configured admin can call this function.
 
@@ -5362,14 +5375,17 @@ Only the configured admin can call this function.
 * `admin` - The admin address (must match the stored admin)
 * `old_prefix` - The prefix to match (e.g. "ipfs://oldgateway/")
 * `new_prefix` - The replacement prefix (e.g. "ipfs://newgateway/")
+* `offset` - The starting index for this batch (0-based)
+* `limit` - The maximum number of NFTs to scan in this batch (capped at MAX_SCAN_LIMIT)
 
 # Returns
-The number of NFTs whose image URIs were updated.
+`(updated_count, next_offset)` — how many image URIs were updated in
+this batch, and the offset to resume from for the next one.
 
 **Signature:**
 
 ```rust
-pub fn admin_update_image_uris(env: Env, admin: Address, old_prefix: String, new_prefix: String) -> Result<u32, crate::errors::NftErrorCode>
+pub fn admin_update_image_uris(env: Env, admin: Address, old_prefix: String, new_prefix: String, offset: u32, limit: u32) -> Result<(u32, u32), crate::errors::NftErrorCode>
 ```
 
 **Parameters:**
@@ -5378,8 +5394,10 @@ pub fn admin_update_image_uris(env: Env, admin: Address, old_prefix: String, new
 - `admin: Address`
 - `old_prefix: String`
 - `new_prefix: String`
+- `offset: u32`
+- `limit: u32`
 
-**Returns:** `Result<u32, crate::errors::NftErrorCode>`
+**Returns:** `Result<(u32, u32), crate::errors::NftErrorCode>`
 
 **Error type:** `NftErrorCode`
 
