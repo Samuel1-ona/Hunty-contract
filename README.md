@@ -524,6 +524,23 @@ We welcome contributions! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for guid
 - **Transparent Progress**: All progress is publicly verifiable on the blockchain
 - **Secure Rewards**: Reward pools are validated before distribution to prevent over-spending
 
+### Admin Governance
+
+Admin assignment is split across exactly two paths, both authorization-gated. There is no
+unguarded shortcut, so an uninitialized contract cannot be taken over by the first caller after
+deployment.
+
+- **`initialize_admin`** – Sets the admin for the very first time. The supplied address must
+  authenticate (`require_auth`), and the call is rejected if an admin is already set. There is no
+  other way to assign the initial admin.
+- **`propose_new_admin` + `accept_admin`** – Two-step rotation of an existing admin. The current
+  admin (authenticated) proposes a successor, then the proposed address must call `accept_admin`
+  and authenticate to complete the transfer. This prevents accidental lockout.
+
+The old single-step `set_admin` entrypoint was removed because it skipped authorization when the
+contract was uninitialized. The storage-level `set_admin` writer is an internal helper used only by
+the two authorized paths above and is never exposed as a public method.
+
 ## Roadmap
 
 ### Phase 1: Core Functionality ✅ (In Progress)

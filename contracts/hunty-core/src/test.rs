@@ -10304,6 +10304,32 @@ mod test {
             });
         }
 
+        #[test]
+        fn test_admin_cannot_be_claimed_without_auth_on_fresh_contract() {
+            // No auth is mocked: an attacker trying to claim admin on an
+            // uninitialized contract must fail authorization. `initialize_admin`
+            // is the only admin-assignment path (the old `set_admin` shortcut was
+            // removed), and it always requires the proposed admin to authenticate,
+            // so an arbitrary caller can never front-run deployment.
+            let env = Env::default();
+            let attacker = Address::generate(&env);
+            let contract_id = env.register_contract(None, HuntyCore);
+
+            let res = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                as_core_contract(&env, &contract_id, |env| {
+                    let _ = HuntyCore::initialize_admin(env.clone(), attacker.clone());
+                });
+            }));
+            assert!(
+                res.is_err(),
+                "initialize_admin must fail authorization on a fresh (uninitialized) contract"
+            );
+            assert!(
+                Storage::get_admin(&env).is_none(),
+                "no admin may be set after an unauthorized initialization attempt"
+            );
+        }
+
         // ========== Blacklist Tests ==========
 
         #[test]
