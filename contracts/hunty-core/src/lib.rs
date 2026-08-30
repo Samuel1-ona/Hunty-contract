@@ -27,6 +27,9 @@ use soroban_sdk::{
 };
 
 const MAX_TITLE_BYTES: u32 = 200;
+// Must stay <= crate::sanitization::SANITIZE_STACK_CAP (2048). Raising these
+// above the sanitizer stack CAP without increasing SANITIZE_STACK_CAP will
+// return SanitizeError::LimitTooLarge for every call using that limit.
 const MAX_DESCRIPTION_BYTES: u32 = 2000;
 const MAX_QUESTION_LENGTH: u32 = 2000;
 const MAX_ANSWER_LENGTH: u32 = 256;
