@@ -3792,13 +3792,15 @@ pub fn is_view_only(env: Env, hunt_id: u64, address: Address) -> bool
 **Signature:**
 
 ```rust
-pub fn get_view_only_list(env: Env, hunt_id: u64) -> Vec<Address>
+pub fn get_view_only_list(env: Env, hunt_id: u64, offset: u32, limit: u32) -> Vec<Address>
 ```
 
 **Parameters:**
 
 - `env: Env`
 - `hunt_id: u64`
+- `offset: u32`
+- `limit: u32` (capped at `MAX_BATCH_SIZE`)
 
 **Returns:** `Vec<Address>`
 
@@ -4295,12 +4297,14 @@ pub fn is_global_view_only(env: Env, address: Address) -> bool
 **Signature:**
 
 ```rust
-pub fn get_global_view_only_list(env: Env) -> Vec<Address>
+pub fn get_global_view_only_list(env: Env, offset: u32, limit: u32) -> Vec<Address>
 ```
 
 **Parameters:**
 
 - `env: Env`
+- `offset: u32`
+- `limit: u32` (capped at `MAX_BATCH_SIZE`)
 
 **Returns:** `Vec<Address>`
 

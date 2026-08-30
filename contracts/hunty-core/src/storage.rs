@@ -10,6 +10,10 @@ const INSTANCE_TTL_THRESHOLD: u32 = 518_400;
 const INSTANCE_TTL_EXTEND_TO: u32 = 518_400;
 const PERSISTENT_TTL_THRESHOLD: u32 = 172_800;
 const PERSISTENT_TTL_EXTEND_TO: u32 = 518_400;
+/// Maximum number of addresses in a hunt's view-only list, and in the global
+/// view-only list. Keeps enumeration bounded so `get_view_only_list` and
+/// `is_view_only` stay within the invocation budget as the list grows.
+pub(crate) const MAX_VIEW_ONLY_ENTRIES: u32 = 200;
 
 /// Storage access layer for hunts, clues, and player progress.
 /// Provides type-safe, efficient storage operations with consistent key management.
@@ -684,6 +688,19 @@ impl Storage {
         (Self::VIEW_ONLY_KEY, hunt_id)
     }
 
+    /// O(1) membership marker for a view-only address on a hunt.
+    fn view_only_member_key(
+        hunt_id: u64,
+        address: &Address,
+    ) -> (soroban_sdk::Symbol, u64, Address) {
+        (symbol_short!("VOMEM"), hunt_id, address.clone())
+    }
+
+    /// O(1) membership marker for an address in the global view-only list.
+    fn global_view_only_member_key(address: &Address) -> (soroban_sdk::Symbol, Address) {
+        (symbol_short!("GVOMEM"), address.clone())
+    }
+
     /// Generates a storage key for a processed answer submission envelope.
     fn processed_submission_key(
         hunt_id: u64,
@@ -1083,11 +1100,29 @@ impl Storage {
     /// Adds an address to the view-only list for a specific hunt.
     /// View-only addresses can read hunt data but cannot modify it.
     ///
+    /// Membership is tracked with an O(1) per-address marker so `is_view_only`
+    /// does not scan the list; the ordered list is kept only for enumeration.
+    /// Additions beyond `MAX_VIEW_ONLY_ENTRIES` are rejected.
+    ///
     /// # Arguments
     /// * `env` - The Soroban environment
     /// * `hunt_id` - The hunt to grant view-only access for
     /// * `address` - The address to grant view-only access
-    pub fn add_view_only(env: &Env, hunt_id: u64, address: &Address) {
+    ///
+    /// # Returns
+    /// * `Ok(())` if the address is (now) in the list
+    /// * `Err(HuntError::HuntFull)` if the list has reached its maximum size
+    pub fn add_view_only(
+        env: &Env,
+        hunt_id: u64,
+        address: &Address,
+    ) -> Result<(), crate::errors::HuntError> {
+        let member_key = Self::view_only_member_key(hunt_id, address);
+        // O(1) de-duplication: an address is either a member or not.
+        if env.storage().instance().has(&member_key) {
+            return Ok(());
+        }
+
         let key = Self::view_only_key(hunt_id);
         let mut view_only_list = env
             .storage()
@@ -1095,11 +1130,17 @@ impl Storage {
             .get::<_, Vec<Address>>(&key)
             .unwrap_or_else(|| Vec::new(env));
 
-        // Check if address already exists to avoid duplicates
-        if view_only_list.first_index_of(address).is_none() {
-            view_only_list.push_back(address.clone());
-            env.storage().instance().set(&key, &view_only_list);
+        if view_only_list.len() >= MAX_VIEW_ONLY_ENTRIES {
+            return Err(crate::errors::HuntError::HuntFull);
         }
+
+        view_only_list.push_back(address.clone());
+        env.storage().instance().set(&key, &view_only_list);
+        env.storage().instance().set(&member_key, &());
+        env.storage()
+            .instance()
+            .extend_ttl(INSTANCE_TTL_THRESHOLD, INSTANCE_TTL_EXTEND_TO);
+        Ok(())
     }
 
     /// Removes an address from the view-only list for a specific hunt.
@@ -1109,6 +1150,11 @@ impl Storage {
     /// * `hunt_id` - The hunt to revoke view-only access for
     /// * `address` - The address to revoke view-only access
     pub fn remove_view_only(env: &Env, hunt_id: u64, address: &Address) {
+        let member_key = Self::view_only_member_key(hunt_id, address);
+        if !env.storage().instance().has(&member_key) {
+            return;
+        }
+
         let key = Self::view_only_key(hunt_id);
         let mut view_only_list = env
             .storage()
@@ -1120,9 +1166,16 @@ impl Storage {
             view_only_list.remove(idx);
             env.storage().instance().set(&key, &view_only_list);
         }
+        env.storage().instance().remove(&member_key);
+        env.storage()
+            .instance()
+            .extend_ttl(INSTANCE_TTL_THRESHOLD, INSTANCE_TTL_EXTEND_TO);
     }
 
     /// Checks if an address has view-only access for a specific hunt.
+    ///
+    /// Backed by a per-address membership key, so this is an O(1) lookup and
+    /// does not scan the view-only list.
     ///
     /// # Arguments
     /// * `env` - The Soroban environment
@@ -1132,6 +1185,23 @@ impl Storage {
     /// # Returns
     /// `true` if the address has view-only access, `false` otherwise
     pub fn is_view_only(env: &Env, hunt_id: u64, address: &Address) -> bool {
+        env.storage()
+            .instance()
+            .has(&Self::view_only_member_key(hunt_id, address))
+    }
+
+    /// Gets a page of view-only addresses for a specific hunt.
+    ///
+    /// # Arguments
+    /// * `env` - The Soroban environment
+    /// * `hunt_id` - The hunt to get view-only addresses for
+    /// * `offset` - The number of entries to skip before returning results
+    /// * `limit` - The maximum number of entries to return
+    ///
+    /// # Returns
+    /// A vector of addresses with view-only access for the hunt, respecting
+    /// the requested `offset`/`limit` window.
+    pub fn get_view_only_list(env: &Env, hunt_id: u64, offset: u32, limit: u32) -> Vec<Address> {
         let key = Self::view_only_key(hunt_id);
         let view_only_list = env
             .storage()
@@ -1139,23 +1209,18 @@ impl Storage {
             .get::<_, Vec<Address>>(&key)
             .unwrap_or_else(|| Vec::new(env));
 
-        view_only_list.first_index_of(address).is_some()
-    }
-
-    /// Gets all view-only addresses for a specific hunt.
-    ///
-    /// # Arguments
-    /// * `env` - The Soroban environment
-    /// * `hunt_id` - The hunt to get view-only addresses for
-    ///
-    /// # Returns
-    /// A vector of all addresses with view-only access for the hunt
-    pub fn get_view_only_list(env: &Env, hunt_id: u64) -> Vec<Address> {
-        let key = Self::view_only_key(hunt_id);
-        env.storage()
-            .instance()
-            .get::<_, Vec<Address>>(&key)
-            .unwrap_or_else(|| Vec::new(env))
+        let start = offset;
+        let end = core::cmp::min(offset.saturating_add(limit), view_only_list.len());
+        let mut result = Vec::new(env);
+        if start >= view_only_list.len() {
+            return result;
+        }
+        for i in start..end {
+            if let Some(addr) = view_only_list.get(i) {
+                result.push_back(addr);
+            }
+        }
+        result
     }
 
     // ========== Global Admin Functions ==========
@@ -1306,23 +1371,46 @@ impl Storage {
     /// Adds an address to the global view-only list.
     /// Global view-only addresses can read ALL hunt data.
     ///
+    /// Membership is tracked with an O(1) per-address marker so
+    /// `is_global_view_only` does not scan the list; the ordered list is kept
+    /// only for enumeration. Additions beyond `MAX_VIEW_ONLY_ENTRIES` are
+    /// rejected.
+    ///
     /// # Arguments
     /// * `env` - The Soroban environment
     /// * `address` - The address to grant global view-only access
-    pub fn add_global_view_only(env: &Env, address: &Address) {
+    ///
+    /// # Returns
+    /// * `Ok(())` if the address is (now) in the list
+    /// * `Err(HuntError::HuntFull)` if the list has reached its maximum size
+    pub fn add_global_view_only(
+        env: &Env,
+        address: &Address,
+    ) -> Result<(), crate::errors::HuntError> {
+        let member_key = Self::global_view_only_member_key(address);
+        if env.storage().instance().has(&member_key) {
+            return Ok(());
+        }
+
         let mut view_only_list = env
             .storage()
             .instance()
             .get::<_, Vec<Address>>(&Self::GLOBAL_VIEW_ONLY_KEY)
             .unwrap_or_else(|| Vec::new(env));
 
-        // Check if address already exists to avoid duplicates
-        if view_only_list.first_index_of(address).is_none() {
-            view_only_list.push_back(address.clone());
-            env.storage()
-                .instance()
-                .set(&Self::GLOBAL_VIEW_ONLY_KEY, &view_only_list);
+        if view_only_list.len() >= MAX_VIEW_ONLY_ENTRIES {
+            return Err(crate::errors::HuntError::HuntFull);
         }
+
+        view_only_list.push_back(address.clone());
+        env.storage()
+            .instance()
+            .set(&Self::GLOBAL_VIEW_ONLY_KEY, &view_only_list);
+        env.storage().instance().set(&member_key, &());
+        env.storage()
+            .instance()
+            .extend_ttl(INSTANCE_TTL_THRESHOLD, INSTANCE_TTL_EXTEND_TO);
+        Ok(())
     }
 
     /// Removes an address from the global view-only list.
@@ -1331,6 +1419,7 @@ impl Storage {
     /// * `env` - The Soroban environment
     /// * `address` - The address to revoke global view-only access
     pub fn remove_global_view_only(env: &Env, address: &Address) {
+        let member_key = Self::global_view_only_member_key(address);
         let mut view_only_list = env
             .storage()
             .instance()
@@ -1342,10 +1431,14 @@ impl Storage {
             env.storage()
                 .instance()
                 .set(&Self::GLOBAL_VIEW_ONLY_KEY, &view_only_list);
+            env.storage().instance().remove(&member_key);
         }
     }
 
     /// Checks if an address has global view-only access.
+    ///
+    /// Backed by a per-address membership key, so this is an O(1) lookup and
+    /// does not scan the global view-only list.
     ///
     /// # Arguments
     /// * `env` - The Soroban environment
@@ -1354,28 +1447,42 @@ impl Storage {
     /// # Returns
     /// `true` if the address has global view-only access, `false` otherwise
     pub fn is_global_view_only(env: &Env, address: &Address) -> bool {
+        env.storage()
+            .instance()
+            .has(&Self::global_view_only_member_key(address))
+    }
+
+    /// Gets a page of global view-only addresses.
+    ///
+    /// # Arguments
+    /// * `env` - The Soroban environment
+    /// * `offset` - The number of entries to skip before returning results
+    /// * `limit` - The maximum number of entries to return
+    ///
+    /// # Returns
+    /// A vector of addresses with global view-only access, respecting the
+    /// requested `offset`/`limit` window.
+    pub fn get_global_view_only_list(env: &Env, offset: u32, limit: u32) -> Vec<Address> {
         let view_only_list = env
             .storage()
             .instance()
             .get::<_, Vec<Address>>(&Self::GLOBAL_VIEW_ONLY_KEY)
             .unwrap_or_else(|| Vec::new(env));
 
-        view_only_list.first_index_of(address).is_some()
+        let start = offset;
+        let end = core::cmp::min(offset.saturating_add(limit), view_only_list.len());
+        let mut result = Vec::new(env);
+        if start >= view_only_list.len() {
+            return result;
+        }
+        for i in start..end {
+            if let Some(addr) = view_only_list.get(i) {
+                result.push_back(addr);
+            }
+        }
+        result
     }
 
-    /// Gets all global view-only addresses.
-    ///
-    /// # Arguments
-    /// * `env` - The Soroban environment
-    ///
-    /// # Returns
-    /// A vector of all addresses with global view-only access
-    pub fn get_global_view_only_list(env: &Env) -> Vec<Address> {
-        env.storage()
-            .instance()
-            .get::<_, Vec<Address>>(&Self::GLOBAL_VIEW_ONLY_KEY)
-            .unwrap_or_else(|| Vec::new(env))
-    }
 
     // ========== Ban Storage Functions ==========
 
@@ -1649,6 +1756,23 @@ impl Storage {
                 if env.storage().persistent().has(&progress) {
                     persistent_removed = persistent_removed.saturating_add(1);
                 }
+            }
+        }
+
+        // ── Per-view-only-address entries ────────────────────────────────
+        // Each member marker shares the hunt_id, so it must be enumerated from
+        // the view-only list (bounded by MAX_VIEW_ONLY_ENTRIES).
+        let view_only_list: Vec<Address> = env
+            .storage()
+            .instance()
+            .get(&Self::view_only_key(hunt_id))
+            .unwrap_or_else(|| Vec::new(env));
+        for viewer in view_only_list.iter() {
+            let member_key = Self::view_only_member_key(hunt_id, &viewer);
+            if remove {
+                Self::gc_remove_instance(env, &member_key, &mut instance_removed);
+            } else if env.storage().instance().has(&member_key) {
+                instance_removed = instance_removed.saturating_add(1);
             }
         }
 

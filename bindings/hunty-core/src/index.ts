@@ -1274,7 +1274,7 @@ export interface Client {
   /**
    * Construct and simulate a get_view_only_list transaction. Returns an `AssembledTransaction` object which will have a `result` field containing the result of the simulation. If this transaction changes contract state, you will need to call `signAndSend()` on the returned object.
    */
-  get_view_only_list: ({hunt_id}: {hunt_id: u64}, options?: MethodOptions) => Promise<AssembledTransaction<Array<string>>>
+  get_view_only_list: ({hunt_id, offset, limit}: {hunt_id: u64, offset: u32, limit: u32}, options?: MethodOptions) => Promise<AssembledTransaction<Array<string>>>
 
   /**
    * Construct and simulate a is_contract_paused transaction. Returns an `AssembledTransaction` object which will have a `result` field containing the result of the simulation. If this transaction changes contract state, you will need to call `signAndSend()` on the returned object.
@@ -1482,7 +1482,7 @@ export interface Client {
   /**
    * Construct and simulate a get_global_view_only_list transaction. Returns an `AssembledTransaction` object which will have a `result` field containing the result of the simulation. If this transaction changes contract state, you will need to call `signAndSend()` on the returned object.
    */
-  get_global_view_only_list: (options?: MethodOptions) => Promise<AssembledTransaction<Array<string>>>
+  get_global_view_only_list: ({offset, limit}: {offset: u32, limit: u32}, options?: MethodOptions) => Promise<AssembledTransaction<Array<string>>>
 
   /**
    * Construct and simulate a get_hunt_leaderboard_window transaction. Returns an `AssembledTransaction` object which will have a `result` field containing the result of the simulation. If this transaction changes contract state, you will need to call `signAndSend()` on the returned object.
