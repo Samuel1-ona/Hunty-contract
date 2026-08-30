@@ -3517,11 +3517,139 @@ mod test {
                     None,
                 )
                 .unwrap();
-                HuntyCore::add_clue(env.clone(), hid, question, answer, 1, false, Some(11), None)
+                HuntyCore::add_clue(env.clone(), hid, question, answer, 1, false, Some(6), None)
                     .unwrap_err()
             });
 
             assert_eq!(err, HuntErrorCode::InvalidDifficulty);
+        }
+
+        #[test]
+        fn test_add_clue_points_boundaries() {
+            let env = Env::default();
+            env.ledger().set_timestamp(1_700_000_000);
+            env.mock_all_auths();
+            let creator = Address::generate(&env);
+
+            with_core_contract(&env, |env, _cid| {
+                let hid = HuntyCore::create_hunt(
+                    env.clone(),
+                    creator.clone(),
+                    String::from_str(env, "Hunt"),
+                    String::from_str(env, "Desc"),
+                    None,
+                    None,
+                    0,
+                    None,
+                    None,
+                )
+                .unwrap();
+
+                // Lower boundary (1) is accepted.
+                HuntyCore::add_clue(
+                    env.clone(),
+                    hid,
+                    String::from_str(env, "Q1"),
+                    String::from_str(env, "a1"),
+                    1,
+                    false,
+                    Some(1),
+                    None,
+                )
+                .unwrap();
+
+                // Upper boundary (10_000) is accepted.
+                HuntyCore::add_clue(
+                    env.clone(),
+                    hid,
+                    String::from_str(env, "Q2"),
+                    String::from_str(env, "a2"),
+                    10_000,
+                    false,
+                    Some(1),
+                    None,
+                )
+                .unwrap();
+
+                // Just above the cap is rejected.
+                let err = HuntyCore::add_clue(
+                    env.clone(),
+                    hid,
+                    String::from_str(env, "Q3"),
+                    String::from_str(env, "a3"),
+                    10_001,
+                    false,
+                    Some(1),
+                    None,
+                )
+                .unwrap_err();
+                assert_eq!(err, HuntErrorCode::InvalidPoints);
+            });
+        }
+
+        #[test]
+        fn test_add_clue_difficulty_boundaries() {
+            let env = Env::default();
+            env.ledger().set_timestamp(1_700_000_000);
+            env.mock_all_auths();
+            let creator = Address::generate(&env);
+
+            with_core_contract(&env, |env, _cid| {
+                let hid = HuntyCore::create_hunt(
+                    env.clone(),
+                    creator.clone(),
+                    String::from_str(env, "Hunt"),
+                    String::from_str(env, "Desc"),
+                    None,
+                    None,
+                    0,
+                    None,
+                    None,
+                )
+                .unwrap();
+
+                // Lower boundary (1) is accepted.
+                HuntyCore::add_clue(
+                    env.clone(),
+                    hid,
+                    String::from_str(env, "Q1"),
+                    String::from_str(env, "a1"),
+                    10,
+                    false,
+                    Some(1),
+                    None,
+                )
+                .unwrap();
+
+                // Upper boundary (5) is accepted.
+                let last_id = HuntyCore::add_clue(
+                    env.clone(),
+                    hid,
+                    String::from_str(env, "Q2"),
+                    String::from_str(env, "a2"),
+                    10,
+                    false,
+                    Some(5),
+                    None,
+                )
+                .unwrap();
+                let stored = Storage::get_clue(env, hid, last_id).unwrap();
+                assert_eq!(stored.difficulty, 5);
+
+                // One above the top tier is rejected.
+                let err = HuntyCore::add_clue(
+                    env.clone(),
+                    hid,
+                    String::from_str(env, "Q3"),
+                    String::from_str(env, "a3"),
+                    10,
+                    false,
+                    Some(6),
+                    None,
+                )
+                .unwrap_err();
+                assert_eq!(err, HuntErrorCode::InvalidDifficulty);
+            });
         }
 
         #[test]

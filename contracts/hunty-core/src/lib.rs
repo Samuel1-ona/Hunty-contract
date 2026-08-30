@@ -51,6 +51,16 @@ const ANSWER_SUBMISSION_FUTURE_SKEW_SECS: u64 = 30;
 /// Maximum number of members allowed in a team.
 #[allow(dead_code)]
 const MAX_TEAM_SIZE: u32 = 10;
+/// Minimum points a clue can be worth.
+pub(crate) const MIN_CLUE_POINTS: u32 = 1;
+/// Maximum points a clue can be worth. A clue above this cap multiplies into
+/// a score that saturates u32 and flattens the leaderboard into a tie.
+pub(crate) const MAX_CLUE_POINTS: u32 = 10_000;
+/// Lowest difficulty tier for a clue. 1 = easiest.
+pub(crate) const MIN_CLUE_DIFFICULTY: u32 = 1;
+/// Highest difficulty tier for a clue. These are the tiers the UI exposes:
+/// 1 = easiest, 5 = hardest. Difficulty is a multiplier on a clue's points.
+pub(crate) const MAX_CLUE_DIFFICULTY: u32 = 5;
 
 #[contract]
 pub struct HuntyCore;
@@ -460,8 +470,11 @@ impl HuntyCore {
     /// * `hunt_id` - The hunt to add the clue to
     /// * `question` - The clue question text (max 2000 chars, non-empty)
     /// * `answer` - Plain-text answer; normalized (trimmed, lowercased) then hashed
-    /// * `points` - Points awarded for solving this clue
+    /// * `points` - Points awarded for solving this clue (must be within 1..=10_000)
     /// * `is_required` - Whether this clue must be solved to complete the hunt
+    /// * `difficulty` - Optional difficulty tier (defaults to 1) used as a multiplier on
+    ///   the clue's points. Valid scale is 1..=5, where 1 is easiest and 5 is hardest.
+    /// * `weight` - Optional weight multiplier (defaults to 1)
     ///
     /// # Returns
     /// The sequential clue ID assigned within the hunt
@@ -473,6 +486,8 @@ impl HuntyCore {
     /// * `TooManyClues` - Hunt already has max clues
     /// * `InvalidQuestion` - Question empty or too long
     /// * `InvalidAnswer` - Answer empty or too long
+    /// * `InvalidPoints` - Points are outside the allowed 1..=10_000 range
+    /// * `InvalidDifficulty` - Difficulty is outside the allowed 1..=5 tier scale
     #[allow(clippy::too_many_arguments)]
     pub fn add_clue(
         env: Env,
@@ -576,8 +591,8 @@ impl HuntyCore {
         difficulty: Option<u32>,
         weight: Option<u32>,
     ) -> Result<u32, HuntErrorCode> {
-        let difficulty_val = difficulty.unwrap_or(1);
-        if difficulty_val == 0 || difficulty_val > 10 {
+        let difficulty_val = difficulty.unwrap_or(MIN_CLUE_DIFFICULTY);
+        if difficulty_val < MIN_CLUE_DIFFICULTY || difficulty_val > MAX_CLUE_DIFFICULTY {
             return Err(HuntErrorCode::InvalidDifficulty);
         }
 
@@ -586,19 +601,13 @@ impl HuntyCore {
             return Err(HuntErrorCode::InvalidQuestion);
         }
 
-        // Get hunt to access default_points
-        let hunt = Storage::get_hunt_or_error(env, hunt_id).map_err(HuntErrorCode::from)?;
-
-        // Apply default_points when clue points is 0
-        let final_points = if points == 0 {
-            hunt.default_points
-        } else {
-            points
-        };
-
-        if points == 0 {
+        // Clue points must stay within [MIN_CLUE_POINTS, MAX_CLUE_POINTS].
+        // 0 is treated as unset (invalid), and a value above the cap multiplies
+        // into a score that saturates u32, tying the leaderboard.
+        if points < MIN_CLUE_POINTS || points > MAX_CLUE_POINTS {
             return Err(HuntErrorCode::InvalidPoints);
         }
+        let final_points = points;
         let question = crate::sanitization::StringSanitizer::sanitize(
             env,
             &question,
@@ -1042,7 +1051,7 @@ impl HuntyCore {
     }
 
     fn validate_difficulty(value: u32) -> Result<(), HuntErrorCode> {
-        if value == 0 || value > 10 {
+        if value < MIN_CLUE_DIFFICULTY || value > MAX_CLUE_DIFFICULTY {
             return Err(HuntErrorCode::InvalidDifficulty);
         }
         Ok(())
