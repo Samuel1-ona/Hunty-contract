@@ -2681,16 +2681,10 @@ impl HuntyCore {
         )
         .map_err(HuntErrorCode::from)?;
 
-        Storage::save_processed_submission(
-            &env,
-            hunt_id,
-            clue_id,
-            &player,
-            submission_nonce,
-            submitted_at,
-            submitted_at.saturating_add(ANSWER_SUBMISSION_WINDOW_SECS),
-        );
-
+        // All cheap validation (player registration, clue existence, completion state, rate
+        // limits) runs BEFORE we write the processed-submission entry.  This prevents nonce
+        // exhaustion on validation failures and stops unregistered addresses from bloating
+        // ledger storage.  The replay guard above is a read-only check and stays in place.
         let mut progress = Storage::get_player_progress(&env, hunt_id, &player)
             .ok_or(HuntErrorCode::PlayerNotRegistered)?;
 
@@ -2742,6 +2736,18 @@ impl HuntyCore {
             }
             progress.clue_last_attempts.set(clue_id, current_time);
         }
+
+        // All validation passed — mark the nonce as consumed so the same envelope cannot be
+        // replayed, then proceed to answer evaluation.
+        Storage::save_processed_submission(
+            &env,
+            hunt_id,
+            clue_id,
+            &player,
+            submission_nonce,
+            submitted_at,
+            submitted_at.saturating_add(ANSWER_SUBMISSION_WINDOW_SECS),
+        );
 
         let submitted_hash = Self::normalize_and_hash_answer(&env, hunt_id, clue_id, &answer)
             .map_err(HuntErrorCode::from)?;
@@ -2809,16 +2815,10 @@ impl HuntyCore {
         )
         .map_err(HuntErrorCode::from)?;
 
-        Storage::save_processed_submission(
-            &env,
-            hunt_id,
-            clue_id,
-            &player,
-            submission_nonce,
-            submitted_at,
-            submitted_at.saturating_add(ANSWER_SUBMISSION_WINDOW_SECS),
-        );
-
+        // All cheap validation (player registration, clue existence, completion state, rate
+        // limits) runs BEFORE we write the processed-submission entry.  This prevents nonce
+        // exhaustion on validation failures and stops unregistered addresses from bloating
+        // ledger storage.  The replay guard above is a read-only check and stays in place.
         let mut progress = Storage::get_player_progress(&env, hunt_id, &player)
             .ok_or(HuntErrorCode::PlayerNotRegistered)?;
 
@@ -2859,6 +2859,18 @@ impl HuntyCore {
             }
             progress.recent_submissions.push_back(current_time);
         }
+
+        // All validation passed — mark the nonce as consumed so the same envelope cannot be
+        // replayed, then proceed to answer evaluation.
+        Storage::save_processed_submission(
+            &env,
+            hunt_id,
+            clue_id,
+            &player,
+            submission_nonce,
+            submitted_at,
+            submitted_at.saturating_add(ANSWER_SUBMISSION_WINDOW_SECS),
+        );
 
         let answer_correct = Self::is_answer_correct(&clue, &answer_hash);
         Self::finalize_answer_submission(
