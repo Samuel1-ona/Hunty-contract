@@ -11390,4 +11390,59 @@ mod test {
         assert!(ok.is_ok(),
             "retry with same nonce after ClueNotFound must succeed, got: {:?}", ok);
     }
+
+    // ── create_hunt auth tests (Closes #789) ────────────────────────────────
+
+    /// create_hunt must reject calls that do not carry the creator's authorization.
+    /// Without env.mock_all_auths() the host will panic when require_auth() is
+    /// evaluated, which is the expected behaviour for missing auth in tests.
+    #[test]
+    #[should_panic]
+    fn test_create_hunt_fails_without_creator_auth() {
+        let env = Env::default();
+        env.ledger().set_timestamp(1_700_000_000);
+        // Intentionally do NOT call env.mock_all_auths() so that
+        // creator.require_auth() inside create_hunt panics.
+        let creator = Address::generate(&env);
+
+        with_core_contract(&env, |env, _cid| {
+            let _ = HuntyCore::create_hunt(
+                env.clone(),
+                creator.clone(),
+                String::from_str(env, "Unauthorized Hunt"),
+                String::from_str(env, "Should never be created"),
+                None,
+                None,
+                0,
+                None,
+            );
+        });
+    }
+
+    /// create_hunt succeeds and returns a valid hunt ID when the creator's auth
+    /// is present (happy path).
+    #[test]
+    fn test_create_hunt_succeeds_with_creator_auth() {
+        let env = Env::default();
+        env.ledger().set_timestamp(1_700_000_000);
+        env.mock_all_auths();
+        let creator = Address::generate(&env);
+
+        let hunt_id = with_core_contract(&env, |env, _cid| {
+            HuntyCore::create_hunt(
+                env.clone(),
+                creator.clone(),
+                String::from_str(env, "Authorized Hunt"),
+                String::from_str(env, "Created with proper auth"),
+                None,
+                None,
+                0,
+                None,
+            )
+        })
+        .expect("create_hunt should succeed with proper auth");
+
+        // The returned hunt ID must be a valid non-zero identifier.
+        assert!(hunt_id > 0, "hunt_id should be greater than 0");
+    }
 }

@@ -173,6 +173,7 @@ impl HuntyCore {
         start_multiplier_bps: Option<u32>,
         default_points: Option<u32>,
     ) -> Result<u64, HuntErrorCode> {
+        creator.require_auth();
         monitoring::Monitoring::record_invocation(&env, 50_000, true);
         if Storage::is_blacklisted(&env, &creator) {
             return Err(HuntErrorCode::AddressBlacklisted);
