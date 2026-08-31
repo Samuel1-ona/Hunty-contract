@@ -14,8 +14,7 @@ const PERSISTENT_TTL_EXTEND_TO: u32 = 518_400;
 #[contracttype]
 #[derive(Clone, Debug)]
 pub struct CreatorDailyHuntCount {
-    pub day: u64,
-    pub count: u32,
+    pub timestamps: Vec<u64>,
 }
 
 /// Storage access layer for hunts, clues, and player progress.
@@ -1452,18 +1451,59 @@ impl Storage {
         (symbol_short!("HRLCT"), creator.clone())
     }
 
-    pub fn get_creator_daily_hunt_count(env: &Env, creator: &Address, day: u64) -> u32 {
+    const HUNT_CREATION_WINDOW_SECS: u64 = 24 * 60 * 60;
+
+    fn read_creator_hunt_window(env: &Env, creator: &Address) -> Option<CreatorDailyHuntCount> {
         let key = Self::creator_daily_count_key(creator);
-        let stored: Option<CreatorDailyHuntCount> = env.storage().persistent().get(&key);
-        match stored {
-            Some(entry) if entry.day == day => entry.count,
-            _ => 0,
-        }
+        let raw: Option<Val> = env.storage().persistent().get(&key);
+        raw.and_then(|value| CreatorDailyHuntCount::try_from_val(env, &value).ok())
     }
 
-    pub fn set_creator_daily_hunt_count(env: &Env, creator: &Address, day: u64, count: u32) {
+    fn pruned_creator_hunt_timestamps(env: &Env, creator: &Address) -> Vec<u64> {
+        let stored = Self::read_creator_hunt_window(env, creator);
+        let entry = match stored {
+            Some(entry) => entry,
+            None => return Vec::new(env),
+        };
+        let cutoff = env
+            .ledger()
+            .timestamp()
+            .saturating_sub(Self::HUNT_CREATION_WINDOW_SECS);
+        let mut active = Vec::new(env);
+        for i in 0..entry.timestamps.len() {
+            if let Some(ts) = entry.timestamps.get(i) {
+                if ts > cutoff {
+                    active.push_back(ts);
+                }
+            }
+        }
+        active
+    }
+
+    pub fn get_creator_daily_hunt_count(env: &Env, creator: &Address, _day: u64) -> u32 {
+        Self::pruned_creator_hunt_timestamps(env, creator).len()
+    }
+
+    pub fn set_creator_daily_hunt_count(env: &Env, creator: &Address, _day: u64, count: u32) {
         let key = Self::creator_daily_count_key(creator);
-        let entry = CreatorDailyHuntCount { day, count };
+        let mut timestamps = Self::pruned_creator_hunt_timestamps(env, creator);
+        let now = env.ledger().timestamp();
+        let current_len = timestamps.len();
+
+        if count == 0 {
+            timestamps = Vec::new(env);
+        } else if count < current_len {
+            while timestamps.len() > count {
+                timestamps.remove(0);
+            }
+        } else {
+            let need = count - current_len;
+            for _ in 0..need {
+                timestamps.push_back(now);
+            }
+        }
+
+        let entry = CreatorDailyHuntCount { timestamps };
         env.storage().persistent().set(&key, &entry);
     }
 
