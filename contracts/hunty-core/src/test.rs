@@ -91,6 +91,67 @@ mod test {
         env.as_contract(contract_id, || f(env))
     }
 
+    #[test]
+    fn test_creator_daily_rate_limit_keeps_single_entry() {
+        let env = Env::default();
+        let creator = Address::generate(&env);
+        let contract_id = env.register(HuntyCore, ());
+        let days = [1_700_000_000u64, 1_700_086_400, 1_700_172_800];
+        let titles = [
+            "Rate Limit Day 1",
+            "Rate Limit Day 2",
+            "Rate Limit Day 3",
+        ];
+
+        for (i, timestamp) in days.iter().enumerate() {
+            env.ledger().set_timestamp(*timestamp);
+            env.mock_all_auths();
+            as_core_contract(&env, &contract_id, |env| {
+                HuntyCore::create_hunt(
+                    env.clone(),
+                    creator.clone(),
+                    String::from_str(env, titles[i]),
+                    String::from_str(env, "Verify one storage entry per creator"),
+                    None,
+                    None,
+                    0,
+                    None,
+                    None,
+                )
+                .unwrap();
+            });
+        }
+
+        let day1 = days[0] / 86_400;
+        let day2 = days[1] / 86_400;
+        let day3 = days[2] / 86_400;
+
+        assert_eq!(
+            Storage::get_creator_daily_hunt_count(&env, &creator, day1),
+            0
+        );
+        assert_eq!(
+            Storage::get_creator_daily_hunt_count(&env, &creator, day2),
+            0
+        );
+        assert_eq!(
+            Storage::get_creator_daily_hunt_count(&env, &creator, day3),
+            1
+        );
+
+        let prefix = Symbol::new(&env, "CreatorDailyHuntCount");
+        for day in [day1, day2, day3] {
+            let old_key = (prefix.clone(), creator.clone(), day);
+            assert!(
+                !env.storage().persistent().has(&old_key),
+                "rate-limit storage must not retain a per-day entry for day {}",
+                day
+            );
+        }
+
+        assert!(env.storage().persistent().has(&(prefix, creator)));
+    }
+
     /// Submits an answer at the current ledger timestamp using the given replay-protection nonce.
     fn submit_answer(
         env: &Env,
