@@ -9354,6 +9354,122 @@ mod test {
             });
         }
 
+        #[test]
+        fn test_create_hunt_rejects_start_multiplier_outside_bounds() {
+            for multiplier in [
+                crate::MIN_START_MULTIPLIER_BPS - 1,
+                crate::MAX_START_MULTIPLIER_BPS + 1,
+                u32::MAX,
+            ] {
+                let env = Env::default();
+                env.ledger().set_timestamp(1_700_000_000);
+                env.mock_all_auths();
+                let creator = Address::generate(&env);
+
+                let result = with_core_contract(&env, |env, _contract_id| {
+                    HuntyCore::create_hunt(
+                        env.clone(),
+                        creator,
+                        String::from_str(env, "Bounded multiplier hunt"),
+                        String::from_str(env, "Reject invalid score multipliers"),
+                        None,
+                        None,
+                        0,
+                        Some(multiplier),
+                        None,
+                    )
+                });
+
+                assert_eq!(result, Err(HuntErrorCode::InvalidTimeBonusConfig));
+            }
+        }
+
+        #[test]
+        fn test_create_hunt_accepts_start_multiplier_boundaries() {
+            for multiplier in [
+                crate::MIN_START_MULTIPLIER_BPS,
+                crate::MAX_START_MULTIPLIER_BPS,
+            ] {
+                let env = Env::default();
+                env.ledger().set_timestamp(1_700_000_000);
+                env.mock_all_auths();
+                let creator = Address::generate(&env);
+
+                let stored_multiplier = with_core_contract(&env, |env, _contract_id| {
+                    let hunt_id = HuntyCore::create_hunt(
+                        env.clone(),
+                        creator,
+                        String::from_str(env, "Boundary multiplier hunt"),
+                        String::from_str(env, "Accept valid score multipliers"),
+                        None,
+                        None,
+                        0,
+                        Some(multiplier),
+                        None,
+                    )?;
+                    Ok::<u32, HuntErrorCode>(
+                        Storage::get_hunt(env, hunt_id).unwrap().start_multiplier_bps,
+                    )
+                })
+                .unwrap();
+
+                assert_eq!(stored_multiplier, multiplier);
+            }
+        }
+
+        #[test]
+        fn test_calculate_score_clamps_legacy_multiplier_and_u32_conversion() {
+            use crate::types::{Clue, Hunt, HuntRewardConfig};
+
+            let env = Env::default();
+            let hunt = Hunt {
+                hunt_id: 1,
+                creator: Address::generate(&env),
+                title: String::from_str(&env, "Legacy hunt"),
+                description: String::from_str(&env, "Unbounded legacy multiplier"),
+                status: HuntStatus::Active,
+                created_at: 0,
+                activated_at: 0,
+                start_time: 0,
+                end_time: 0,
+                reward_config: HuntRewardConfig::new(&env, 0, false, None, 0, 0, 0, None),
+                total_clues: 0,
+                required_clues: 0,
+                completed_count: 0,
+                max_submissions_per_minute: 0,
+                max_attempts_per_clue: 5,
+                start_multiplier_bps: u32::MAX,
+                categories: Vec::new(&env),
+                difficulty_rating: 0,
+                difficulty_override: None,
+                time_bonus_start_bps: None,
+                time_bonus_min_bps: None,
+                time_bonus_decay_secs: None,
+                registration_deadline: 0,
+                allow_partial_scoring: false,
+                team_mode: false,
+                default_points: 100,
+                attempt_cooldown_secs: 0,
+                is_private: false,
+                invite_code_hash: None,
+                max_players: 0,
+                remaining_slots: 0,
+            };
+            let clue = Clue {
+                clue_id: 1,
+                question: String::from_str(&env, "Q"),
+                answer_hashes: Vec::new(&env),
+                points: u32::MAX,
+                is_required: true,
+                difficulty: crate::MAX_CLUE_DIFFICULTY,
+                weight: u32::MAX,
+                hint: None,
+                hint_penalty_points: 0,
+            };
+
+            assert_eq!(HuntyCore::calculate_score(&hunt, &clue, 0, 0), u32::MAX);
+        }
+
         // ========== Fuzz Tests for Answer Validation ==========
         #[test]
         fn fuzz_answer_validation() {

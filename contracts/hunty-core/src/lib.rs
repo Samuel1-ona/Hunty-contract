@@ -79,6 +79,10 @@ pub(crate) const MIN_CLUE_DIFFICULTY: u32 = 1;
 /// Highest difficulty tier for a clue. These are the tiers the UI exposes:
 /// 1 = easiest, 5 = hardest. Difficulty is a multiplier on a clue's points.
 pub(crate) const MAX_CLUE_DIFFICULTY: u32 = 5;
+/// Lowest supported initial score multiplier. 10_000 basis points is 1x.
+pub(crate) const MIN_START_MULTIPLIER_BPS: u32 = 10_000;
+/// Highest supported initial score multiplier. 50_000 basis points is 5x.
+pub(crate) const MAX_START_MULTIPLIER_BPS: u32 = 50_000;
 
 #[contract]
 pub struct HuntyCore;
@@ -161,6 +165,7 @@ impl HuntyCore {
     /// * `InvalidTitle` - If title is empty or exceeds maximum length
     /// * `InvalidDescription` - If description exceeds maximum length
     /// * `InvalidAddress` - If creator address is invalid
+    /// * `InvalidTimeBonusConfig` - If the initial score multiplier is outside 1x..=5x
     #[allow(clippy::too_many_arguments)]
     pub fn create_hunt(
         env: Env,
@@ -200,6 +205,13 @@ impl HuntyCore {
             return Err(HuntErrorCode::HuntEndTimeInPast);
         }
 
+        let start_multiplier_bps = start_multiplier_bps.unwrap_or(20_000);
+        if !(MIN_START_MULTIPLIER_BPS..=MAX_START_MULTIPLIER_BPS)
+            .contains(&start_multiplier_bps)
+        {
+            return Err(HuntErrorCode::InvalidTimeBonusConfig);
+        }
+
         // Generate unique hunt ID
         let hunt_id = Storage::next_hunt_id(&env);
 
@@ -237,7 +249,7 @@ impl HuntyCore {
             completed_count: 0,
             max_submissions_per_minute,
             max_attempts_per_clue: 5,
-            start_multiplier_bps: start_multiplier_bps.unwrap_or(20000),
+            start_multiplier_bps,
             registration_deadline: 0,
             allow_partial_scoring: false,
             team_mode: false,
@@ -2477,24 +2489,24 @@ impl HuntyCore {
         } else {
             decrease_bps as u32
         };
+        // Clamp legacy hunts created before multiplier validation as well as
+        // new hunts. This keeps the arithmetic bound true for stored data.
+        let bounded_start_multiplier = hunt
+            .start_multiplier_bps
+            .clamp(MIN_START_MULTIPLIER_BPS, MAX_START_MULTIPLIER_BPS);
         let multiplier_bps = core::cmp::max(
-            10000, // Minimum 1x
-            hunt.start_multiplier_bps.saturating_sub(decrease_bps_u32),
+            MIN_START_MULTIPLIER_BPS,
+            bounded_start_multiplier.saturating_sub(decrease_bps_u32),
         );
         let base_points = clue
             .points
             .saturating_mul(clue.difficulty)
             .saturating_mul(clue.weight);
-        // Use saturating arithmetic for the score multiplication to prevent overflow
-        let score = (base_points as u64)
-            .saturating_mul(multiplier_bps as u64)
-            .saturating_div(10000);
-        // Clamp to u32::MAX to prevent silent truncation
-        if score > u32::MAX as u64 {
-            u32::MAX
-        } else {
-            score as u32
-        }
+        // u32::MAX * MAX_START_MULTIPLIER_BPS fits in u64. Clamp before the
+        // final cast so the conversion is mathematically unable to truncate.
+        let score = u64::from(base_points) * u64::from(multiplier_bps)
+            / u64::from(MIN_START_MULTIPLIER_BPS);
+        score.min(u64::from(u32::MAX)) as u32
     }
 
     /// In team mode, returns true if any teammate has already completed this clue.
