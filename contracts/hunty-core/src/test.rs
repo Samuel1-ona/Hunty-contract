@@ -3977,6 +3977,36 @@ mod test {
         }
 
         #[test]
+        #[should_panic]
+        fn test_activate_hunt_requires_creator_auth() {
+            let env = Env::default();
+            env.ledger().set_timestamp(1_700_000_000);
+            env.mock_all_auths();
+            let creator = Address::generate(&env);
+
+            let title = String::from_str(&env, "Test Hunt");
+            let description = String::from_str(&env, "Test description");
+
+            with_core_contract(&env, |env, _cid| {
+                let hunt_id = HuntyCore::create_hunt(
+                    env.clone(),
+                    creator.clone(),
+                    title,
+                    description,
+                    None,
+                    None,
+                    0,
+                    None,
+                    None,
+                )
+                .unwrap();
+
+                env.set_auths(&[]);
+                let _ = HuntyCore::activate_hunt(env.clone(), hunt_id, creator.clone());
+            });
+        }
+
+        #[test]
         fn test_activate_hunt_no_clues() {
             let env = Env::default();
             env.ledger().set_timestamp(1_700_000_000);
