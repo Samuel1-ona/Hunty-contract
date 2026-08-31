@@ -82,8 +82,7 @@ impl HuntyCore {
         if Storage::get_admin(&env).is_some() {
             return Err(HuntErrorCode::Unauthorized);
         }
-        Storage::set_admin(&env, &admin);
-        Ok(())
+            Ok(())
     }
 
     #[allow(dead_code)]
