@@ -1975,8 +1975,27 @@ impl HuntyCore {
                     &Symbol::new(env, "distribute_rewards"),
                     args,
                 );
-                if !matches!(result, Ok(Ok(()))) {
-                    return Err(HuntErrorCode::RewardDistributionFailed);
+                match result {
+                    Ok(Ok(())) => {}
+                    Ok(Err(upstream_code)) => {
+                        // Emit a diagnostic event carrying the originating reward-manager
+                        // error code (range 2001–2999) so off-chain clients can distinguish
+                        // e.g. InsufficientPool (2002) from Unauthorized (2010) without
+                        // needing per-upstream variants in HuntErrorCode.
+                        env.events().publish(
+                            (Symbol::new(env, "reward_distribution_failed"),),
+                            (hunt.hunt_id, upstream_code as u32),
+                        );
+                        return Err(HuntErrorCode::RewardDistributionFailed);
+                    }
+                    Err(_invoke_err) => {
+                        // Host-level invocation failure (contract not found, out of gas, etc.)
+                        env.events().publish(
+                            (Symbol::new(env, "reward_distribution_failed"),),
+                            (hunt.hunt_id, 0u32),
+                        );
+                        return Err(HuntErrorCode::RewardDistributionFailed);
+                    }
                 }
             }
         }

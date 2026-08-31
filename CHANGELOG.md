@@ -7,6 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **BREAKING** — Error code namespacing (#836). All three contracts now use
+  non-overlapping numeric ranges so a code read from any transaction envelope
+  is unambiguous without knowing which contract frame produced it:
+  - `hunty-core` → **1001–1050** (was 1–50)
+  - `reward-manager` → **2001–2040** (was 1–40)
+  - `nft-reward` → **3001–3019** (was 1–19)
+  - `reward-interface` `RewardErrorCode` mirror updated to 2001–2024 to match.
+
+  Clients that switch on raw error integers must update their comparisons.
+  Clients using the named TypeScript binding objects (`HuntErrorCode`,
+  `RewardErrorCode`, `NftErrorCode`) in `bindings/` are unaffected by name,
+  but the numeric keys in those objects have changed accordingly.
+
+- **BREAKING** — Cross-contract error propagation (#836). When a
+  `distribute_rewards` call into `reward-manager` fails, `hunty-core` now
+  emits a `reward_distribution_failed` diagnostic event **before** returning
+  `RewardDistributionFailed` (1020). The event payload is
+  `(hunt_id: u64, upstream_code: u32)` where `upstream_code` is the
+  originating `RewardErrorCode` discriminant (2001–2040), or `0` for a
+  host-level invocation error. Off-chain clients can inspect this event to
+  distinguish e.g. `InsufficientPool` (2002) from `Unauthorized` (2010)
+  without requiring additional `HuntErrorCode` variants (the enum is already
+  at Soroban's 50-variant cap).
+
 ### Fixed
 
 - `hunty-core`: view-only, admin-rotation, and pause functions are exported inside `#[contractimpl]` and present in the contract ABI/spec (#604).

@@ -3,63 +3,73 @@ use soroban_sdk::contracterror;
 // NOTE: Soroban's #[contracterror] XDR spec caps error enums at 50 cases
 // (ScSpecUdtErrorEnumV0::cases is a VecM_, 50>). This enum is already at
 // that limit. If a new error code is ever needed, reuse a semantically-close
-// existing variant instead of adding one (see InviteNotConfigured/
-// InvalidInviteCode below for the established pattern) rather than removing
-// or renumbering an existing variant.
+// existing variant instead of adding one rather than removing or renumbering
+// an existing variant.
+//
+// NAMESPACE: hunty-core error codes occupy the range 1001–1999.
+//   reward-manager uses 2001–2999 (see contracts/reward-manager/src/errors.rs).
+//   nft-reward      uses 3001–3999 (see contracts/nft-reward/src/errors.rs).
+// This guarantees that a numeric code read from a transaction envelope is
+// unambiguous regardless of which contract frame produced it.
 #[contracterror]
 #derive(Clone, Copy, Debug, Eq, PartialEq, PartialOrd, Ord)]
 #[repr(u32)]
 pub enum HuntErrorCode {
-    HuntNotFound = 1,
-    ClueNotFound = 2,
-    InvalidHuntStatus = 3,
-    PlayerNotRegistered = 4,
-    ClueAlreadyCompleted = 5,
-    InvalidAnswer = 6,
-    HuntNotActive = 7,
-    Unauthorized = 8,
-    InsufficientRewardPool = 9,
-    DuplicateRegistration = 10,
-    InvalidTitle = 11,
-    InvalidDescription = 12,
-    InvalidAddress = 13,
-    TooManyClues = 14,
-    InvalidQuestion = 15,
-    RefundFailed = 16,
-    NoCluesAdded = 17,
-    HuntNotCompleted = 18,
-    RewardAlreadyClaimed = 19,
-    RewardDistributionFailed = 20,
-    NoRewardsConfigured = 21,
-    DuplicateSubmission = 22,
-    SubmissionExpired = 23,
-    BannedPlayer = 24,
-    NoRequiredClues = 25,
-    RateLimitExceeded = 26,
-    ScoreOverflow = 27,
-    RegistrationsPaused = 28,
-    AnswersPaused = 29,
-    RewardsPaused = 30,
-    HuntEndTimeInPast = 31,
-    NoPendingAdmin = 32,
-    PendingAdminMismatch = 33,
-    InvalidRarity = 34,
-    InvalidTimeBonusConfig = 35,
-    AddressBlacklisted = 36,
-    ContractPaused = 37,
-    InvalidMaxAttempts = 38,
-    InvalidWeight = 39,
-    HintNotAvailable = 40,
-    HintAlreadyUnlocked = 41,
-    InsufficientScore = 42,
-    TooManyCategories = 43,
-    InvalidCategory = 44,
-    InvalidDifficulty = 45,
-    CorruptPlayerProgress = 46,
-    HuntNotStarted = 47,
-    AdminAlreadyProposed = 48,
-    InvalidPoints = 49,
-    HuntFull = 50,
+    HuntNotFound = 1001,
+    ClueNotFound = 1002,
+    InvalidHuntStatus = 1003,
+    PlayerNotRegistered = 1004,
+    ClueAlreadyCompleted = 1005,
+    InvalidAnswer = 1006,
+    HuntNotActive = 1007,
+    Unauthorized = 1008,
+    InsufficientRewardPool = 1009,
+    DuplicateRegistration = 1010,
+    InvalidTitle = 1011,
+    InvalidDescription = 1012,
+    InvalidAddress = 1013,
+    TooManyClues = 1014,
+    InvalidQuestion = 1015,
+    RefundFailed = 1016,
+    NoCluesAdded = 1017,
+    HuntNotCompleted = 1018,
+    RewardAlreadyClaimed = 1019,
+    /// A RewardManager cross-contract call failed. The originating contract's
+    /// error code is published in the `reward_distribution_failed` diagnostic
+    /// event emitted immediately before this error is returned, allowing
+    /// off-chain clients to distinguish e.g. `InsufficientPool` (2002) from
+    /// `Unauthorized` (2010) without needing per-upstream variants here.
+    RewardDistributionFailed = 1020,
+    NoRewardsConfigured = 1021,
+    DuplicateSubmission = 1022,
+    SubmissionExpired = 1023,
+    BannedPlayer = 1024,
+    NoRequiredClues = 1025,
+    RateLimitExceeded = 1026,
+    ScoreOverflow = 1027,
+    RegistrationsPaused = 1028,
+    AnswersPaused = 1029,
+    RewardsPaused = 1030,
+    HuntEndTimeInPast = 1031,
+    NoPendingAdmin = 1032,
+    PendingAdminMismatch = 1033,
+    InvalidRarity = 1034,
+    InvalidTimeBonusConfig = 1035,
+    AddressBlacklisted = 1036,
+    ContractPaused = 1037,
+    InvalidMaxAttempts = 1038,
+    InvalidWeight = 1039,
+    HintNotAvailable = 1040,
+    HintAlreadyUnlocked = 1041,
+    InsufficientScore = 1042,
+    TooManyCategories = 1043,
+    InvalidCategory = 1044,
+    InvalidDifficulty = 1045,
+    CorruptPlayerProgress = 1046,
+    HuntNotStarted = 1047,
+    AdminAlreadyProposed = 1048,
+    InvalidPoints = 1049,
+    HuntFull = 1050,
 }
 
 #derive(Debug)
