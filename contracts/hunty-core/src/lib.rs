@@ -24,7 +24,8 @@ use crate::types::{
 };
 use reward_interface::RewardErrorCode;
 use soroban_sdk::{
-    contract, contractimpl, Address, Bytes, BytesN, Env, IntoVal, String, Symbol, Val, Vec,
+    contract, contractimpl, contracttype, Address, Bytes, BytesN, Env, IntoVal, String, Symbol,
+    Val, Vec,
 };
 
 const MAX_TITLE_BYTES: u32 = 200;
@@ -35,13 +36,45 @@ const MAX_DESCRIPTION_BYTES: u32 = 2000;
 /// Sentinel value for `max_submissions_per_minute` indicating no rate limit.
 const UNLIMITED_SUBMISSIONS_PER_MINUTE: u32 = 0;
 
+const HUNT_CREATION_WINDOW_SECS: u64 = 86_400;
+const HUNT_CREATION_LIMIT: u32 = 10;
+
+#[derive(Clone)]
+#[contracttype]
+enum CreationRateLimitKey {
+    Timestamps(Address),
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use soroban_sdk::testutils::Address as _;
 
     #[test]
     fn max_submissions_per_minute_zero_is_unlimited_sentinel() {
         assert_eq!(UNLIMITED_SUBMISSIONS_PER_MINUTE, 0);
+    }
+
+    #[test]
+    fn hunt_creation_rate_limit_is_rolling_across_utc_midnight() {
+        let env = Env::default();
+        env.ledger().set_timestamp(86_399);
+        let creator = Address::generate(&env);
+        for _ in 0..10 {
+            assert!(
+                HuntyCore::check_hunt_creation_rate_limit(&env, &creator, env.ledger().timestamp())
+                    .is_ok()
+            );
+        }
+        assert!(
+            HuntyCore::check_hunt_creation_rate_limit(&env, &creator, env.ledger().timestamp())
+                .is_err()
+        );
+        env.ledger().set_timestamp(86_401);
+        assert!(
+            HuntyCore::check_hunt_creation_rate_limit(&env, &creator, env.ledger().timestamp())
+                .is_err()
+        );
     }
 }
 const MAX_QUESTION_LENGTH: u32 = 2000;
@@ -140,6 +173,33 @@ impl HuntyCore {
         Ok(())
     }
 
+    fn check_hunt_creation_rate_limit(
+        env: &Env,
+        creator: &Address,
+        current_time: u64,
+    ) -> Result<(), HuntErrorCode> {
+        let key = CreationRateLimitKey::Timestamps(creator.clone());
+        let timestamps: Vec<u64> = env
+            .storage()
+            .persistent()
+            .get(&key)
+            .unwrap_or_else(|| Vec::new(env));
+        let mut recent = Vec::new(env);
+        for i in 0..timestamps.len() {
+            // SAFETY: i is within the vector bounds established by the enclosing loop
+            let ts = timestamps.get(i).unwrap();
+            if current_time.saturating_sub(ts) < HUNT_CREATION_WINDOW_SECS {
+                recent.push_back(ts);
+            }
+        }
+        if recent.len() >= HUNT_CREATION_LIMIT {
+            return Err(HuntErrorCode::from(HuntError::RateLimitExceeded));
+        }
+        recent.push_back(current_time);
+        env.storage().persistent().set(&key, &recent);
+        Ok(())
+    }
+
     /// Creates a new scavenger hunt with the provided metadata.
     ///
     /// # Arguments
@@ -192,7 +252,7 @@ impl HuntyCore {
         .map_err(|_| HuntErrorCode::InvalidDescription)?;
 
         let current_time = env.ledger().timestamp();
-        rate_limit::RateLimiter::check_and_increment(&env, &creator, current_time)?;
+        Self::check_hunt_creation_rate_limit(&env, &creator, current_time)?;
 
         let end_time_val = end_time.unwrap_or(0);
         if end_time_val != 0 && end_time_val < current_time.saturating_add(MIN_HUNT_DURATION) {
