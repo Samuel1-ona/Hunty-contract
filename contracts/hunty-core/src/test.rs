@@ -11561,4 +11561,115 @@ mod test {
         // The returned hunt ID must be a valid non-zero identifier.
         assert!(hunt_id > 0, "hunt_id should be greater than 0");
     }
+
+    #[test]
+    fn test_start_time_validation_and_playability() {
+        let env = Env::default();
+        let now = 1_700_000_000;
+        env.ledger().set_timestamp(now);
+        env.mock_all_auths();
+        let creator = Address::generate(&env);
+        let player = Address::generate(&env);
+
+        let start_time = now + 10_000;
+        let end_time = now + 20_000;
+
+        with_core_contract(&env, |env, _cid| {
+            // 1. start_time >= end_time is rejected
+            let err_equal = HuntyCore::create_hunt(
+                env.clone(),
+                creator.clone(),
+                String::from_str(env, "Equal Times"),
+                String::from_str(env, "Desc"),
+                Some(start_time),
+                Some(start_time),
+                0,
+                None,
+                None,
+            );
+            assert_eq!(err_equal, Err(HuntErrorCode::HuntEndTimeInPast));
+
+            let err_greater = HuntyCore::create_hunt(
+                env.clone(),
+                creator.clone(),
+                String::from_str(env, "Greater Start"),
+                String::from_str(env, "Desc"),
+                Some(start_time + 100),
+                Some(start_time),
+                0,
+                None,
+                None,
+            );
+            assert_eq!(err_greater, Err(HuntErrorCode::HuntEndTimeInPast));
+
+            // 2. start_time < end_time succeeds
+            let hunt_id = HuntyCore::create_hunt(
+                env.clone(),
+                creator.clone(),
+                String::from_str(env, "Valid Scheduled Hunt"),
+                String::from_str(env, "Desc"),
+                Some(start_time),
+                Some(end_time),
+                0,
+                None,
+                None,
+            )
+            .unwrap();
+
+            let clue_id = HuntyCore::add_clue(
+                env.clone(),
+                hunt_id,
+                String::from_str(env, "Question 1"),
+                String::from_str(env, "Answer 1"),
+                100,
+                true,
+                Some(1),
+                None,
+            )
+            .unwrap();
+
+            HuntyCore::activate_hunt(env.clone(), hunt_id, creator.clone()).unwrap();
+
+            // 3. Before start_time: Hunt is not active, registration & submission fail
+            let hunt = Storage::get_hunt(env, hunt_id).unwrap();
+            assert!(!hunt.is_active(now));
+
+            let reg_err = HuntyCore::register_player(env.clone(), hunt_id, player.clone());
+            assert_eq!(reg_err, Err(HuntErrorCode::HuntNotStarted));
+
+            let sub_err = HuntyCore::submit_answer(
+                env.clone(),
+                hunt_id,
+                clue_id,
+                player.clone(),
+                String::from_str(env, "Answer 1"),
+                100,
+                now,
+            );
+            assert_eq!(sub_err, Err(HuntErrorCode::HuntNotActive));
+
+            // 4. Advance time to start_time: Hunt is active, registration & submission succeed
+            env.ledger().set_timestamp(start_time);
+            let hunt_at_start = Storage::get_hunt(env, hunt_id).unwrap();
+            assert!(hunt_at_start.is_active(start_time));
+
+            HuntyCore::register_player(env.clone(), hunt_id, player.clone()).unwrap();
+
+            HuntyCore::submit_answer(
+                env.clone(),
+                hunt_id,
+                clue_id,
+                player.clone(),
+                String::from_str(env, "Answer 1"),
+                101,
+                start_time,
+            )
+            .unwrap();
+
+            // 5. Advance time to end_time: Hunt is no longer active
+            env.ledger().set_timestamp(end_time);
+            let hunt_at_end = Storage::get_hunt(env, hunt_id).unwrap();
+            assert!(!hunt_at_end.is_active(end_time));
+        });
+    }
 }

@@ -151,10 +151,10 @@ impl HuntyCore {
     /// * `creator` - The address of the hunt creator (typically use env.invoker() from the caller)
     /// * `title` - The title of the hunt (max 200 characters)
     /// * `description` - The description of the hunt (max 2000 characters)
-    /// * `start_time` - Optional start timestamp. When set, players cannot register
-    ///   or submit answers until the ledger timestamp reaches this value. 0 means
-    ///   no start time restriction (immediately playable once activated).
-    /// * `end_time` - Optional end timestamp (0 means no end time restriction)
+    /// * `start_time` - Optional start timestamp (0 or None means no start time restriction).
+    ///   When set, players cannot register or submit answers until the ledger timestamp
+    ///   reaches this value. Must be strictly less than `end_time` if `end_time` is also set.
+    /// * `end_time` - Optional end timestamp (0 or None means no end time restriction)
     /// * `max_submissions_per_minute` - Maximum number of submissions allowed per
     ///   minute per player. [`UNLIMITED_SUBMISSIONS_PER_MINUTE`] (0) means no limit.
     ///
@@ -200,8 +200,12 @@ impl HuntyCore {
         let current_time = env.ledger().timestamp();
         rate_limit::RateLimiter::check_and_increment(&env, &creator, current_time)?;
 
+        let start_time_val = start_time.unwrap_or(0);
         let end_time_val = end_time.unwrap_or(0);
         if end_time_val != 0 && end_time_val < current_time.saturating_add(MIN_HUNT_DURATION) {
+            return Err(HuntErrorCode::HuntEndTimeInPast);
+        }
+        if start_time_val != 0 && end_time_val != 0 && start_time_val >= end_time_val {
             return Err(HuntErrorCode::HuntEndTimeInPast);
         }
 
@@ -238,7 +242,7 @@ impl HuntyCore {
             status: HuntStatus::Draft,
             created_at: current_time,
             activated_at: 0, // Will be set when hunt is activated
-            start_time: start_time.unwrap_or(0),
+            start_time: start_time_val,
             end_time: end_time_val,
             reward_config,
             time_bonus_start_bps: None,
