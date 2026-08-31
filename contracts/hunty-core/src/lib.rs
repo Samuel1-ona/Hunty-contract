@@ -1451,8 +1451,6 @@ impl HuntyCore {
             return Err(HuntErrorCode::Unauthorized);
         }
 
-        // Cannot cancel a completed hunt
-
         // Cannot cancel a completed or already-cancelled hunt
         if cache.status == HuntStatus::Completed {
             return Err(HuntErrorCode::InvalidHuntStatus);
