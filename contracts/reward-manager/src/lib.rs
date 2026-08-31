@@ -3523,7 +3523,35 @@ mod monitoring;
 mod nft_handler;
 pub mod storage;
 mod token_handler;
-pub mod types;
+#[path = "types.rs"]
+mod types_impl;
+pub mod types {
+    pub use crate::types_impl::*;
+
+    use soroban_sdk::{contracttype, Address};
+
+    #[contracttype]
+    #[derive(Clone, Debug, PartialEq, Eq)]
+    pub enum PoolOperation {
+        Create,
+        Fund,
+        Distribute,
+        Refund,
+        Withdraw,
+        Migrate,
+        Freeze,
+        Unfreeze,
+    }
+
+    #[contracttype]
+    #[derive(Clone, Debug, PartialEq, Eq)]
+    pub struct PoolAuditEntry {
+        pub actor: Address,
+        pub operation: PoolOperation,
+        pub timestamp: u64,
+        pub amount: Option<i128>,
+    }
+}
 mod xlm_handler;
 
 #[cfg(test)]
