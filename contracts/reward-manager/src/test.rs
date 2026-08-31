@@ -199,6 +199,27 @@ mod test {
     }
 
     #[test]
+    fn test_fund_reward_pool_tracks_cumulative_total_deposited() {
+        let env = Env::default();
+        env.mock_all_auths_allowing_non_root_auth();
+        let (contract_id, token_address, token_admin) = setup(&env);
+        let creator = Address::generate(&env);
+
+        mint_tokens(&env, &token_address, &token_admin, &creator, 10_000);
+
+        env.as_contract(&contract_id, || {
+            initialize_contract(&env, &token_address);
+            RewardManager::create_reward_pool(env.clone(), creator.clone(), 1, 0).unwrap();
+
+            RewardManager::fund_reward_pool(env.clone(), creator.clone(), 1, 3_000).unwrap();
+            assert_eq!(Storage::get_pool_total_deposited(&env, 1), 3_000);
+
+            RewardManager::fund_reward_pool(env.clone(), creator.clone(), 1, 2_000).unwrap();
+            assert_eq!(Storage::get_pool_total_deposited(&env, 1), 5_000);
+        });
+    }
+
+    #[test]
     fn test_fund_reward_pool_invalid_amount() {
         let env = Env::default();
         env.mock_all_auths_allowing_non_root_auth();
