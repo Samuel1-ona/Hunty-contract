@@ -1052,6 +1052,107 @@ mod test {
     }
 
     #[test]
+    fn test_long_elapsed_time_bonus_clamps_and_does_not_panic() {
+        let env = Env::default();
+        env.ledger().set_timestamp(1_700_000_000);
+
+        let creator = Address::generate(&env);
+        let player1 = Address::generate(&env);
+        let player2 = Address::generate(&env);
+        let title = String::from_str(&env, "Long Run Hunt");
+        let description = String::from_str(&env, "Long run time bonus clamp");
+        let question = String::from_str(&env, "Question?");
+        let answer = String::from_str(&env, "answer");
+        let bonus = TimeBonusConfig {
+            start_multiplier_bps: 20_000,
+            min_multiplier_bps: 10_000,
+            decay_duration_secs: 100,
+        };
+
+        let contract_id = env.register_contract(None, super::HuntyCore);
+        let hunt_id = as_core_contract(&env, &contract_id, |env| {
+            HuntyCore::create_hunt(
+                env.clone(),
+                creator.clone(),
+                title,
+                description,
+                None,
+                None,
+                0,
+                None,
+                None,
+            )
+            .unwrap()
+        });
+
+        env.mock_all_auths();
+        as_core_contract(&env, &contract_id, |env| {
+            HuntyCore::set_time_bonus_config(
+                env.clone(),
+                hunt_id,
+                creator.clone(),
+                Some(bonus),
+            )
+            .unwrap();
+            HuntyCore::add_clue(
+                env.clone(),
+                hunt_id,
+                question,
+                answer.clone(),
+                10,
+                true,
+                Some(1),
+                None,
+            )
+            .unwrap();
+            HuntyCore::activate_hunt(env.clone(), hunt_id, creator.clone()).unwrap();
+            HuntyCore::register_player(env.clone(), hunt_id, player1.clone()).unwrap();
+            HuntyCore::register_player(env.clone(), hunt_id, player2.clone()).unwrap();
+        });
+
+        // First case: decrease_bps = 4_294_970_000, just above u32::MAX.
+        // `as u32` truncation kept a near-maximum multiplier; fixed code floors.
+        env.ledger().set_timestamp(1_700_000_000 + 42_949_700);
+        env.mock_all_auths();
+        as_core_contract(&env, &contract_id, |env| {
+            HuntyCore::submit_answer(
+                env.clone(),
+                hunt_id,
+                1,
+                player1.clone(),
+                answer.clone(),
+                1,
+                env.ledger().timestamp(),
+            )
+            .unwrap();
+        });
+        let progress1 = as_core_contract(&env, &contract_id, |env| {
+            HuntyCore::get_player_progress(env.clone(), hunt_id, player1.clone()).unwrap()
+        });
+        assert_eq!(progress1.total_score, 10);
+
+        // Second case: elapsed = u64::MAX / 2 must saturate, not overflow.
+        env.ledger().set_timestamp(1_700_000_000 + u64::MAX / 2);
+        env.mock_all_auths();
+        as_core_contract(&env, &contract_id, |env| {
+            HuntyCore::submit_answer(
+                env.clone(),
+                hunt_id,
+                1,
+                player2.clone(),
+                answer.clone(),
+                1,
+                env.ledger().timestamp(),
+            )
+            .unwrap();
+        });
+        let progress2 = as_core_contract(&env, &contract_id, |env| {
+            HuntyCore::get_player_progress(env.clone(), hunt_id, player2).unwrap()
+        });
+        assert_eq!(progress2.total_score, 10);
+    }
+
+    #[test]
     fn test_create_hunt_with_end_time() {
         let env = Env::default();
         env.ledger().set_timestamp(1_700_000_000);
