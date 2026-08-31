@@ -32,6 +32,18 @@ const MAX_TITLE_BYTES: u32 = 200;
 // above the sanitizer stack CAP without increasing SANITIZE_STACK_CAP will
 // return SanitizeError::LimitTooLarge for every call using that limit.
 const MAX_DESCRIPTION_BYTES: u32 = 2000;
+/// Sentinel value for `max_submissions_per_minute` indicating no rate limit.
+const UNLIMITED_SUBMISSIONS_PER_MINUTE: u32 = 0;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn max_submissions_per_minute_zero_is_unlimited_sentinel() {
+        assert_eq!(UNLIMITED_SUBMISSIONS_PER_MINUTE, 0);
+    }
+}
 const MAX_QUESTION_LENGTH: u32 = 2000;
 const MAX_ANSWER_LENGTH: u32 = 256;
 const MAX_CATEGORY_BYTES: u32 = 64;
@@ -140,6 +152,8 @@ impl HuntyCore {
     ///   or submit answers until the ledger timestamp reaches this value. 0 means
     ///   no start time restriction (immediately playable once activated).
     /// * `end_time` - Optional end timestamp (0 means no end time restriction)
+    /// * `max_submissions_per_minute` - Maximum number of submissions allowed per
+    ///   minute per player. [`UNLIMITED_SUBMISSIONS_PER_MINUTE`] (0) means no limit.
     ///
     /// # Returns
     /// The unique hunt ID of the newly created hunt
