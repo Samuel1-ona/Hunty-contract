@@ -8119,4 +8119,91 @@ mod test {
             _ => panic!("Expected CorruptPlayerProgress error"),
         }
     }
+
+    // ─── Issue #808: save_processed_submission must not fire on validation failure ───
+
+    /// A submission that fails with ClueNotFound must NOT consume its nonce.
+    /// The same envelope (same nonce + submitted_at) must be retryable with the
+    /// correct clue_id after fixing an off-by-one in the caller.
+    #[test]
+    fn test_clue_not_found_does_not_consume_nonce() {
+        let env = Env::default();
+        env.ledger().set_timestamp(1_700_000_000);
+        env.mock_all_auths();
+
+        let creator = Address::generate(&env);
+        let player = Address::generate(&env);
+        let contract_id = env.register(HuntyCore, ());
+
+        // Set up a hunt with one clue (id will be 1) and register the player.
+        let hunt_id = as_core_contract(&env, &contract_id, |env| {
+            HuntyCore::create_hunt(
+                env.clone(),
+                creator.clone(),
+                String::from_str(env, "Test Hunt"),
+                String::from_str(env, "Desc"),
+                None,
+                None,
+                0,
+                None,
+            )
+            .unwrap()
+        });
+
+        let clue_id = as_core_contract(&env, &contract_id, |env| {
+            HuntyCore::add_clue(
+                env.clone(),
+                hunt_id,
+                String::from_str(env, "Capital of France?"),
+                String::from_str(env, "Paris"),
+                10,
+                true,
+                None,
+            )
+            .unwrap()
+        });
+
+        as_core_contract(&env, &contract_id, |env| {
+            HuntyCore::activate_hunt(env.clone(), hunt_id, creator.clone()).unwrap();
+        });
+
+        as_core_contract(&env, &contract_id, |env| {
+            HuntyCore::register_player(env.clone(), hunt_id, player.clone()).unwrap();
+        });
+
+        let nonce = 42u64;
+        let submitted_at = env.ledger().timestamp();
+        let wrong_clue_id = clue_id + 99; // deliberately wrong — simulates UI off-by-one
+
+        // First call: wrong clue id → ClueNotFound.  The nonce must NOT be consumed.
+        let err = as_core_contract(&env, &contract_id, |env| {
+            HuntyCore::submit_answer(
+                env.clone(),
+                hunt_id,
+                wrong_clue_id,
+                player.clone(),
+                String::from_str(env, "Paris"),
+                nonce,
+                submitted_at,
+            )
+            .unwrap_err()
+        });
+        assert_eq!(err, HuntErrorCode::ClueNotFound,
+            "expected ClueNotFound on wrong clue id");
+
+        // Second call: correct clue id, SAME nonce + submitted_at envelope — must succeed.
+        let ok = as_core_contract(&env, &contract_id, |env| {
+            HuntyCore::submit_answer(
+                env.clone(),
+                hunt_id,
+                clue_id,
+                player.clone(),
+                String::from_str(env, "Paris"),
+                nonce,
+                submitted_at,
+            )
+        });
+        assert!(ok.is_ok(),
+            "retry with same nonce after ClueNotFound must succeed, got: {:?}", ok);
+    }
 }
