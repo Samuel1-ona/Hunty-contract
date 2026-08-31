@@ -11,6 +11,13 @@ const INSTANCE_TTL_EXTEND_TO: u32 = 518_400;
 const PERSISTENT_TTL_THRESHOLD: u32 = 172_800;
 const PERSISTENT_TTL_EXTEND_TO: u32 = 518_400;
 
+#[contracttype]
+#[derive(Clone, Debug)]
+pub struct CreatorDailyHuntCount {
+    pub day: u64,
+    pub count: u32,
+}
+
 /// Storage access layer for hunts, clues, and player progress.
 /// Provides type-safe, efficient storage operations with consistent key management.
 pub struct Storage;
@@ -1441,18 +1448,23 @@ impl Storage {
             .unwrap_or_else(|| Self::get_default_hunt_creation_limit(env))
     }
 
-    fn creator_daily_count_key(creator: &Address, day: u64) -> (soroban_sdk::Symbol, Address, u64) {
-        (symbol_short!("HRLCT"), creator.clone(), day)
+    fn creator_daily_count_key(creator: &Address) -> (soroban_sdk::Symbol, Address) {
+        (symbol_short!("HRLCT"), creator.clone())
     }
 
     pub fn get_creator_daily_hunt_count(env: &Env, creator: &Address, day: u64) -> u32 {
-        let key = Self::creator_daily_count_key(creator, day);
-        env.storage().persistent().get(&key).unwrap_or(0)
+        let key = Self::creator_daily_count_key(creator);
+        let stored: Option<CreatorDailyHuntCount> = env.storage().persistent().get(&key);
+        match stored {
+            Some(entry) if entry.day == day => entry.count,
+            _ => 0,
+        }
     }
 
     pub fn set_creator_daily_hunt_count(env: &Env, creator: &Address, day: u64, count: u32) {
-        let key = Self::creator_daily_count_key(creator, day);
-        env.storage().persistent().set(&key, &count);
+        let key = Self::creator_daily_count_key(creator);
+        let entry = CreatorDailyHuntCount { day, count };
+        env.storage().persistent().set(&key, &entry);
     }
 
     // ========== Co-Creators Storage Functions ==========

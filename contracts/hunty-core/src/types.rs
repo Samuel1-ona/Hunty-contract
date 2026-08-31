@@ -757,6 +757,13 @@ impl TimeBonusConfig {
 
 #[contracttype]
 #[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CreatorDailyHuntCount {
+    pub day: u64,
+    pub count: u32,
+}
+
+#[contracttype]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct RateLimitStatus {
     pub creations_today: u32,
     pub daily_limit: u32,
