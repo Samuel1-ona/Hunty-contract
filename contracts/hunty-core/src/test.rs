@@ -9365,19 +9365,19 @@ mod test {
             // Test 1: Boundary lengths
             // Test empty string
             let empty = String::from_str(&env, "");
-            let res_empty = StringSanitizer::sanitize(&env, &empty, 256, false);
+            let res_empty = StringSanitizer::sanitize::<256>(&env, &empty, false);
             assert!(res_empty.is_err());
 
             // Test exactly max length
             let max_str = "a".repeat(256);
             let max_input = String::from_str(&env, &max_str);
-            let res_max = StringSanitizer::sanitize(&env, &max_input, 256, false);
+            let res_max = StringSanitizer::sanitize::<256>(&env, &max_input, false);
             assert!(res_max.is_ok());
 
             // Test over max length
             let over_str = "a".repeat(257);
             let over_input = String::from_str(&env, &over_str);
-            let res_over = StringSanitizer::sanitize(&env, &over_input, 256, false);
+            let res_over = StringSanitizer::sanitize::<256>(&env, &over_input, false);
             assert!(res_over.is_err());
 
             // Test 2: Special characters
@@ -9394,7 +9394,7 @@ mod test {
             ];
             for s in special_chars {
                 let input = String::from_str(&env, s);
-                let res = StringSanitizer::sanitize(&env, &input, 256, false);
+                let res = StringSanitizer::sanitize::<256>(&env, &input, false);
                 assert!(res.is_ok());
             }
 
@@ -9407,7 +9407,7 @@ mod test {
             ];
             for c in controls {
                 let input = String::from_str(&env, &format!("test{}test", c));
-                let res = StringSanitizer::sanitize(&env, &input, 256, false);
+                let res = StringSanitizer::sanitize::<256>(&env, &input, false);
                 assert!(res.is_err());
             }
 
@@ -9429,7 +9429,7 @@ mod test {
             // Test 5: Long strings
             let long_str = "x".repeat(2000);
             let long_input = String::from_str(&env, &long_str);
-            let res = StringSanitizer::sanitize(&env, &long_input, 256, false);
+            let res = StringSanitizer::sanitize::<256>(&env, &long_input, false);
             assert!(res.is_err());
         }
 
