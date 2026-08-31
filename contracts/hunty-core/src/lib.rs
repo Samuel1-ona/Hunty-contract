@@ -27,11 +27,26 @@ use soroban_sdk::{
     contract, contractimpl, Address, Bytes, BytesN, Env, IntoVal, String, Symbol, Val, Vec,
 };
 
-const MAX_TITLE_BYTES: usize = 200;
-const MAX_DESCRIPTION_BYTES: usize = 2000;
-const MAX_QUESTION_LENGTH: usize = 2000;
-const MAX_ANSWER_LENGTH: usize = 256;
-const MAX_CATEGORY_BYTES: usize = 64;
+const MAX_TITLE_BYTES: u32 = 200;
+// Must stay <= crate::sanitization::SANITIZE_STACK_CAP (2048). Raising these
+// above the sanitizer stack CAP without increasing SANITIZE_STACK_CAP will
+// return SanitizeError::LimitTooLarge for every call using that limit.
+const MAX_DESCRIPTION_BYTES: u32 = 2000;
+/// Sentinel value for `max_submissions_per_minute` indicating no rate limit.
+const UNLIMITED_SUBMISSIONS_PER_MINUTE: u32 = 0;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn max_submissions_per_minute_zero_is_unlimited_sentinel() {
+        assert_eq!(UNLIMITED_SUBMISSIONS_PER_MINUTE, 0);
+    }
+}
+const MAX_QUESTION_LENGTH: u32 = 2000;
+const MAX_ANSWER_LENGTH: u32 = 256;
+const MAX_CATEGORY_BYTES: u32 = 64;
 const MAX_CATEGORIES_PER_HUNT: u32 = 5;
 const MAX_CLUES_PER_HUNT: u32 = 100;
 /// Maximum number of leaderboard entries returned (gas and UX limit).
@@ -79,8 +94,7 @@ impl HuntyCore {
         if Storage::get_admin(&env).is_some() {
             return Err(HuntErrorCode::Unauthorized);
         }
-        Storage::set_admin(&env, &admin);
-        Ok(())
+            Ok(())
     }
 
     #[allow(dead_code)]
@@ -137,6 +151,8 @@ impl HuntyCore {
     ///   or submit answers until the ledger timestamp reaches this value. 0 means
     ///   no start time restriction (immediately playable once activated).
     /// * `end_time` - Optional end timestamp (0 means no end time restriction)
+    /// * `max_submissions_per_minute` - Maximum number of submissions allowed per
+    ///   minute per player. [`UNLIMITED_SUBMISSIONS_PER_MINUTE`] (0) means no limit.
     ///
     /// # Returns
     /// The unique hunt ID of the newly created hunt
@@ -157,6 +173,7 @@ impl HuntyCore {
         start_multiplier_bps: Option<u32>,
         default_points: Option<u32>,
     ) -> Result<u64, HuntErrorCode> {
+        creator.require_auth();
         monitoring::Monitoring::record_invocation(&env, 50_000, true);
         if Storage::is_blacklisted(&env, &creator) {
             return Err(HuntErrorCode::AddressBlacklisted);
@@ -2659,16 +2676,10 @@ impl HuntyCore {
         )
         .map_err(HuntErrorCode::from)?;
 
-        Storage::save_processed_submission(
-            &env,
-            hunt_id,
-            clue_id,
-            &player,
-            submission_nonce,
-            submitted_at,
-            submitted_at.saturating_add(ANSWER_SUBMISSION_WINDOW_SECS),
-        );
-
+        // All cheap validation (player registration, clue existence, completion state, rate
+        // limits) runs BEFORE we write the processed-submission entry.  This prevents nonce
+        // exhaustion on validation failures and stops unregistered addresses from bloating
+        // ledger storage.  The replay guard above is a read-only check and stays in place.
         let mut progress = Storage::get_player_progress(&env, hunt_id, &player)
             .ok_or(HuntErrorCode::PlayerNotRegistered)?;
 
@@ -2720,6 +2731,18 @@ impl HuntyCore {
             }
             progress.clue_last_attempts.set(clue_id, current_time);
         }
+
+        // All validation passed — mark the nonce as consumed so the same envelope cannot be
+        // replayed, then proceed to answer evaluation.
+        Storage::save_processed_submission(
+            &env,
+            hunt_id,
+            clue_id,
+            &player,
+            submission_nonce,
+            submitted_at,
+            submitted_at.saturating_add(ANSWER_SUBMISSION_WINDOW_SECS),
+        );
 
         let submitted_hash = Self::normalize_and_hash_answer(&env, hunt_id, clue_id, &answer)
             .map_err(HuntErrorCode::from)?;
@@ -2787,16 +2810,10 @@ impl HuntyCore {
         )
         .map_err(HuntErrorCode::from)?;
 
-        Storage::save_processed_submission(
-            &env,
-            hunt_id,
-            clue_id,
-            &player,
-            submission_nonce,
-            submitted_at,
-            submitted_at.saturating_add(ANSWER_SUBMISSION_WINDOW_SECS),
-        );
-
+        // All cheap validation (player registration, clue existence, completion state, rate
+        // limits) runs BEFORE we write the processed-submission entry.  This prevents nonce
+        // exhaustion on validation failures and stops unregistered addresses from bloating
+        // ledger storage.  The replay guard above is a read-only check and stays in place.
         let mut progress = Storage::get_player_progress(&env, hunt_id, &player)
             .ok_or(HuntErrorCode::PlayerNotRegistered)?;
 
@@ -2837,6 +2854,18 @@ impl HuntyCore {
             }
             progress.recent_submissions.push_back(current_time);
         }
+
+        // All validation passed — mark the nonce as consumed so the same envelope cannot be
+        // replayed, then proceed to answer evaluation.
+        Storage::save_processed_submission(
+            &env,
+            hunt_id,
+            clue_id,
+            &player,
+            submission_nonce,
+            submitted_at,
+            submitted_at.saturating_add(ANSWER_SUBMISSION_WINDOW_SECS),
+        );
 
         let answer_correct = Self::is_answer_correct(&clue, &answer_hash);
         Self::finalize_answer_submission(

@@ -680,3 +680,54 @@ fn test_multiple_hunts_at_maximum_size() {
         assert_eq!(hunt_1.total_clues, 100);
     });
 }
+
+#[test]
+fn test_rate_limit_single_storage_entry_across_days() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let core_id = setup_core_contract(&env);
+    let creator = Address::generate(&env);
+
+    let day_length: u64 = 86_400;
+    let days = [1_700_000_000u64, 1_700_086_400, 1_700_172_800];
+
+    for (i, day) in days.iter().enumerate() {
+        env.ledger().set_timestamp(*day);
+        as_core_contract(&env, &core_id, |env| {
+            HuntyCore::create_hunt(
+                env.clone(),
+                creator.clone(),
+                String::from_str(env, &format!("Rate Limit Hunt {}", i)),
+                String::from_str(env, "Storage bound test"),
+                None,
+                None,
+                0,
+                None,
+            )
+            .unwrap();
+        });
+    }
+
+    as_core_contract(&env, &core_id, |env| {
+        // The fixed rate-limit layout uses a single key per creator.
+        let old_day_keys = [
+            env.storage().instance().has(&(creator.clone(), days[0])),
+            env.storage().instance().has(&(creator.clone(), days[1])),
+            env.storage().instance().has(&(creator.clone(), days[2])),
+        ];
+        assert_eq!(old_day_keys, [false, false, false]);
+
+        let (stored_day, count): (u64, u32) = env
+            .storage()
+            .instance()
+            .get(&creator)
+            .expect("creator rate-limit entry should exist");
+        assert_eq!(stored_day, days[2] / day_length);
+        assert_eq!(count, 1);
+
+        let known_entry_count = old_day_keys.iter().filter(|exists| **exists).count()
+            + if env.storage().instance().has(&creator) { 1 } else { 0 };
+        assert_eq!(known_entry_count, 1);
+    });
+}
