@@ -174,7 +174,8 @@ impl HuntyCore {
         default_points: Option<u32>,
     ) -> Result<u64, HuntErrorCode> {
         creator.require_auth();
-        monitoring::Monitoring::record_invocation(&env, 50_000, true);
+        // Telemetry via event: no instance-storage read-modify-write on this path.
+        monitoring::Monitoring::record_invocation_event(&env, 50_000, true);
         if Storage::is_blacklisted(&env, &creator) {
             return Err(HuntErrorCode::AddressBlacklisted);
         }
@@ -2659,10 +2660,6 @@ impl HuntyCore {
             return Err(HuntErrorCode::BannedPlayer);
         }
 
-        if Storage::is_banned(&env, hunt_id, &player) {
-            return Err(HuntErrorCode::BannedPlayer);
-        }
-
         Self::validate_submission_timestamp(current_time, submitted_at)
             .map_err(HuntErrorCode::from)?;
         Self::assert_submission_not_replayed(
@@ -3016,11 +3013,56 @@ impl HuntyCore {
 
     /// Returns the list of clue IDs that the player has completed for a hunt (read-only).
     /// Useful for UI to show progress. Returns empty vec if player is not registered.
+    ///
+    /// Thin backwards-compatible wrapper: returns at most `MAX_CLUES_PER_HUNT`
+    /// entries, since `add_clue` / `add_clues_batch` bound a hunt's clue set by
+    /// that same constant. Prefer `get_completed_clues_paginated` for new callers.
     pub fn get_completed_clues(env: Env, hunt_id: u64, player: Address) -> Vec<u32> {
-        match Storage::get_player_progress(&env, hunt_id, &player) {
-            Some(progress) => progress.completed_clues,
-            None => Vec::new(&env),
+        let mut all = Self::get_completed_clues_paginated(env.clone(), hunt_id, player.clone(), 0, MAX_BATCH_SIZE);
+        let mut offset = MAX_BATCH_SIZE;
+        while all.len() < MAX_CLUES_PER_HUNT {
+            let page =
+                Self::get_completed_clues_paginated(env.clone(), hunt_id, player.clone(), offset, MAX_BATCH_SIZE);
+            if page.is_empty() {
+                break;
+            }
+            for id in page.iter() {
+                all.push_back(id);
+            }
+            offset += MAX_BATCH_SIZE;
         }
+        all
+    }
+
+    /// Paginated variant of `get_completed_clues` (read-only).
+    /// `offset` is 0-indexed; `limit` is capped at `MAX_BATCH_SIZE`, matching
+    /// `list_clues`. Returns an empty vec if the player is not registered or the
+    /// offset is past the end of the completed set.
+    pub fn get_completed_clues_paginated(
+        env: Env,
+        hunt_id: u64,
+        player: Address,
+        offset: u32,
+        limit: u32,
+    ) -> Vec<u32> {
+        let progress = match Storage::get_player_progress(&env, hunt_id, &player) {
+            Some(progress) => progress,
+            None => return Vec::new(&env),
+        };
+
+        // Cap the page so a raised MAX_CLUES_PER_HUNT can never turn this into
+        // an unbounded scan. The uncapped wrapper above stays bounded because
+        // MAX_CLUES_PER_HUNT bounds the stored set itself.
+        let effective_limit = core::cmp::min(limit, MAX_BATCH_SIZE);
+        let total = progress.completed_clues.len();
+
+        let mut page: Vec<u32> = Vec::new(&env);
+        let mut idx = offset;
+        while idx < total && page.len() < effective_limit {
+            page.push_back(progress.completed_clues.get(idx).unwrap_or(0));
+            idx += 1;
+        }
+        page
     }
 
     /// Returns the total number of hunts created (read-only).
@@ -3551,6 +3593,10 @@ impl HuntyCore {
         admin: Address,
     ) -> Result<migration::MigrationReport, hunty_migration::UpgradeAuthError> {
         migration::HuntyCoreMigration::rollback_migration(&env, &admin)
+    }
+
+    pub fn get_active_alerts(env: Env) -> Vec<monitoring::HealthAlert> {
+        monitoring::Monitoring::active_alerts(&env)
     }
 
     pub fn get_health_dashboard(env: Env) -> monitoring::ContractHealth {
