@@ -254,6 +254,7 @@ impl Storage {
                     is_private: false,
                     invite_code_hash: None,
                     remaining_slots: 0,
+                    leaderboard_visibility: crate::types::LeaderboardVisibility::Public,
                 })
         });
         if let Some(ref mut hunt) = result {

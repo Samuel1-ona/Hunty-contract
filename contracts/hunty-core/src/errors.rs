@@ -60,6 +60,7 @@ pub enum HuntErrorCode {
     AdminAlreadyProposed = 48,
     InvalidPoints = 49,
     HuntFull = 50,
+    LeaderboardVisibilityUnauthorized = 51,
 }
 
 #derive(Debug)
@@ -114,6 +115,7 @@ pub enum HuntError {
     CorruptPlayerProgress,
     HuntNotStarted,
     AttemptCooldownNotExpired,
+    LeaderboardVisibilityUnauthorized,
 }
 
 impl From<HuntError> for HuntErrorCode {
@@ -169,6 +171,9 @@ impl From<HuntError> for HuntErrorCode {
             HuntError::CorruptPlayerProgress => HuntErrorCode::CorruptPlayerProgress,
             HuntError::HuntNotStarted => HuntErrorCode::HuntNotStarted,
             HuntError::AttemptCooldownNotExpired => HuntErrorCode::RateLimitExceeded,
+            HuntError::LeaderboardVisibilityUnauthorized => {
+                HuntErrorCode::LeaderboardVisibilityUnauthorized
+            }
         }
     }
 }
