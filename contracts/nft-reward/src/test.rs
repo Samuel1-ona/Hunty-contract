@@ -4,7 +4,7 @@ extern crate std;
 
 use crate::{
     CollectionMetadata, NftErrorCode, NftMetadata, NftMintedEvent, NftReward, NftRewardClient,
-    MAX_NFT_URI_BYTES, MAX_SCAN_LIMIT, METADATA_SCHEMA_VERSION,
+    MAX_NFT_URI_BYTES, MAX_ROYALTY_BPS, MAX_SCAN_LIMIT, METADATA_SCHEMA_VERSION,
 };
 use soroban_sdk::{
     testutils::{Address as _, Events as _, Ledger as _},
@@ -2091,4 +2091,88 @@ fn test_completion_rank_is_distinct_per_player() {
         ev2.total_minted_for_hunt, ev2.completion_rank,
         "total_minted_for_hunt and completion_rank are different concepts"
     );
+}
+
+// =========================================================================
+// ROYALTY BPS VALIDATION TESTS
+// =========================================================================
+
+#[test]
+fn test_mint_accepts_valid_royalty_bps_at_boundary() {
+    let env = setup_env();
+    let (client, minter) = setup_nft_reward(&env, None);
+    let player = Address::generate(&env);
+    let creator = Address::generate(&env);
+
+    // Test boundary value: exactly 10,000 bp (100%)
+    let metadata = create_metadata_with_creator(
+        &env,
+        "Hunt Champion",
+        "Completed the City Hunt",
+        "ipfs://QmExample123",
+        creator,
+        Some(10_000),
+    );
+
+    let nft_id = client.mint_reward_nft(&minter, &1, &player, &metadata);
+    let nft = client.get_nft(&nft_id).unwrap();
+    assert_eq!(nft.metadata.royalty_bps, Some(10_000));
+}
+
+#[test]
+fn test_mint_rejects_royalty_bps_above_max() {
+    let env = setup_env();
+    let (client, minter) = setup_nft_reward(&env, None);
+    let player = Address::generate(&env);
+    let creator = Address::generate(&env);
+
+    // Test rejection: 10,001 bp (100.01%, above max)
+    let metadata = create_metadata_with_creator(
+        &env,
+        "Hunt Champion",
+        "Completed the City Hunt",
+        "ipfs://QmExample123",
+        creator,
+        Some(10_001),
+    );
+
+    let err = client
+        .try_mint_reward_nft(&minter, &1, &player, &metadata)
+        .unwrap_err();
+    assert_eq!(err, Ok(NftErrorCode::InvalidRoyalty));
+}
+
+#[test]
+fn test_mint_from_map_rejects_excessive_royalty_bps() {
+    let env = setup_env();
+    let (client, minter) = setup_nft_reward(&env, None);
+    let player = Address::generate(&env);
+    let creator = Address::generate(&env);
+
+    let mut map: Map<Symbol, Val> = Map::new(&env);
+    map.set(
+        Symbol::new(&env, "title"),
+        String::from_str(&env, "Hunt Champion").into_val(&env),
+    );
+    map.set(
+        Symbol::new(&env, "description"),
+        String::from_str(&env, "Completed the City Hunt").into_val(&env),
+    );
+    map.set(
+        Symbol::new(&env, "image_uri"),
+        String::from_str(&env, "ipfs://QmExample123").into_val(&env),
+    );
+    map.set(
+        Symbol::new(&env, "creator"),
+        creator.into_val(&env),
+    );
+    map.set(
+        Symbol::new(&env, "royalty_bps"),
+        50_000u32.into_val(&env), // 500% - way above max
+    );
+
+    let err = client
+        .try_mint_reward_nft_from_map(&minter, &1, &player, &map)
+        .unwrap_err();
+    assert_eq!(err, Ok(NftErrorCode::InvalidRoyalty));
 }
