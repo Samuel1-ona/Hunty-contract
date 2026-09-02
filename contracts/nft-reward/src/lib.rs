@@ -599,6 +599,7 @@ impl NftReward {
         };
 
         Storage::save_nft(&env, &nft_data);
+        Storage::increment_live_supply(&env);
         Storage::set_nft_version(&env, nft_id, METADATA_SCHEMA_VERSION);
         Storage::add_nft_to_owner(&env, &player_address, nft_id);
         Storage::increment_owner_hunt_count(&env, &player_address, hunt_id);
@@ -1055,15 +1056,23 @@ impl NftReward {
         Ok(())
     }
 
-    /// Returns the total number of NFTs minted so far.
+    /// Returns the number of NFTs that currently exist — i.e. minted so far
+    /// minus burned. This decreases when an NFT is burned.
+    ///
+    /// This is distinct from the `max_supply` cap (see `get_max_supply`),
+    /// which limits the *lifetime* mint count and is unaffected by burns:
+    /// a burned NFT's ID is never reused and never reopens room under the
+    /// cap for an additional mint.
     pub fn total_supply(env: Env) -> u64 {
-        Storage::get_nft_counter(&env)
+        Storage::get_live_supply(&env)
     }
 
     /// Returns the configured maximum total supply of NFTs.
     ///
     /// - `None`  → no cap was set (unlimited minting)
-    /// - `Some(n)` → at most `n` NFTs may ever be minted
+    /// - `Some(n)` → at most `n` NFTs may ever be minted, lifetime. This caps
+    ///   the ever-minted count (see `total_supply` for the currently-live
+    ///   count), so burning an NFT does not free up room under the cap.
     pub fn get_max_supply(env: Env) -> Option<u64> {
         Storage::get_max_supply(&env)
     }
@@ -1432,6 +1441,19 @@ impl NftReward {
     /// # Authorization
     /// The `owner` must authorize this call and be the current owner of the NFT.
     ///
+    /// # Locked vs. soulbound — deliberate, distinct policies
+    /// - **Locked** (`nft.locked`) blocks burning outright: this flag exists for
+    ///   states like escrow, staking, or a dispute hold, where the NFT must
+    ///   not be destroyed out from under whatever holds the lock.
+    /// - **Soulbound / non-transferable** (`!nft.transferable`) does *not*
+    ///   block burning. `transferable` only gates `transfer_nft` — moving an
+    ///   NFT to a different owner. Burning is destruction by its own owner,
+    ///   not a transfer, so a soulbound NFT can still be burned by the owner
+    ///   it's bound to. (If a given deployment wants soulbound NFTs to be
+    ///   permanent even against their own owner, that is a separate policy
+    ///   decision this function deliberately does not make — nothing here
+    ///   currently checks `transferable`.)
+    ///
     /// # Errors
     /// Returns `NftNotFound` if the NFT does not exist.
     /// Returns `NotOwner` if the caller is not the current owner.
@@ -1455,6 +1477,7 @@ impl NftReward {
 
         let hunt_id = nft.hunt_id;
         Storage::remove_nft(&env, nft_id);
+        Storage::decrement_live_supply(&env);
         Storage::remove_nft_from_hunt(&env, hunt_id, nft_id);
         Storage::remove_nft_from_owner(&env, &owner, nft_id);
         Storage::decrement_owner_hunt_count(&env, &owner, hunt_id);
