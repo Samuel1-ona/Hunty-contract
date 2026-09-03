@@ -5,6 +5,11 @@ const FAILURES_KEY: soroban_sdk::Symbol = symbol_short!("FAILCT");
 const GAS_UNITS_KEY: soroban_sdk::Symbol = symbol_short!("GASUN");
 const ALERTS_KEY: soroban_sdk::Symbol = symbol_short!("ALERT");
 
+/// Large withdrawal alert threshold: 100 XLM (1_000_000_000 stroops)
+/// Triggers monitoring alert for withdrawals exceeding this amount.
+/// 1 XLM = 10_000_000 stroops (Stellar's base unit)
+const LARGE_WITHDRAWAL_THRESHOLD: i128 = 1_000_000_000;
+
 #[contracttype]
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ContractHealth {
@@ -43,7 +48,7 @@ impl Monitoring {
     }
 
     pub fn record_large_withdrawal(env: &Env, amount: i128) {
-        if amount > 1_000_000_000 {
+        if amount > LARGE_WITHDRAWAL_THRESHOLD {
             Self::raise_alert(env, "large_withdrawal");
         }
     }
