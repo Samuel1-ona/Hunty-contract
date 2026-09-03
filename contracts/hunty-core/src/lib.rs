@@ -3375,7 +3375,7 @@ impl HuntyCore {
             return Err(HuntErrorCode::Unauthorized);
         }
 
-        Storage::add_view_only(&env, hunt_id, &viewer);
+        Storage::add_view_only(&env, hunt_id, &viewer)?;
         Ok(())
     }
 
@@ -3401,8 +3401,8 @@ impl HuntyCore {
         Storage::is_view_only(&env, hunt_id, &address)
     }
 
-    pub fn get_view_only_list(env: Env, hunt_id: u64) -> Vec<Address> {
-        Storage::get_view_only_list(&env, hunt_id)
+    pub fn get_view_only_list(env: Env, hunt_id: u64, offset: u32, limit: u32) -> Vec<Address> {
+        Storage::get_view_only_list(&env, hunt_id, offset, limit.min(MAX_BATCH_SIZE))
     }
 
     pub fn add_co_creator(
@@ -3500,7 +3500,7 @@ impl HuntyCore {
     ) -> Result<(), HuntErrorCode> {
         Self::require_admin(&env, &admin)?;
 
-        Storage::add_global_view_only(&env, &viewer);
+        Storage::add_global_view_only(&env, &viewer)?;
         Ok(())
     }
 
@@ -3519,8 +3519,8 @@ impl HuntyCore {
         Storage::is_global_view_only(&env, &address)
     }
 
-    pub fn get_global_view_only_list(env: Env) -> Vec<Address> {
-        Storage::get_global_view_only_list(&env)
+    pub fn get_global_view_only_list(env: Env, offset: u32, limit: u32) -> Vec<Address> {
+        Storage::get_global_view_only_list(&env, offset, limit.min(MAX_BATCH_SIZE))
     }
 
     // Pause controls
