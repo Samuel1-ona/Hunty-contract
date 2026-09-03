@@ -57,8 +57,8 @@ const MAX_LEADERBOARD_SCAN_SIZE: u32 = 200;
 const MAX_BATCH_SIZE: u32 = 50;
 /// Maximum hunt records scanned by discovery queries in one invocation.
 const MAX_HUNT_SEARCH_SCAN_SIZE: u32 = 200;
-/// Default page size for paginated queries.
-#[allow(dead_code)]
+/// Default page size for paginated queries. Used when a caller passes `0`
+/// for `limit`/`page_size`, which would otherwise return an empty vector.
 const DEFAULT_PAGE_SIZE: u32 = 20;
 /// Maximum allowed age for a submission envelope before it is considered stale.
 pub(crate) const ANSWER_SUBMISSION_WINDOW_SECS: u64 = 300;
@@ -772,7 +772,9 @@ impl HuntyCore {
     }
 
     /// Returns paginated clues for a hunt. Answer hashes are not exposed.
+    /// A `limit` of `0` defaults to `DEFAULT_PAGE_SIZE`.
     pub fn list_clues(env: Env, hunt_id: u64, offset: u32, limit: u32) -> Vec<ClueInfo> {
+        let limit = if limit == 0 { DEFAULT_PAGE_SIZE } else { limit };
         let raw = Storage::list_clues_for_hunt(&env, hunt_id, offset, limit.min(MAX_BATCH_SIZE));
         let mut out = Vec::new(&env);
         let limit = core::cmp::min(raw.len(), MAX_BATCH_SIZE);
@@ -794,7 +796,9 @@ impl HuntyCore {
     }
 
     /// Returns a list of all hunts (paginated).
+    /// A `limit` of `0` defaults to `DEFAULT_PAGE_SIZE`.
     pub fn list_hunts(env: Env, offset: u32, limit: u32) -> Vec<Hunt> {
+        let limit = if limit == 0 { DEFAULT_PAGE_SIZE } else { limit };
         let counter = Storage::get_hunt_counter(&env);
         let mut hunts = Vec::new(&env);
         let mut current = offset;
@@ -986,6 +990,7 @@ impl HuntyCore {
 
     /// Returns a paginated slice of clues for a hunt. Useful for large hunts to bound gas.
     /// Page is 0-indexed. Max page_size is capped at MAX_BATCH_SIZE (50).
+    /// A `page_size` of `0` defaults to `DEFAULT_PAGE_SIZE`.
     /// Estimated gas: O(page_size) ~5_000 gas per clue + 10_000 overhead.
     pub fn list_clues_paginated(
         env: Env,
@@ -993,6 +998,7 @@ impl HuntyCore {
         page: u32,
         page_size: u32,
     ) -> Vec<ClueInfo> {
+        let page_size = if page_size == 0 { DEFAULT_PAGE_SIZE } else { page_size };
         let effective_page_size = core::cmp::min(page_size, MAX_BATCH_SIZE);
         let offset = page.saturating_mul(effective_page_size);
         let raw = Storage::list_clues_for_hunt(&env, hunt_id, offset, effective_page_size);
