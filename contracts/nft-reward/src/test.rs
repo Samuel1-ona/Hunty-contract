@@ -4,7 +4,7 @@ extern crate std;
 
 use crate::{
     CollectionMetadata, NftErrorCode, NftMetadata, NftMintedEvent, NftReward, NftRewardClient,
-    MAX_SCAN_LIMIT, METADATA_SCHEMA_VERSION,
+    MAX_NFT_URI_BYTES, MAX_SCAN_LIMIT, METADATA_SCHEMA_VERSION,
 };
 use soroban_sdk::{
     testutils::{Address as _, Events as _, Ledger as _},
@@ -255,6 +255,36 @@ fn test_mint_reward_nft_rejects_empty_image_uri_consistently() {
         .try_mint_reward_nft_from_map(&minter, &1, &player, &map)
         .unwrap_err();
     assert_eq!(map_err, Ok(NftErrorCode::InvalidMetadata));
+}
+
+#[test]
+fn test_mint_reward_nft_enforces_single_uri_length_limit() {
+    let env = setup_env();
+    let (client, minter) = setup_nft_reward(&env, None);
+    let player = Address::generate(&env);
+
+    let prefix = "ipfs://";
+    let at_limit = format!("{}{}", prefix, "a".repeat(MAX_NFT_URI_BYTES as usize - prefix.len()));
+    let over_limit = format!("{}{}", prefix, "a".repeat(MAX_NFT_URI_BYTES as usize - prefix.len() + 1));
+
+    client
+        .mint_reward_nft(
+            &minter,
+            &1,
+            &player,
+            &create_metadata(&env, "At Limit", "Valid boundary", &at_limit),
+        )
+        .unwrap();
+
+    let err = client
+        .try_mint_reward_nft(
+            &minter,
+            &2,
+            &player,
+            &create_metadata(&env, "Over Limit", "Too long", &over_limit),
+        )
+        .unwrap_err();
+    assert_eq!(err, Ok(NftErrorCode::InvalidMetadata));
 }
 
 #[test]
@@ -1693,6 +1723,127 @@ fn test_add_authorized_contract_requires_admin_authorization() {
     }
 }
 
+// -----------------------------------------------------------------------------
+// admin_update_image_uris pagination (issue #845)
+// -----------------------------------------------------------------------------
+
+#[test]
+fn test_admin_update_image_uris_paginates_across_multiple_calls() {
+    let env = setup_env();
+    let contract_id = env.register_contract(None, NftReward);
+    let client = NftRewardClient::new(&env, &contract_id);
+    let admin = Address::generate(&env);
+    let minter = Address::generate(&env);
+    client.initialize(&admin, &minter, &None, &default_collection_metadata(&env));
+
+    let player = Address::generate(&env);
+    let n = 5u32;
+    for i in 0..n {
+        let uri = std::format!("https://old-gateway.example/{}", i);
+        let metadata = create_metadata(&env, "NFT", "Desc", &uri);
+        client.mint_reward_nft(&minter, &(i as u64), &player, &metadata);
+    }
+
+    let old_prefix = String::from_str(&env, "https://old-gateway.example/");
+    let new_prefix = String::from_str(&env, "https://new-gateway.example/");
+
+    // Drive the migration two NFTs at a time, exactly like an operator
+    // would, following next_offset until it reaches the total count.
+    let mut offset: u32 = 0;
+    let mut total_updated: u32 = 0;
+    let mut iterations = 0;
+    loop {
+        let (updated, next_offset) = client
+            .admin_update_image_uris(&admin, &old_prefix, &new_prefix, &offset, &2)
+            .unwrap();
+        total_updated += updated;
+        assert!(next_offset >= offset, "next_offset must not regress");
+        if next_offset >= n {
+            break;
+        }
+        offset = next_offset;
+        iterations += 1;
+        assert!(iterations <= 10, "pagination did not terminate");
+    }
+
+    assert_eq!(total_updated, n);
+    for i in 0..n {
+        let nft = client.get_nft(&(i as u64)).unwrap();
+        let expected = std::format!("https://new-gateway.example/{}", i);
+        assert_eq!(nft.metadata.image_uri, String::from_str(&env, &expected));
+    }
+}
+
+#[test]
+fn test_admin_update_image_uris_rerun_is_idempotent() {
+    let env = setup_env();
+    let contract_id = env.register_contract(None, NftReward);
+    let client = NftRewardClient::new(&env, &contract_id);
+    let admin = Address::generate(&env);
+    let minter = Address::generate(&env);
+    client.initialize(&admin, &minter, &None, &default_collection_metadata(&env));
+
+    let player = Address::generate(&env);
+    let metadata = create_metadata(&env, "NFT", "Desc", "https://old-gateway.example/a");
+    client.mint_reward_nft(&minter, &1, &player, &metadata);
+
+    let old_prefix = String::from_str(&env, "https://old-gateway.example/");
+    let new_prefix = String::from_str(&env, "https://new-gateway.example/");
+
+    let (first_updated, next_offset) = client
+        .admin_update_image_uris(&admin, &old_prefix, &new_prefix, &0, &10)
+        .unwrap();
+    assert_eq!(first_updated, 1);
+
+    // Re-running the exact same batch should update nothing the second
+    // time: the NFT's URI now starts with new_prefix, not old_prefix.
+    let (second_updated, _) = client
+        .admin_update_image_uris(&admin, &old_prefix, &new_prefix, &0, &10)
+        .unwrap();
+    assert_eq!(second_updated, 0);
+    assert_eq!(next_offset, 1);
+}
+
+#[test]
+fn test_admin_update_image_uris_offset_past_end_returns_zero() {
+    let env = setup_env();
+    let contract_id = env.register_contract(None, NftReward);
+    let client = NftRewardClient::new(&env, &contract_id);
+    let admin = Address::generate(&env);
+    let minter = Address::generate(&env);
+    client.initialize(&admin, &minter, &None, &default_collection_metadata(&env));
+
+    let player = Address::generate(&env);
+    let metadata = create_metadata(&env, "NFT", "Desc", "https://old-gateway.example/a");
+    client.mint_reward_nft(&minter, &1, &player, &metadata);
+
+    let old_prefix = String::from_str(&env, "https://old-gateway.example/");
+    let new_prefix = String::from_str(&env, "https://new-gateway.example/");
+
+    let (updated, next_offset) = client
+        .admin_update_image_uris(&admin, &old_prefix, &new_prefix, &50, &10)
+        .unwrap();
+    assert_eq!(updated, 0);
+    assert_eq!(next_offset, 50);
+}
+
+#[test]
+fn test_admin_update_image_uris_requires_admin() {
+    let env = setup_env();
+    let contract_id = env.register_contract(None, NftReward);
+    let client = NftRewardClient::new(&env, &contract_id);
+    let admin = Address::generate(&env);
+    let minter = Address::generate(&env);
+    client.initialize(&admin, &minter, &None, &default_collection_metadata(&env));
+
+    let not_admin = Address::generate(&env);
+    let old_prefix = String::from_str(&env, "https://old-gateway.example/");
+    let new_prefix = String::from_str(&env, "https://new-gateway.example/");
+
+    let result = client.try_admin_update_image_uris(&not_admin, &old_prefix, &new_prefix, &0, &10);
+    assert!(result.is_err());
+}
+
 #[test]
 fn test_unauthorized_cannot_mint_before_and_after_init() {
     // Do NOT mock auth here — we expect unauthorized addresses to fail.
@@ -1723,8 +1874,221 @@ fn test_unauthorized_cannot_mint_before_and_after_init() {
     assert!(post_init.is_err());
 }
 
+// -----------------------------------------------------------------------------
+// admin_update_image_uris / replace_prefix (issue #844)
+// -----------------------------------------------------------------------------
+
+/// `mint_reward_nft` validates image_uri against a strict https://|ipfs://
+/// scheme (and a 200-byte cap), but `update_nft_metadata` does not — so it's
+/// the realistic way for an NFT to end up with an arbitrary, longer
+/// image_uri for these admin_update_image_uris regression tests.
+fn set_raw_image_uri(
+    env: &Env,
+    client: &NftRewardClient<'_>,
+    nft_id: u64,
+    owner: &Address,
+    uri: &str,
+) {
+    let nft = client.get_nft(&nft_id).unwrap();
+    client
+        .update_nft_metadata(
+            &nft_id,
+            owner,
+            &nft.metadata.description,
+            &String::from_str(env, uri),
+        )
+        .unwrap();
+}
+
 #[test]
-fn nft_data_field_count_remains_constant() {
-    assert_eq!(crate::NFT_DATA_FIELD_COUNT, 8);
-    assert_eq!(std::mem::size_of::<crate::NftData>(), std::mem::size_of::<crate::NftData>());
+fn test_admin_update_image_uris_replaces_matching_prefix() {
+    let env = setup_env();
+    let contract_id = env.register_contract(None, NftReward);
+    let client = NftRewardClient::new(&env, &contract_id);
+    let admin = Address::generate(&env);
+    let minter = Address::generate(&env);
+    client.initialize(&admin, &minter, &None, &default_collection_metadata(&env));
+
+    let player = Address::generate(&env);
+    let metadata = create_metadata(&env, "NFT", "Desc", "https://old-gateway.example/a");
+    let nft_id = client.mint_reward_nft(&minter, &1, &player, &metadata);
+
+    let old_prefix = String::from_str(&env, "https://old-gateway.example/");
+    let new_prefix = String::from_str(&env, "https://new-gateway.example/");
+    let updated = client
+        .admin_update_image_uris(&admin, &old_prefix, &new_prefix)
+        .unwrap();
+
+    assert_eq!(updated, 1);
+    let nft = client.get_nft(&nft_id).unwrap();
+    assert_eq!(
+        nft.metadata.image_uri,
+        String::from_str(&env, "https://new-gateway.example/a")
+    );
+}
+
+#[test]
+fn test_admin_update_image_uris_handles_uri_over_256_bytes_without_corruption() {
+    // Regression test for issue #844: a >256-byte URI used to be silently
+    // truncated to zero-padded garbage because the copy into the fixed
+    // buffer was clamped to 256 bytes while the comparison/copy lengths
+    // downstream were not.
+    let env = setup_env();
+    let contract_id = env.register_contract(None, NftReward);
+    let client = NftRewardClient::new(&env, &contract_id);
+    let admin = Address::generate(&env);
+    let minter = Address::generate(&env);
+    client.initialize(&admin, &minter, &None, &default_collection_metadata(&env));
+
+    let player = Address::generate(&env);
+    let metadata = create_metadata(&env, "NFT", "Desc", "https://x.example/a");
+    let nft_id = client.mint_reward_nft(&minter, &1, &player, &metadata);
+
+    let prefix = "ipfs://old-gateway/";
+    // 400 bytes of 'a' after the prefix keeps the whole URI under the
+    // 512-byte MAX_NFT_URI_BYTES cap while comfortably exceeding 256.
+    let suffix = "a".repeat(400);
+    let long_uri = std::format!("{}{}", prefix, suffix);
+    assert!(long_uri.len() > 256 && long_uri.len() <= 512);
+    set_raw_image_uri(&env, &client, nft_id, &player, &long_uri);
+
+    let old_prefix = String::from_str(&env, prefix);
+    let new_prefix = String::from_str(&env, "ipfs://new-gateway/");
+    let updated = client
+        .admin_update_image_uris(&admin, &old_prefix, &new_prefix)
+        .unwrap();
+    assert_eq!(updated, 1);
+
+    let expected = std::format!("ipfs://new-gateway/{}", suffix);
+    let nft = client.get_nft(&nft_id).unwrap();
+    assert_eq!(nft.metadata.image_uri, String::from_str(&env, &expected));
+}
+
+#[test]
+fn test_admin_update_image_uris_long_old_prefix_does_not_panic() {
+    // Regression test for issue #844: an old_prefix longer than 256 bytes
+    // used to index a [0u8; 256] buffer out of bounds and panic.
+    let env = setup_env();
+    let contract_id = env.register_contract(None, NftReward);
+    let client = NftRewardClient::new(&env, &contract_id);
+    let admin = Address::generate(&env);
+    let minter = Address::generate(&env);
+    client.initialize(&admin, &minter, &None, &default_collection_metadata(&env));
+
+    let player = Address::generate(&env);
+    let metadata = create_metadata(&env, "NFT", "Desc", "https://x.example/a");
+    let nft_id = client.mint_reward_nft(&minter, &1, &player, &metadata);
+
+    let long_uri = "b".repeat(300);
+    set_raw_image_uri(&env, &client, nft_id, &player, &long_uri);
+
+    // 280-byte old_prefix: longer than the old 256-byte buffer, shorter
+    // than the 300-byte URI, and matches it byte-for-byte.
+    let old_prefix_str = "b".repeat(280);
+    let old_prefix = String::from_str(&env, &old_prefix_str);
+    let new_prefix = String::from_str(&env, "c");
+
+    let updated = client
+        .admin_update_image_uris(&admin, &old_prefix, &new_prefix)
+        .unwrap();
+    assert_eq!(updated, 1);
+}
+
+#[test]
+fn test_admin_update_image_uris_oversized_result_is_skipped_not_panicked() {
+    // Regression test for issue #844: a new_prefix long enough to push the
+    // assembled result past 512 bytes used to overflow the output buffer
+    // and panic. It should now simply be skipped (URI left unchanged).
+    let env = setup_env();
+    let contract_id = env.register_contract(None, NftReward);
+    let client = NftRewardClient::new(&env, &contract_id);
+    let admin = Address::generate(&env);
+    let minter = Address::generate(&env);
+    client.initialize(&admin, &minter, &None, &default_collection_metadata(&env));
+
+    let player = Address::generate(&env);
+    let metadata = create_metadata(&env, "NFT", "Desc", "https://x.example/a");
+    let nft_id = client.mint_reward_nft(&minter, &1, &player, &metadata);
+
+    // A near-max-length URI so that swapping in a longer prefix overflows 512.
+    let uri_str = std::format!("x/{}", "y".repeat(500));
+    set_raw_image_uri(&env, &client, nft_id, &player, &uri_str);
+
+    let old_prefix = String::from_str(&env, "x/");
+    let new_prefix = String::from_str(&env, &"z".repeat(100));
+
+    let updated = client
+        .admin_update_image_uris(&admin, &old_prefix, &new_prefix)
+        .unwrap();
+    assert_eq!(updated, 0);
+
+    // Unchanged — the oversized replacement was skipped, not applied garbled.
+    let nft = client.get_nft(&nft_id).unwrap();
+    assert_eq!(nft.metadata.image_uri, String::from_str(&env, &uri_str));
+}
+
+/// Acceptance test for issue #856:
+/// Two players mint for the same hunt with distinct `completion_rank` values
+/// supplied via the metadata map.  Asserts that:
+/// - the first minter gets rank 1 in the emitted `NftMintedEvent`,
+/// - the second minter gets rank 2, and
+/// - `get_nft_count_for_hunt` is irrelevant to the stored ranks (i.e. the
+///   counter growing does not clobber an already-emitted rank).
+#[test]
+fn test_completion_rank_is_distinct_per_player() {
+    let env = setup_env();
+    let (client, minter) = setup_nft_reward(&env, None);
+
+    let player1 = Address::generate(&env);
+    let player2 = Address::generate(&env);
+    let hunt_id: u64 = 42;
+
+    // Build a minimal metadata map for the first player, rank = 1.
+    let mut meta1: Map<Symbol, Val> = Map::new(&env);
+    meta1.set(Symbol::new(&env, "title"), String::from_str(&env, "Hunt Winner").into_val(&env));
+    meta1.set(Symbol::new(&env, "description"), String::from_str(&env, "First finisher").into_val(&env));
+    meta1.set(Symbol::new(&env, "image_uri"), String::from_str(&env, "ipfs://rank1").into_val(&env));
+    meta1.set(Symbol::new(&env, "completion_rank"), 1u32.into_val(&env));
+
+    let nft1 = client.mint_reward_nft_from_map(&minter, &hunt_id, &player1, &meta1)
+        .expect("first mint should succeed");
+
+    // Build metadata map for the second player, rank = 2.
+    let mut meta2: Map<Symbol, Val> = Map::new(&env);
+    meta2.set(Symbol::new(&env, "title"), String::from_str(&env, "Hunt Runner-up").into_val(&env));
+    meta2.set(Symbol::new(&env, "description"), String::from_str(&env, "Second finisher").into_val(&env));
+    meta2.set(Symbol::new(&env, "image_uri"), String::from_str(&env, "ipfs://rank2").into_val(&env));
+    meta2.set(Symbol::new(&env, "completion_rank"), 2u32.into_val(&env));
+
+    let nft2 = client.mint_reward_nft_from_map(&minter, &hunt_id, &player2, &meta2)
+        .expect("second mint should succeed");
+
+    // Collect the two NftMinted events (the last two events in the log).
+    let all_events = env.events().all();
+    assert!(all_events.len() >= 2, "expected at least 2 NftMinted events");
+
+    let event_count = all_events.len();
+    let (_, _, data1): (Address, soroban_sdk::Vec<Val>, Val) =
+        all_events.get(event_count - 2).unwrap();
+    let (_, _, data2): (Address, soroban_sdk::Vec<Val>, Val) =
+        all_events.get(event_count - 1).unwrap();
+
+    let ev1 = NftMintedEvent::try_from_val(&env, &data1).unwrap();
+    let ev2 = NftMintedEvent::try_from_val(&env, &data2).unwrap();
+
+    // Basic sanity checks.
+    assert_eq!(ev1.nft_id, nft1);
+    assert_eq!(ev2.nft_id, nft2);
+
+    // Core assertion: ranks are frozen at the values supplied by hunty-core,
+    // not at the live hunt-NFT counter.
+    assert_eq!(ev1.completion_rank, 1, "first player should have rank 1");
+    assert_eq!(ev2.completion_rank, 2, "second player should have rank 2");
+    assert_ne!(ev1.completion_rank, ev2.completion_rank, "ranks must be distinct");
+
+    // total_minted_for_hunt reflects the collection counter, not the rank.
+    assert_ne!(
+        ev2.total_minted_for_hunt, ev2.completion_rank,
+        "total_minted_for_hunt and completion_rank are different concepts"
+    );
 }

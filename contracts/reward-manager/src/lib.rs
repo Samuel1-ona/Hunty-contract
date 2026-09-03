@@ -1846,6 +1846,7 @@ impl RewardManager {
                 &pool_config.creator,
                 pool_config.nft_royalty_bps,
                 pool_config.nft_transferable,
+                reward_config.completion_rank,
             ) {
                 Ok(id) => nft_id = Some(id),
                 Err(_) => {
@@ -1871,6 +1872,7 @@ impl RewardManager {
                             nft_hunt_title: reward_config.nft_hunt_title.clone(),
                             nft_rarity: reward_config.nft_rarity,
                             nft_tier: reward_config.nft_tier,
+                            completion_rank: reward_config.completion_rank,
                         },
                     );
                 }
@@ -2186,6 +2188,7 @@ impl RewardManager {
                     &pool_config.creator,
                     pool_config.nft_royalty_bps,
                     pool_config.nft_transferable,
+                    entry.reward_config.completion_rank,
                 ) {
                     Ok(id) => {
                         nft_id = Some(id);
@@ -2218,6 +2221,7 @@ impl RewardManager {
                                 nft_hunt_title: entry.reward_config.nft_hunt_title.clone(),
                                 nft_rarity: entry.reward_config.nft_rarity,
                                 nft_tier: entry.reward_config.nft_tier,
+                                completion_rank: entry.reward_config.completion_rank,
                             },
                         );
                     }
@@ -2299,6 +2303,7 @@ impl RewardManager {
             &pool_config.creator,
             pool_config.nft_royalty_bps,
             pool_config.nft_transferable,
+            pending.completion_rank,
         )?;
 
         if let Some(mut record) = Storage::get_distribution_record(&env, hunt_id, &player) {
@@ -2374,6 +2379,7 @@ impl RewardManager {
             nft_hunt_title: soroban_sdk::String::from_str(&env, ""),
             nft_rarity: 0,
             nft_tier: 0,
+            completion_rank: 0,
         };
         Self::distribute_rewards(env, hunt_id, player, config).is_ok()
     }
@@ -2523,6 +2529,7 @@ impl RewardManager {
             nft_hunt_title: soroban_sdk::String::from_str(&env, ""),
             nft_rarity: 0,
             nft_tier: 0,
+            completion_rank: 0,
         };
 
         Self::distribute_rewards(env, hunt_id, player, config)?;
@@ -3516,7 +3523,35 @@ mod monitoring;
 mod nft_handler;
 pub mod storage;
 mod token_handler;
-pub mod types;
+#[path = "types.rs"]
+mod types_impl;
+pub mod types {
+    pub use crate::types_impl::*;
+
+    use soroban_sdk::{contracttype, Address};
+
+    #[contracttype]
+    #[derive(Clone, Debug, PartialEq, Eq)]
+    pub enum PoolOperation {
+        Create,
+        Fund,
+        Distribute,
+        Refund,
+        Withdraw,
+        Migrate,
+        Freeze,
+        Unfreeze,
+    }
+
+    #[contracttype]
+    #[derive(Clone, Debug, PartialEq, Eq)]
+    pub struct PoolAuditEntry {
+        pub actor: Address,
+        pub operation: PoolOperation,
+        pub timestamp: u64,
+        pub amount: Option<i128>,
+    }
+}
 mod xlm_handler;
 
 #[cfg(test)]

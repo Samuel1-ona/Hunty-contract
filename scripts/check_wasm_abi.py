@@ -36,7 +36,7 @@ EXPECTED_FUNCTIONS: Dict[str, Set[str]] = {
         "create_hunt",
         "clone_hunt",
         "set_time_bonus_config",
-        "update_hunt",
+        "set_max_attempts_per_clue",
         "update_hunt_description",
         "set_max_players",
         "get_hunt_end_time",

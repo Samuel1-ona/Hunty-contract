@@ -125,6 +125,7 @@ mod test {
             nft_hunt_title: soroban_sdk::String::from_str(env, ""),
             nft_rarity: 0,
             nft_tier: 0,
+            completion_rank: 0,
         }
     }
 
@@ -797,6 +798,27 @@ mod test {
         // Verify tokens transferred to contract
         assert_eq!(get_balance(&env, &token_address, &contract_id), 50_000_000);
         assert_eq!(get_balance(&env, &token_address, &creator), 50_000_000);
+    }
+
+    #[test]
+    fn test_fund_reward_pool_tracks_cumulative_total_deposited() {
+        let env = Env::default();
+        env.mock_all_auths_allowing_non_root_auth();
+        let (contract_id, token_address, token_admin) = setup(&env);
+        let creator = Address::generate(&env);
+
+        mint_tokens(&env, &token_address, &token_admin, &creator, 10_000);
+
+        env.as_contract(&contract_id, || {
+            initialize_contract(&env, &token_address);
+            RewardManager::create_reward_pool(env.clone(), creator.clone(), 1, 0).unwrap();
+
+            RewardManager::fund_reward_pool(env.clone(), creator.clone(), 1, 3_000).unwrap();
+            assert_eq!(Storage::get_pool_total_deposited(&env, 1), 3_000);
+
+            RewardManager::fund_reward_pool(env.clone(), creator.clone(), 1, 2_000).unwrap();
+            assert_eq!(Storage::get_pool_total_deposited(&env, 1), 5_000);
+        });
     }
 
     #[test]
@@ -1689,6 +1711,7 @@ mod test {
                 nft_hunt_title: soroban_sdk::String::from_str(&env, ""),
                 nft_rarity: 0,
                 nft_tier: 0,
+                completion_rank: 0,
             };
             let result = RewardManager::distribute_rewards(env.clone(), 1, player.clone(), config);
             assert_eq!(result, Err(RewardErrorCode::InvalidConfig));
@@ -1726,6 +1749,7 @@ mod test {
                 nft_hunt_title: soroban_sdk::String::from_str(&env, ""),
                 nft_rarity: 0,
                 nft_tier: 0,
+                completion_rank: 0,
             };
             let result = RewardManager::distribute_rewards(env.clone(), 1, player.clone(), config);
             assert_eq!(result, Err(RewardErrorCode::InvalidConfig));
@@ -1765,6 +1789,7 @@ mod test {
                 nft_hunt_title: soroban_sdk::String::from_str(&env, "hunt"),
                 nft_rarity: 0,
                 nft_tier: 0,
+                completion_rank: 0,
             };
 
             // Distribution should succeed even though NFT mint fails
@@ -1818,6 +1843,7 @@ mod test {
                 nft_hunt_title: soroban_sdk::String::from_str(&env, "hunt"),
                 nft_rarity: 0,
                 nft_tier: 0,
+                completion_rank: 0,
             };
 
             // Distribution should succeed (no XLM to block on NFT failure)
@@ -1907,6 +1933,7 @@ mod test {
                 nft_hunt_title: soroban_sdk::String::from_str(&env, "hunt"),
                 nft_rarity: 0,
                 nft_tier: 0,
+                completion_rank: 0,
             };
 
             // Distribution succeeds despite NFT failure
@@ -3786,6 +3813,7 @@ mod test {
             nft_hunt_title: soroban_sdk::String::from_str(&env, "Summit Hunt"),
             nft_rarity: 3,
             nft_tier: 2,
+            completion_rank: 1,
         };
 
         env.as_contract(&contract_id, || {

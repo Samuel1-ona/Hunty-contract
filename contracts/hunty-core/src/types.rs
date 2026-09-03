@@ -12,6 +12,18 @@ pub enum HuntStatus {
     Archived,
 }
 
+/// Controls who can view the leaderboard for a hunt.
+#[contracttype]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum LeaderboardVisibility {
+    /// Anyone can view the leaderboard (default).
+    Public,
+    /// Only players who have registered for the hunt can view the leaderboard.
+    RegisteredOnly,
+    /// Only the hunt creator can view the leaderboard.
+    CreatorOnly,
+}
+
 #[contracttype]
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct RewardConfig {
@@ -22,6 +34,7 @@ pub struct RewardConfig {
     pub claimed_count: u32,
     pub nft_rarity: u32,
     pub nft_tier: u32,
+    pub nft_image_uri: Option<String>,
 }
 
 pub type HuntRewardConfig = RewardConfig;
@@ -122,7 +135,8 @@ pub struct BatchClueInput {
     pub answer: String,
     pub points: u32,
     pub is_required: bool,
-    /// Difficulty multiplier (1-10). Points earned = points * difficulty.
+    /// Difficulty tier (1-5, 1 = easiest, 5 = hardest).
+    /// Difficulty multiplies the clue's points: points earned = points * difficulty.
     pub difficulty: u32,
 }
 
@@ -255,6 +269,9 @@ pub struct StoredPlayerProgress {
     pub recent_submissions: Vec<u64>,
     pub clue_last_attempts: Map<u32, u64>,
     pub required_completed_count: u32,
+    /// The player's finishing position among all completions for this hunt,
+    /// frozen at the moment `is_completed` was set to `true`. 0 = not yet completed.
+    pub completion_rank: u32,
 }
 
 /// Public view of player progress, with `player` and `hunt_id` reconstructed from the key.
@@ -272,6 +289,10 @@ pub struct PlayerProgress {
     pub completed_at: u64,
     pub is_completed: bool,
     pub reward_claimed: bool,
+    /// The player's finishing position among all completions for this hunt,
+    /// frozen at the moment `is_completed` was set to `true`.  Zero means the
+    /// player has not yet completed the hunt.
+    pub completion_rank: u32,
     pub recent_submissions: Vec<u64>,
     pub clue_last_attempts: Map<u32, u64>,
 }
@@ -290,15 +311,16 @@ impl PlayerProgress {
             completed_at: 0,
             is_completed: false,
             reward_claimed: false,
+            completion_rank: 0,
             recent_submissions: Vec::new(env),
             clue_last_attempts: Map::new(env),
         }
     }
 
-    /// Pack boolean flags into a single byte
+    /// Pack boolean flags into a single u32
     #[allow(dead_code)]
-    fn bools_to_flags(is_completed: bool, reward_claimed: bool) -> u8 {
-        let mut flags = 0u8;
+    fn bools_to_flags(is_completed: bool, reward_claimed: bool) -> u32 {
+        let mut flags = 0u32;
         if is_completed {
             flags |= 0x01;
         }
@@ -333,6 +355,7 @@ impl PlayerProgress {
             recent_submissions: self.recent_submissions.clone(),
             clue_last_attempts: self.clue_last_attempts.clone(),
             required_completed_count: self.required_completed_count,
+            completion_rank: self.completion_rank,
         }
     }
 
@@ -375,6 +398,7 @@ impl PlayerProgress {
             completed_at,
             is_completed: (stored.flags & 0b0000_0001) != 0,
             reward_claimed: (stored.flags & 0b0000_0010) != 0,
+            completion_rank: stored.completion_rank,
             recent_submissions: stored.recent_submissions,
             clue_last_attempts: stored.clue_last_attempts,
         }
@@ -460,6 +484,7 @@ impl RewardConfig {
         max_winners: u32,
         nft_rarity: u32,
         nft_tier: u32,
+        nft_image_uri: Option<String>,
     ) -> Self {
         Self {
             xlm_pool,
@@ -469,6 +494,7 @@ impl RewardConfig {
             claimed_count: 0,
             nft_rarity,
             nft_tier,
+            nft_image_uri,
         }
     }
 
@@ -559,7 +585,7 @@ pub struct ClueAddedEvent {
     pub question: String,
     pub points: u32,
     pub is_required: bool,
-    /// Difficulty multiplier (1-10).
+    /// Difficulty tier (1-5, 1 = easiest, 5 = hardest).
     pub difficulty: u32,
     /// Weight multiplier (default 1).
     pub weight: u32,
@@ -727,6 +753,13 @@ impl TimeBonusConfig {
         let decay = (span * elapsed_secs as u128) / self.decay_duration_secs as u128;
         (start.saturating_sub(decay)) as u32
     }
+}
+
+#[contracttype]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CreatorDailyHuntCount {
+    pub day: u64,
+    pub count: u32,
 }
 
 #[contracttype]

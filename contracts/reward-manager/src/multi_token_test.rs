@@ -250,6 +250,7 @@ fn test_distribute_rewards_uses_pool_token() {
             nft_hunt_title: String::from_str(&env, ""),
             nft_rarity: 0,
             nft_tier: 0,
+            completion_rank: 0,
         };
 
         let result =

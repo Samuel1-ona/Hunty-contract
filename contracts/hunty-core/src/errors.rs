@@ -1,13 +1,13 @@
 use soroban_sdk::contracterror;
 
 // NOTE: Soroban's #[contracterror] XDR spec caps error enums at 50 cases
-// (ScSpecUdtErrorEnumV0::cases is a VecM<_, 50>). This enum is already at
+// (ScSpecUdtErrorEnumV0::cases is a VecM_, 50>). This enum is already at
 // that limit. If a new error code is ever needed, reuse a semantically-close
 // existing variant instead of adding one (see InviteNotConfigured/
 // InvalidInviteCode below for the established pattern) rather than removing
 // or renumbering an existing variant.
 #[contracterror]
-#[derive(Clone, Copy, Debug, Eq, PartialEq, PartialOrd, Ord)]
+#derive(Clone, Copy, Debug, Eq, PartialEq, PartialOrd, Ord)]
 #[repr(u32)]
 pub enum HuntErrorCode {
     HuntNotFound = 1,
@@ -62,7 +62,7 @@ pub enum HuntErrorCode {
     HuntFull = 50,
 }
 
-#[derive(Debug)]
+#derive(Debug)
 pub enum HuntError {
     HuntNotFound,
     ClueNotFound,
@@ -103,6 +103,7 @@ pub enum HuntError {
     AddressBlacklisted,
     ContractPaused,
     InvalidMaxAttempts,
+    InvalidSubmissionsPerMinute,
     InvalidWeight,
     HintNotAvailable,
     HintAlreadyUnlocked,
@@ -158,6 +159,7 @@ impl From<HuntError> for HuntErrorCode {
             HuntError::AddressBlacklisted => HuntErrorCode::AddressBlacklisted,
             HuntError::ContractPaused => HuntErrorCode::ContractPaused,
             HuntError::InvalidMaxAttempts => HuntErrorCode::InvalidMaxAttempts,
+            HuntError::InvalidSubmissionsPerMinute => HuntErrorCode::InvalidMaxAttempts,
             HuntError::InvalidWeight => HuntErrorCode::InvalidWeight,
             HuntError::HintNotAvailable => HuntErrorCode::HintNotAvailable,
             HuntError::HintAlreadyUnlocked => HuntErrorCode::HintAlreadyUnlocked,

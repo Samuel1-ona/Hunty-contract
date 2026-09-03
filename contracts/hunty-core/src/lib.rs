@@ -1,3 +1,6 @@
+#![no_std]
+#![allow(clippy::too_many_arguments)]
+
 mod errors;
 mod migration;
 mod monitoring;
@@ -6,16 +9,14 @@ mod sanitization;
 mod storage;
 pub mod types;
 
-#![no_std]
-#![allow(clippy::too_many_arguments)]
 use crate::errors::{HuntError, HuntErrorCode};
 use crate::storage::Storage;
 use crate::types::{
     AnswerIncorrectEvent, AnswerPreviewedEvent, BatchClueInput, Clue, ClueAddedEvent, ClueAliasesAddedEvent,
-    ClueCompletedEvent, ClueInfo, CreatorBlacklistedEvent, CreatorRemovedFromBlacklistEvent, Hunt,
+    ClueCompletedEvent, ClueInfo, CreatorBlacklistedEvent, CreatorRemovedFromBlacklistEvent, GcReport, Hunt,
     HuntActivatedEvent, HuntArchivedEvent, HuntCache, HuntCancelledEvent, HuntClonedEvent,
     HuntClosedEvent, HuntCompletedEvent, HuntCreatedEvent, HuntDeactivatedEvent,
-    HuntDescriptionUpdatedEvent, HuntReactivatedEvent, HuntStatistics, HuntStatus,
+    HuntDescriptionUpdatedEvent, HuntGarbageCollectedEvent, HuntReactivatedEvent, HuntStatistics, HuntStatus,
     HuntStatusChangedEvent, InviteCodeGeneratedEvent, InviteCodeRevokedEvent, LeaderboardEntry,
     LeaderboardIndexEntry, LeaderboardResult, PlayerProgress, PlayerRegisteredEvent,
     PlayerRegisteredWithInviteEvent, RewardClaimedEvent, RewardConfig, RewardManagerSetEvent,
@@ -27,7 +28,22 @@ use soroban_sdk::{
 };
 
 const MAX_TITLE_BYTES: u32 = 200;
+// Must stay <= crate::sanitization::SANITIZE_STACK_CAP (2048). Raising these
+// above the sanitizer stack CAP without increasing SANITIZE_STACK_CAP will
+// return SanitizeError::LimitTooLarge for every call using that limit.
 const MAX_DESCRIPTION_BYTES: u32 = 2000;
+/// Sentinel value for `max_submissions_per_minute` indicating no rate limit.
+const UNLIMITED_SUBMISSIONS_PER_MINUTE: u32 = 0;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn max_submissions_per_minute_zero_is_unlimited_sentinel() {
+        assert_eq!(UNLIMITED_SUBMISSIONS_PER_MINUTE, 0);
+    }
+}
 const MAX_QUESTION_LENGTH: u32 = 2000;
 const MAX_ANSWER_LENGTH: u32 = 256;
 const MAX_CATEGORY_BYTES: u32 = 64;
@@ -48,9 +64,25 @@ const DEFAULT_PAGE_SIZE: u32 = 20;
 pub(crate) const ANSWER_SUBMISSION_WINDOW_SECS: u64 = 300;
 /// Small forward-skew allowance so near-simultaneous signing and inclusion does not fail.
 const ANSWER_SUBMISSION_FUTURE_SKEW_SECS: u64 = 30;
+/// Minimum allowed duration between hunt creation and a non-zero end time (ledger seconds).
+pub(crate) const MIN_HUNT_DURATION: u64 = 3600;
 /// Maximum number of members allowed in a team.
 #[allow(dead_code)]
 const MAX_TEAM_SIZE: u32 = 10;
+/// Minimum points a clue can be worth.
+pub(crate) const MIN_CLUE_POINTS: u32 = 1;
+/// Maximum points a clue can be worth. A clue above this cap multiplies into
+/// a score that saturates u32 and flattens the leaderboard into a tie.
+pub(crate) const MAX_CLUE_POINTS: u32 = 10_000;
+/// Lowest difficulty tier for a clue. 1 = easiest.
+pub(crate) const MIN_CLUE_DIFFICULTY: u32 = 1;
+/// Highest difficulty tier for a clue. These are the tiers the UI exposes:
+/// 1 = easiest, 5 = hardest. Difficulty is a multiplier on a clue's points.
+pub(crate) const MAX_CLUE_DIFFICULTY: u32 = 5;
+/// Lowest supported initial score multiplier. 10_000 basis points is 1x.
+pub(crate) const MIN_START_MULTIPLIER_BPS: u32 = 10_000;
+/// Highest supported initial score multiplier. 50_000 basis points is 5x.
+pub(crate) const MAX_START_MULTIPLIER_BPS: u32 = 50_000;
 
 #[contract]
 pub struct HuntyCore;
@@ -66,8 +98,7 @@ impl HuntyCore {
         if Storage::get_admin(&env).is_some() {
             return Err(HuntErrorCode::Unauthorized);
         }
-        Storage::set_admin(&env, &admin);
-        Ok(())
+            Ok(())
     }
 
     #[allow(dead_code)]
@@ -124,6 +155,8 @@ impl HuntyCore {
     ///   or submit answers until the ledger timestamp reaches this value. 0 means
     ///   no start time restriction (immediately playable once activated).
     /// * `end_time` - Optional end timestamp (0 means no end time restriction)
+    /// * `max_submissions_per_minute` - Maximum number of submissions allowed per
+    ///   minute per player. [`UNLIMITED_SUBMISSIONS_PER_MINUTE`] (0) means no limit.
     ///
     /// # Returns
     /// The unique hunt ID of the newly created hunt
@@ -132,6 +165,7 @@ impl HuntyCore {
     /// * `InvalidTitle` - If title is empty or exceeds maximum length
     /// * `InvalidDescription` - If description exceeds maximum length
     /// * `InvalidAddress` - If creator address is invalid
+    /// * `InvalidTimeBonusConfig` - If the initial score multiplier is outside 1x..=5x
     #[allow(clippy::too_many_arguments)]
     pub fn create_hunt(
         env: Env,
@@ -144,26 +178,39 @@ impl HuntyCore {
         start_multiplier_bps: Option<u32>,
         default_points: Option<u32>,
     ) -> Result<u64, HuntErrorCode> {
-        monitoring::Monitoring::record_invocation(&env, 50_000, true);
+        creator.require_auth();
+        // Telemetry via event: no instance-storage read-modify-write on this path.
+        monitoring::Monitoring::record_invocation_event(&env, 50_000, true);
         if Storage::is_blacklisted(&env, &creator) {
             return Err(HuntErrorCode::AddressBlacklisted);
         }
 
         // Validate and sanitize title/description at byte level
         let title =
-            crate::sanitization::StringSanitizer::sanitize(&env, &title, MAX_TITLE_BYTES, false)
+            crate::sanitization::StringSanitizer::sanitize::<MAX_TITLE_BYTES>(&env, &title, false)
                 .map_err(|_| HuntErrorCode::InvalidTitle)?;
 
-        let description = crate::sanitization::StringSanitizer::sanitize(
+        let description = crate::sanitization::StringSanitizer::sanitize::<MAX_DESCRIPTION_BYTES>(
             &env,
             &description,
-            MAX_DESCRIPTION_BYTES,
             true,
         )
         .map_err(|_| HuntErrorCode::InvalidDescription)?;
 
         let current_time = env.ledger().timestamp();
         rate_limit::RateLimiter::check_and_increment(&env, &creator, current_time)?;
+
+        let end_time_val = end_time.unwrap_or(0);
+        if end_time_val != 0 && end_time_val < current_time.saturating_add(MIN_HUNT_DURATION) {
+            return Err(HuntErrorCode::HuntEndTimeInPast);
+        }
+
+        let start_multiplier_bps = start_multiplier_bps.unwrap_or(20_000);
+        if !(MIN_START_MULTIPLIER_BPS..=MAX_START_MULTIPLIER_BPS)
+            .contains(&start_multiplier_bps)
+        {
+            return Err(HuntErrorCode::InvalidTimeBonusConfig);
+        }
 
         // Generate unique hunt ID
         let hunt_id = Storage::next_hunt_id(&env);
@@ -176,6 +223,7 @@ impl HuntyCore {
             0,     // max_winners: 0 initially
             0,     // nft_rarity: zero initially
             0,     // nft_tier: zero initially
+            None,  // nft_image_uri: None initially
         );
 
         // Create the hunt with Draft status
@@ -191,7 +239,7 @@ impl HuntyCore {
             created_at: current_time,
             activated_at: 0, // Will be set when hunt is activated
             start_time: start_time.unwrap_or(0),
-            end_time: end_time.unwrap_or(0),
+            end_time: end_time_val,
             reward_config,
             time_bonus_start_bps: None,
             time_bonus_min_bps: None,
@@ -201,7 +249,7 @@ impl HuntyCore {
             completed_count: 0,
             max_submissions_per_minute,
             max_attempts_per_clue: 5,
-            start_multiplier_bps: start_multiplier_bps.unwrap_or(20000),
+            start_multiplier_bps,
             registration_deadline: 0,
             allow_partial_scoring: false,
             team_mode: false,
@@ -358,8 +406,9 @@ impl HuntyCore {
         Ok(())
     }
 
-    /// Updates a draft hunt's title and description. Only the hunt creator can update it.
-    pub fn update_hunt(
+    /// Updates the maximum number of attempts allowed per clue and attempt cooldown duration for a draft hunt.
+    /// Only the hunt creator or co-creator can update it.
+    pub fn set_max_attempts_per_clue(
         env: Env,
         hunt_id: u64,
         caller: Address,
@@ -399,10 +448,9 @@ impl HuntyCore {
         }
 
         // Validate and sanitize description
-        let description = crate::sanitization::StringSanitizer::sanitize(
+        let description = crate::sanitization::StringSanitizer::sanitize::<MAX_DESCRIPTION_BYTES>(
             &env,
             &description,
-            MAX_DESCRIPTION_BYTES,
             true,
         )
         .map_err(|_| HuntErrorCode::InvalidDescription)?;
@@ -460,8 +508,11 @@ impl HuntyCore {
     /// * `hunt_id` - The hunt to add the clue to
     /// * `question` - The clue question text (max 2000 chars, non-empty)
     /// * `answer` - Plain-text answer; normalized (trimmed, lowercased) then hashed
-    /// * `points` - Points awarded for solving this clue
+    /// * `points` - Points awarded for solving this clue (must be within 1..=10_000)
     /// * `is_required` - Whether this clue must be solved to complete the hunt
+    /// * `difficulty` - Optional difficulty tier (defaults to 1) used as a multiplier on
+    ///   the clue's points. Valid scale is 1..=5, where 1 is easiest and 5 is hardest.
+    /// * `weight` - Optional weight multiplier (defaults to 1)
     ///
     /// # Returns
     /// The sequential clue ID assigned within the hunt
@@ -473,6 +524,8 @@ impl HuntyCore {
     /// * `TooManyClues` - Hunt already has max clues
     /// * `InvalidQuestion` - Question empty or too long
     /// * `InvalidAnswer` - Answer empty or too long
+    /// * `InvalidPoints` - Points are outside the allowed 1..=10_000 range
+    /// * `InvalidDifficulty` - Difficulty is outside the allowed 1..=5 tier scale
     #[allow(clippy::too_many_arguments)]
     pub fn add_clue(
         env: Env,
@@ -576,8 +629,8 @@ impl HuntyCore {
         difficulty: Option<u32>,
         weight: Option<u32>,
     ) -> Result<u32, HuntErrorCode> {
-        let difficulty_val = difficulty.unwrap_or(1);
-        if difficulty_val == 0 || difficulty_val > 10 {
+        let difficulty_val = difficulty.unwrap_or(MIN_CLUE_DIFFICULTY);
+        if difficulty_val < MIN_CLUE_DIFFICULTY || difficulty_val > MAX_CLUE_DIFFICULTY {
             return Err(HuntErrorCode::InvalidDifficulty);
         }
 
@@ -586,23 +639,16 @@ impl HuntyCore {
             return Err(HuntErrorCode::InvalidQuestion);
         }
 
-        // Get hunt to access default_points
-        let hunt = Storage::get_hunt_or_error(env, hunt_id).map_err(HuntErrorCode::from)?;
-
-        // Apply default_points when clue points is 0
-        let final_points = if points == 0 {
-            hunt.default_points
-        } else {
-            points
-        };
-
-        if points == 0 {
+        // Clue points must stay within [MIN_CLUE_POINTS, MAX_CLUE_POINTS].
+        // 0 is treated as unset (invalid), and a value above the cap multiplies
+        // into a score that saturates u32, tying the leaderboard.
+        if points < MIN_CLUE_POINTS || points > MAX_CLUE_POINTS {
             return Err(HuntErrorCode::InvalidPoints);
         }
-        let question = crate::sanitization::StringSanitizer::sanitize(
+        let final_points = points;
+        let question = crate::sanitization::StringSanitizer::sanitize::<MAX_QUESTION_LENGTH>(
             env,
             &question,
-            MAX_QUESTION_LENGTH,
             false,
         )
         .map_err(|_| HuntErrorCode::InvalidQuestion)?;
@@ -826,10 +872,9 @@ impl HuntyCore {
         limit: u32,
         scan_limit: u32,
     ) -> Vec<Hunt> {
-        let Ok(category) = crate::sanitization::StringSanitizer::sanitize(
+        let Ok(category) = crate::sanitization::StringSanitizer::sanitize::<MAX_CATEGORY_BYTES>(
             &env,
             &category,
-            MAX_CATEGORY_BYTES,
             false,
         ) else {
             return Vec::new(&env);
@@ -901,10 +946,9 @@ impl HuntyCore {
             Storage::get_clue_or_error(&env, hunt_id, clue_id).map_err(HuntErrorCode::from)?;
         clue.hint = match hint {
             Some(value) => Some(
-                crate::sanitization::StringSanitizer::sanitize(
+                crate::sanitization::StringSanitizer::sanitize::<MAX_QUESTION_LENGTH>(
                     &env,
                     &value,
-                    MAX_QUESTION_LENGTH,
                     false,
                 )
                 .map_err(|_| HuntErrorCode::InvalidQuestion)?,
@@ -980,7 +1024,7 @@ impl HuntyCore {
         answer: &String,
     ) -> Result<BytesN<32>, HuntError> {
         let answer =
-            crate::sanitization::StringSanitizer::sanitize(env, answer, MAX_ANSWER_LENGTH, false)
+            crate::sanitization::StringSanitizer::sanitize::<MAX_ANSWER_LENGTH>(env, answer, false)
                 .map_err(|_| HuntError::InvalidAnswer)?;
         let n = answer.len();
         if n == 0 {
@@ -1029,10 +1073,9 @@ impl HuntyCore {
         for i in 0..categories.len() {
             // SAFETY: i is within the vector bounds established by the enclosing loop
             let category = categories.get(i).unwrap();
-            let category = crate::sanitization::StringSanitizer::sanitize(
+            let category = crate::sanitization::StringSanitizer::sanitize::<MAX_CATEGORY_BYTES>(
                 env,
                 &category,
-                MAX_CATEGORY_BYTES,
                 false,
             )
             .map_err(|_| HuntErrorCode::InvalidCategory)?;
@@ -1042,7 +1085,7 @@ impl HuntyCore {
     }
 
     fn validate_difficulty(value: u32) -> Result<(), HuntErrorCode> {
-        if value == 0 || value > 10 {
+        if value < MIN_CLUE_DIFFICULTY || value > MAX_CLUE_DIFFICULTY {
             return Err(HuntErrorCode::InvalidDifficulty);
         }
         Ok(())
@@ -1168,6 +1211,26 @@ impl HuntyCore {
         v <= 5
     }
 
+    fn validate_nft_image_uri(uri: &String) -> bool {
+        let len = uri.len();
+        if len == 0 || len > 200 {
+            return false;
+        }
+        let mut buf = [0u8; 200];
+        uri.copy_into_slice(&mut buf[..len as usize]);
+        let text = unsafe { core::str::from_utf8_unchecked(&buf[..len as usize]) };
+
+        if text.starts_with("https://") {
+            let authority = &text[8..];
+            return !authority.is_empty() && !authority.bytes().all(|b| b == b' ');
+        }
+        if text.starts_with("ipfs://") {
+            let cid = &text[7..];
+            return cid.len() >= 46;
+        }
+        false
+    }
+
     /// Resolves the XLM amount for the completing player.
     ///
     /// If the hunt's rewardManager-configured pool has a non-empty
@@ -1240,23 +1303,37 @@ impl HuntyCore {
             if cache.required_clues == 0 {
                 return Err(HuntErrorCode::NoRequiredClues);
             }
-            if Storage::get_reward_manager(&env).is_some() && cache.max_winners == 0 {
+
+            debug_assert_eq!(cache.max_winners, hunt.reward_config.max_winners);
+
+            let reward_manager = Storage::get_reward_manager(&env);
+
+            if reward_manager.is_some() && hunt.reward_config.max_winners == 0 {
                 return Err(HuntErrorCode::NoRewardsConfigured);
             }
 
-            // Check rewards are configured if reward manager is set
-            if Storage::get_reward_manager(&env).is_some() && hunt.reward_config.max_winners == 0 {
-                return Err(HuntErrorCode::NoRewardsConfigured);
+            if hunt.reward_config.nft_enabled {
+                if !Self::validate_rarity(hunt.reward_config.nft_rarity) {
+                    return Err(HuntErrorCode::InvalidRarity);
+                }
+                match hunt.reward_config.nft_image_uri.as_ref() {
+                    Some(uri) => {
+                        if !Self::validate_nft_image_uri(uri) {
+                            return Err(HuntErrorCode::NoRewardsConfigured);
+                        }
+                    }
+                    None => return Err(HuntErrorCode::NoRewardsConfigured),
+                }
             }
 
             // Check reward pool has sufficient balance if reward manager is configured
-            if let Some(reward_manager_addr) = Storage::get_reward_manager(&env) {
+            if let Some(ref reward_manager_addr) = reward_manager {
                 let mut balance_args: Vec<Val> = Vec::new(&env);
                 balance_args.push_back(hunt_id.into_val(&env));
 
                 // Query the pool balance from the reward manager
                 let pool_balance = match env.try_invoke_contract::<i128, RewardErrorCode>(
-                    &reward_manager_addr,
+                    reward_manager_addr,
                     &Symbol::new(&env, "get_pool_balance"),
                     balance_args.clone(),
                 ) {
@@ -1268,7 +1345,7 @@ impl HuntyCore {
                 // Query the minimum distribution amount for this pool
                 let min_distribution_amount = match env
                     .try_invoke_contract::<i128, RewardErrorCode>(
-                        &reward_manager_addr,
+                        reward_manager_addr,
                         &Symbol::new(&env, "get_min_distribution_amount"),
                         balance_args,
                     ) {
@@ -1373,8 +1450,6 @@ impl HuntyCore {
         if caller != cache.creator {
             return Err(HuntErrorCode::Unauthorized);
         }
-
-        // Cannot cancel a completed hunt
 
         // Cannot cancel a completed or already-cancelled hunt
         if cache.status == HuntStatus::Completed {
@@ -1640,6 +1715,36 @@ impl HuntyCore {
         Ok(hunt)
     }
 
+    /// Convenience helper used in tests to set reward configuration on a hunt.
+    /// Sets nft_image_uri to a placeholder when nft_enabled is true.
+    pub fn set_reward_config(
+        env: Env,
+        hunt_id: u64,
+        max_winners: u32,
+        xlm_pool: i128,
+        nft_enabled: bool,
+        nft_contract: Option<Address>,
+    ) -> Result<(), HuntErrorCode> {
+        let mut hunt = Storage::get_hunt(&env, hunt_id).ok_or(HuntErrorCode::HuntNotFound)?;
+        let uri = if nft_enabled {
+            Some(String::from_str(&env, "https://example.com/nft.png"))
+        } else {
+            None
+        };
+        hunt.reward_config = RewardConfig::new(
+            &env,
+            xlm_pool,
+            nft_enabled,
+            nft_contract,
+            max_winners,
+            0,
+            0,
+            uri,
+        );
+        Storage::save_hunt(&env, &hunt);
+        Ok(())
+    }
+
     /// Sets the RewardManager contract address for cross-contract reward distribution.
     pub fn set_reward_manager(
         env: Env,
@@ -1758,6 +1863,11 @@ impl HuntyCore {
             return Err(HuntErrorCode::NoRewardsConfigured);
         }
 
+        // #832: Enforce max_winners cap before any reward movement
+        if hunt.reward_config.claimed_count >= hunt.reward_config.max_winners {
+            return Err(HuntErrorCode::InsufficientRewardPool);
+        }
+
         // Distribute the reward, mark the player as claimed, and emit the event.
         Self::distribute_player_reward(&env, &mut hunt, &mut progress)?;
 
@@ -1794,7 +1904,8 @@ impl HuntyCore {
         // =======================================================================
         let nft_awarded = hunt.reward_config.nft_enabled;
 
-        if !Self::validate_rarity(hunt.reward_config.nft_rarity) {
+        // #834: Only validate rarity when NFT rewards are actually enabled
+        if nft_awarded && !Self::validate_rarity(hunt.reward_config.nft_rarity) {
             return Err(HuntErrorCode::InvalidRarity);
         }
 
@@ -1805,16 +1916,22 @@ impl HuntyCore {
             } else {
                 None
             };
+            // #833: Thread nft_image_uri from hunt.reward_config into the cross-contract call
             let (nft_contract, nft_title, nft_desc, nft_uri, nft_hunt_title) = if nft_awarded {
                 hunt.reward_config
                     .nft_contract
                     .clone()
                     .map(|nft_contract| {
+                        let uri = hunt
+                            .reward_config
+                            .nft_image_uri
+                            .clone()
+                            .unwrap_or_else(|| String::from_str(env, ""));
                         (
                             Some(nft_contract),
                             hunt.title.clone(),
                             hunt.description.clone(),
-                            String::from_str(env, ""),
+                            uri,
                             hunt.title.clone(),
                         )
                     })
@@ -1843,6 +1960,7 @@ impl HuntyCore {
                 nft_hunt_title,
                 nft_rarity: hunt.reward_config.nft_rarity,
                 nft_tier: hunt.reward_config.nft_tier,
+                completion_rank: progress.completion_rank,
             };
 
             // Only call RewardManager when there is at least one reward type
@@ -1867,8 +1985,12 @@ impl HuntyCore {
         progress.reward_claimed = true;
         Storage::save_player_progress(env, progress);
 
-        // Update hunt reward config (persisted by the caller)
-        hunt.reward_config.claimed_count = hunt.reward_config.claimed_count.saturating_add(1);
+        // #832: Use checked_add for claimed_count to guard against overflow
+        hunt.reward_config.claimed_count = hunt
+            .reward_config
+            .claimed_count
+            .checked_add(1)
+            .ok_or(HuntErrorCode::InsufficientRewardPool)?;
 
         // Once every reward slot has been claimed, the hunt itself is done.
         // The status change is persisted by the caller along with claimed_count.
@@ -2365,24 +2487,24 @@ impl HuntyCore {
         } else {
             decrease_bps as u32
         };
+        // Clamp legacy hunts created before multiplier validation as well as
+        // new hunts. This keeps the arithmetic bound true for stored data.
+        let bounded_start_multiplier = hunt
+            .start_multiplier_bps
+            .clamp(MIN_START_MULTIPLIER_BPS, MAX_START_MULTIPLIER_BPS);
         let multiplier_bps = core::cmp::max(
-            10000, // Minimum 1x
-            hunt.start_multiplier_bps.saturating_sub(decrease_bps_u32),
+            MIN_START_MULTIPLIER_BPS,
+            bounded_start_multiplier.saturating_sub(decrease_bps_u32),
         );
         let base_points = clue
             .points
             .saturating_mul(clue.difficulty)
             .saturating_mul(clue.weight);
-        // Use saturating arithmetic for the score multiplication to prevent overflow
-        let score = (base_points as u64)
-            .saturating_mul(multiplier_bps as u64)
-            .saturating_div(10000);
-        // Clamp to u32::MAX to prevent silent truncation
-        if score > u32::MAX as u64 {
-            u32::MAX
-        } else {
-            score as u32
-        }
+        // u32::MAX * MAX_START_MULTIPLIER_BPS fits in u64. Clamp before the
+        // final cast so the conversion is mathematically unable to truncate.
+        let score = u64::from(base_points) * u64::from(multiplier_bps)
+            / u64::from(MIN_START_MULTIPLIER_BPS);
+        score.min(u64::from(u32::MAX)) as u32
     }
 
     /// In team mode, returns true if any teammate has already completed this clue.
@@ -2486,6 +2608,9 @@ impl HuntyCore {
             let rank = hunt_mut.completed_count;
             Storage::save_hunt(env, &hunt_mut);
             Storage::increment_player_completed_hunt_count(env, player);
+            // Freeze the rank on the player's progress record so it is
+            // available as an authoritative value at reward-claim time.
+            progress.completion_rank = rank;
             let hunt_completed_event = HuntCompletedEvent {
                 hunt_id,
                 player: player.clone(),
@@ -2545,10 +2670,6 @@ impl HuntyCore {
             return Err(HuntErrorCode::BannedPlayer);
         }
 
-        if Storage::is_banned(&env, hunt_id, &player) {
-            return Err(HuntErrorCode::BannedPlayer);
-        }
-
         Self::validate_submission_timestamp(current_time, submitted_at)
             .map_err(HuntErrorCode::from)?;
         Self::assert_submission_not_replayed(
@@ -2562,16 +2683,10 @@ impl HuntyCore {
         )
         .map_err(HuntErrorCode::from)?;
 
-        Storage::save_processed_submission(
-            &env,
-            hunt_id,
-            clue_id,
-            &player,
-            submission_nonce,
-            submitted_at,
-            submitted_at.saturating_add(ANSWER_SUBMISSION_WINDOW_SECS),
-        );
-
+        // All cheap validation (player registration, clue existence, completion state, rate
+        // limits) runs BEFORE we write the processed-submission entry.  This prevents nonce
+        // exhaustion on validation failures and stops unregistered addresses from bloating
+        // ledger storage.  The replay guard above is a read-only check and stays in place.
         let mut progress = Storage::get_player_progress(&env, hunt_id, &player)
             .ok_or(HuntErrorCode::PlayerNotRegistered)?;
 
@@ -2610,6 +2725,7 @@ impl HuntyCore {
                 let _cooldown_remaining = 60u64.saturating_sub(elapsed);
                 return Err(HuntErrorCode::from(HuntError::RateLimitExceeded));
             }
+            progress.recent_submissions.push_back(current_time);
         }
 
         if hunt.attempt_cooldown_secs > 0 {
@@ -2622,6 +2738,18 @@ impl HuntyCore {
             }
             progress.clue_last_attempts.set(clue_id, current_time);
         }
+
+        // All validation passed — mark the nonce as consumed so the same envelope cannot be
+        // replayed, then proceed to answer evaluation.
+        Storage::save_processed_submission(
+            &env,
+            hunt_id,
+            clue_id,
+            &player,
+            submission_nonce,
+            submitted_at,
+            submitted_at.saturating_add(ANSWER_SUBMISSION_WINDOW_SECS),
+        );
 
         let submitted_hash = Self::normalize_and_hash_answer(&env, hunt_id, clue_id, &answer)
             .map_err(HuntErrorCode::from)?;
@@ -2689,16 +2817,10 @@ impl HuntyCore {
         )
         .map_err(HuntErrorCode::from)?;
 
-        Storage::save_processed_submission(
-            &env,
-            hunt_id,
-            clue_id,
-            &player,
-            submission_nonce,
-            submitted_at,
-            submitted_at.saturating_add(ANSWER_SUBMISSION_WINDOW_SECS),
-        );
-
+        // All cheap validation (player registration, clue existence, completion state, rate
+        // limits) runs BEFORE we write the processed-submission entry.  This prevents nonce
+        // exhaustion on validation failures and stops unregistered addresses from bloating
+        // ledger storage.  The replay guard above is a read-only check and stays in place.
         let mut progress = Storage::get_player_progress(&env, hunt_id, &player)
             .ok_or(HuntErrorCode::PlayerNotRegistered)?;
 
@@ -2737,7 +2859,20 @@ impl HuntyCore {
                 let _cooldown_remaining = 60u64.saturating_sub(elapsed);
                 return Err(HuntErrorCode::from(HuntError::RateLimitExceeded));
             }
+            progress.recent_submissions.push_back(current_time);
         }
+
+        // All validation passed — mark the nonce as consumed so the same envelope cannot be
+        // replayed, then proceed to answer evaluation.
+        Storage::save_processed_submission(
+            &env,
+            hunt_id,
+            clue_id,
+            &player,
+            submission_nonce,
+            submitted_at,
+            submitted_at.saturating_add(ANSWER_SUBMISSION_WINDOW_SECS),
+        );
 
         let answer_correct = Self::is_answer_correct(&clue, &answer_hash);
         Self::finalize_answer_submission(
@@ -2888,11 +3023,56 @@ impl HuntyCore {
 
     /// Returns the list of clue IDs that the player has completed for a hunt (read-only).
     /// Useful for UI to show progress. Returns empty vec if player is not registered.
+    ///
+    /// Thin backwards-compatible wrapper: returns at most `MAX_CLUES_PER_HUNT`
+    /// entries, since `add_clue` / `add_clues_batch` bound a hunt's clue set by
+    /// that same constant. Prefer `get_completed_clues_paginated` for new callers.
     pub fn get_completed_clues(env: Env, hunt_id: u64, player: Address) -> Vec<u32> {
-        match Storage::get_player_progress(&env, hunt_id, &player) {
-            Some(progress) => progress.completed_clues,
-            None => Vec::new(&env),
+        let mut all = Self::get_completed_clues_paginated(env.clone(), hunt_id, player.clone(), 0, MAX_BATCH_SIZE);
+        let mut offset = MAX_BATCH_SIZE;
+        while all.len() < MAX_CLUES_PER_HUNT {
+            let page =
+                Self::get_completed_clues_paginated(env.clone(), hunt_id, player.clone(), offset, MAX_BATCH_SIZE);
+            if page.is_empty() {
+                break;
+            }
+            for id in page.iter() {
+                all.push_back(id);
+            }
+            offset += MAX_BATCH_SIZE;
         }
+        all
+    }
+
+    /// Paginated variant of `get_completed_clues` (read-only).
+    /// `offset` is 0-indexed; `limit` is capped at `MAX_BATCH_SIZE`, matching
+    /// `list_clues`. Returns an empty vec if the player is not registered or the
+    /// offset is past the end of the completed set.
+    pub fn get_completed_clues_paginated(
+        env: Env,
+        hunt_id: u64,
+        player: Address,
+        offset: u32,
+        limit: u32,
+    ) -> Vec<u32> {
+        let progress = match Storage::get_player_progress(&env, hunt_id, &player) {
+            Some(progress) => progress,
+            None => return Vec::new(&env),
+        };
+
+        // Cap the page so a raised MAX_CLUES_PER_HUNT can never turn this into
+        // an unbounded scan. The uncapped wrapper above stays bounded because
+        // MAX_CLUES_PER_HUNT bounds the stored set itself.
+        let effective_limit = core::cmp::min(limit, MAX_BATCH_SIZE);
+        let total = progress.completed_clues.len();
+
+        let mut page: Vec<u32> = Vec::new(&env);
+        let mut idx = offset;
+        while idx < total && page.len() < effective_limit {
+            page.push_back(progress.completed_clues.get(idx).unwrap_or(0));
+            idx += 1;
+        }
+        page
     }
 
     /// Returns the total number of hunts created (read-only).
@@ -2903,6 +3083,17 @@ impl HuntyCore {
     /// Returns ranked players for a hunt with pagination support (read-only).
     /// Sorted by score descending, then by completion time ascending (earlier = better).
     /// Limit is capped at 20 to control gas. Returns error if hunt does not exist.
+    ///
+    /// Access is governed by the hunt's `leaderboard_visibility` setting:
+    /// * `Public` – any caller (pass `None` for anonymous access).
+    /// * `RegisteredOnly` – caller must be a registered player for the hunt.
+    /// * `CreatorOnly` – caller must be the hunt creator.
+    ///
+    /// # Arguments
+    /// * `env` - The Soroban environment
+    /// * `hunt_id` - The hunt to query
+    /// * `limit` - Maximum entries to return (capped at `MAX_LEADERBOARD_SIZE`)
+    /// * `caller` - Optional address of the requester; required for non-Public visibility
     pub fn get_hunt_leaderboard(
         env: Env,
         hunt_id: u64,
@@ -2945,8 +3136,35 @@ impl HuntyCore {
         hunt_id: u64,
         start_index: u32,
         window_size: u32,
+        caller: Option<Address>,
     ) -> Result<crate::types::LeaderboardWindow, HuntErrorCode> {
-        let _ = Storage::get_hunt(&env, hunt_id).ok_or(HuntErrorCode::HuntNotFound)?;
+        let hunt = Storage::get_hunt(&env, hunt_id).ok_or(HuntErrorCode::HuntNotFound)?;
+
+        // Enforce visibility
+        match &hunt.leaderboard_visibility {
+            LeaderboardVisibility::Public => {
+                // No restrictions — anyone may query.
+            }
+            LeaderboardVisibility::RegisteredOnly => {
+                let addr = caller
+                    .as_ref()
+                    .ok_or(HuntErrorCode::LeaderboardVisibilityUnauthorized)?;
+                addr.require_auth();
+                if Storage::get_player_progress(&env, hunt_id, addr).is_none() {
+                    return Err(HuntErrorCode::LeaderboardVisibilityUnauthorized);
+                }
+            }
+            LeaderboardVisibility::CreatorOnly => {
+                let addr = caller
+                    .as_ref()
+                    .ok_or(HuntErrorCode::LeaderboardVisibilityUnauthorized)?;
+                addr.require_auth();
+                if *addr != hunt.creator {
+                    return Err(HuntErrorCode::LeaderboardVisibilityUnauthorized);
+                }
+            }
+        }
+
         let queried_at = env.ledger().timestamp();
         let players = Storage::get_hunt_players(&env, hunt_id);
         let total_players = players.len();
@@ -3387,6 +3605,10 @@ impl HuntyCore {
         migration::HuntyCoreMigration::rollback_migration(&env, &admin)
     }
 
+    pub fn get_active_alerts(env: Env) -> Vec<monitoring::HealthAlert> {
+        monitoring::Monitoring::active_alerts(&env)
+    }
+
     pub fn get_health_dashboard(env: Env) -> monitoring::ContractHealth {
         monitoring::Monitoring::health_dashboard(&env)
     }
@@ -3415,21 +3637,3 @@ impl HuntyCore {
         );
     }
 }
-
-mod errors;
-mod migration;
-mod monitoring;
-mod rate_limit;
-mod sanitization;
-mod storage;
-pub mod types;
-
-// #[cfg(test)]
-// mod test;
-
-#[cfg(test)]
-mod preview_answer_security_test;
-
-#[cfg(test)]
-mod view_only_test;
-

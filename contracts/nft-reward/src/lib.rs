@@ -8,8 +8,6 @@ use hunty_common::audit::{
     emit_audit_event, detail, ACTION_ADMIN_ADDED, ACTION_ADMIN_REMOVED, TOPIC_AUDIT,
 };
 
-#[allow(dead_code)]
-const MAX_URI_LEN: usize = 512;
 const MAX_NFT_TITLE_BYTES: u32 = 128;
 const MAX_NFT_DESCRIPTION_BYTES: u32 = 1024;
 const MAX_NFT_URI_BYTES: u32 = 512;
@@ -71,10 +69,10 @@ fn image_uri_is_valid(uri: &String) -> bool {
     // Accept non-empty URIs that start with https:// or ipfs://
     // soroban_sdk::String has no as_str(); compare via UTF-8 text when possible.
     let len = uri.len();
-    if len == 0 || len > 200 {
+    if len == 0 || len > MAX_NFT_URI_BYTES {
         return false;
     }
-    let mut buf = [0u8; 200];
+    let mut buf = [0u8; MAX_NFT_URI_BYTES as usize];
     uri.copy_into_slice(&mut buf[..len as usize]);
     // SAFETY: `buf` is populated from a soroban_sdk::String via
     // copy_into_slice, so the bytes are guaranteed to be valid UTF-8.
@@ -197,6 +195,11 @@ pub struct AdminImageUrisUpdatedEvent {
     pub old_prefix: String,
     pub new_prefix: String,
     pub updated_count: u32,
+    /// Start index of this batch (as passed in).
+    pub offset: u32,
+    /// Index to pass as `offset` for the next batch. Equal to the total NFT
+    /// count when this was the final batch.
+    pub next_offset: u32,
 }
 
 /// Event emitted when an NFT extension is set.
@@ -375,7 +378,10 @@ impl NftReward {
         metadata: NftMetadata,
     ) -> u64 {
         Self::require_authorized_caller(&env, &minter);
-        Self::mint_reward_nft_impl(env, hunt_id, player_address, metadata, true)
+        // This direct entrypoint has no rank context; pass 0 so callers that
+        // care about rank should use `mint_reward_nft_from_map` with the
+        // "completion_rank" key set.
+        Self::mint_reward_nft_impl(env, hunt_id, player_address, metadata, true, 0)
     }
 
     /// Mints a reward NFT from a generic metadata map. This is the entrypoint
@@ -467,6 +473,10 @@ impl NftReward {
         let royalty_bps: Option<u32> = extract_optional_field!("royalty_bps", u32);
         let transferable = extract_field!("transferable", bool, false);
 
+        // Extract the authoritative completion rank threaded from hunty-core.
+        // Defaults to 0 when absent (e.g., direct test calls that omit the key).
+        let completion_rank = extract_field!("completion_rank", u32, 0u32);
+
         // Parse extensions from metadata map
         let extensions: Map<String, String> =
             extract_field!("extensions", Map<String, String>, Map::new(&env));
@@ -482,7 +492,7 @@ impl NftReward {
             royalty_bps,
             extensions,
         };
-        Ok(Self::mint_reward_nft_impl(env, hunt_id, player_address, meta, transferable))
+        Ok(Self::mint_reward_nft_impl(env, hunt_id, player_address, meta, transferable, completion_rank))
     }
 
     fn validate_image_uri(env: &Env, value: &String) -> Result<(), NftErrorCode> {
@@ -523,27 +533,13 @@ impl NftReward {
         Ok(())
     }
 
-    fn compute_completion_rank(
-        env: &Env,
-        hunt_id: u64,
-    ) -> u32 {
-        let players = Storage::get_hunt_players(env, hunt_id);
-        let mut completed: u32 = 0;
-        for i in 0..players.len() {
-            let progress = players.get(i).unwrap();
-            if progress.is_completed {
-                completed += 1;
-            }
-        }
-        completed.saturating_add(1)
-    }
-
     fn mint_reward_nft_impl(
         env: Env,
         hunt_id: u64,
         player_address: Address,
         metadata: NftMetadata,
         transferable: bool,
+        completion_rank: u32,
     ) -> u64 {
         if metadata.rarity > 5 {
             panic_with_error!(&env, crate::errors::NftErrorCode::InvalidRarity);
@@ -608,7 +604,9 @@ impl NftReward {
         Storage::increment_owner_hunt_count(&env, &player_address, hunt_id);
         Storage::add_nft_to_hunt(&env, hunt_id, nft_id);
         Storage::mark_hunt_minted(&env, hunt_id);
-        Storage::update_collection_metadata_total_supply(&env, Storage::get_nft_counter(&env));
+        // Read the counter once and reuse it for both the supply update and the event.
+        let total_supply = Storage::get_nft_counter(&env);
+        Storage::update_collection_metadata_total_supply(&env, total_supply);
 
         let event = NftMintedEvent {
             nft_id,
@@ -618,11 +616,13 @@ impl NftReward {
             tier: nft_data.metadata.tier,
             minted_at,
             hunt_title: metadata.hunt_title.clone(),
-            total_minted_for_hunt: Storage::get_nft_counter(&env) as u32,
-            completion_rank: Self::compute_completion_rank(env, hunt_id),
+            total_minted_for_hunt: total_supply as u32,
+            // Use the authoritative rank threaded from hunty-core (frozen at
+            // completion time), not a live re-count of minted NFTs.
+            completion_rank,
             collection_stats: format!(
                 "total_supply={},total_hunts={},total_owners={}",
-                Storage::get_nft_counter(&env),
+                total_supply,
                 0u64, // total_hunts would need tracking
                 0u64  // total_owners would need tracking
             ),
@@ -862,6 +862,19 @@ impl NftReward {
     /// Batch-updates image URIs for all NFTs whose `image_uri` starts with `old_prefix`,
     /// replacing it with `new_prefix`. Useful for migrating between IPFS gateways or CDNs.
     ///
+    /// Paginated like every other collection scan in this contract
+    /// (`list_all_nfts`, `get_player_nfts`, `get_nfts_by_hunt`): a single call
+    /// only ever touches up to `MAX_SCAN_LIMIT` NFTs starting at `offset`, so
+    /// it can't exceed the invocation resource budget regardless of
+    /// collection size. Drive a full migration by repeatedly calling this
+    /// with `offset` set to the previous call's `next_offset` until
+    /// `next_offset` stops advancing (or equals the collection size).
+    ///
+    /// The operation is idempotent: re-running a batch over an
+    /// already-migrated range updates nothing (those URIs already start with
+    /// `new_prefix`, not `old_prefix`), so a retried or overlapping batch is
+    /// harmless.
+    ///
     /// # Authorization
     /// Only the configured admin can call this function.
     ///
@@ -869,28 +882,53 @@ impl NftReward {
     /// * `admin` - The admin address (must match the stored admin)
     /// * `old_prefix` - The prefix to match (e.g. "ipfs://oldgateway/")
     /// * `new_prefix` - The replacement prefix (e.g. "ipfs://newgateway/")
+    /// * `offset` - The starting index for this batch (0-based)
+    /// * `limit` - The maximum number of NFTs to scan in this batch (capped at MAX_SCAN_LIMIT)
     ///
     /// # Returns
-    /// The number of NFTs whose image URIs were updated.
+    /// `(updated_count, next_offset)` — how many image URIs were updated in
+    /// this batch, and the offset to resume from for the next one.
     pub fn admin_update_image_uris(
         env: Env,
         admin: Address,
         old_prefix: String,
         new_prefix: String,
-    ) -> Result<u32, crate::errors::NftErrorCode> {
+        offset: u32,
+        limit: u32,
+    ) -> Result<(u32, u32), crate::errors::NftErrorCode> {
         Self::require_admin(&env, &admin)?;
 
         let all_ids = Storage::get_all_nft_ids(&env);
-        let mut updated: u32 = 0;
+        let total_count = all_ids.len();
 
-        for nft_id in all_ids.iter() {
+        if offset >= total_count {
+            let event = AdminImageUrisUpdatedEvent {
+                old_prefix,
+                new_prefix,
+                updated_count: 0,
+                offset,
+                next_offset: offset,
+            };
+            env.events()
+                .publish((Symbol::new(&env, "AdminImageUrisUpdated"),), event);
+            return Ok((0, offset));
+        }
+
+        let bounded_limit = limit.min(MAX_SCAN_LIMIT);
+        let end = offset.saturating_add(bounded_limit).min(total_count);
+
+        let mut updated: u32 = 0;
+        for i in offset..end {
+            let Some(nft_id) = all_ids.get(i) else {
+                continue;
+            };
             if let Some(mut nft) = Storage::get_nft(&env, nft_id) {
                 if let Some(new_uri) =
                     Self::replace_prefix(&env, &nft.metadata.image_uri, &old_prefix, &new_prefix)
                 {
                     nft.metadata.image_uri = new_uri;
                     Storage::save_nft(&env, &nft);
-                    updated += 1;
+                    updated = updated.saturating_add(1);
                 }
             }
         }
@@ -901,46 +939,85 @@ impl NftReward {
                 old_prefix,
                 new_prefix,
                 updated_count: updated,
+                offset,
+                next_offset: end,
             },
         );
 
-        Ok(updated)
+        Ok((updated, end))
     }
 
+    /// Replaces a matching `old_prefix` at the start of `uri` with `new_prefix`.
+    ///
+    /// Returns `None` — meaning "leave the URI untouched" — whenever the
+    /// operation cannot be performed *exactly*:
+    /// - `uri` does not start with `old_prefix`, or
+    /// - any of `uri` / `old_prefix` / `new_prefix` exceeds `MAX_NFT_URI_BYTES`
+    ///   (all three are bounded by that constant elsewhere in the contract;
+    ///   this defends against callers that bypass those checks), or
+    /// - the resulting URI would exceed `MAX_NFT_URI_BYTES`.
+    ///
+    /// Every early return above is an explicit, checked rejection. Unlike the
+    /// previous implementation, nothing here is silently truncated (the old
+    /// code copied at most 256 bytes into a fixed buffer but kept comparing
+    /// against the untruncated length) and nothing can index out of bounds
+    /// (the old code panicked when `old_prefix` exceeded 256 bytes, or when
+    /// `new_prefix` was long enough to overflow the 512-byte output buffer).
     fn replace_prefix(
         env: &Env,
         uri: &String,
         old_prefix: &String,
         new_prefix: &String,
     ) -> Option<String> {
+        const MAX: usize = MAX_NFT_URI_BYTES as usize;
+
         let uri_len = uri.len() as usize;
         let old_len = old_prefix.len() as usize;
         let new_len = new_prefix.len() as usize;
 
+        // Reject anything that wouldn't fit our fixed-size buffers instead of
+        // truncating the copy (old bug #1) or indexing past it (old bug #2).
+        if uri_len > MAX || old_len > MAX || new_len > MAX {
+            return None;
+        }
         if uri_len < old_len {
             return None;
         }
 
-        let mut buf_uri = [0u8; 256];
-        let mut buf_old = [0u8; 256];
-        let mut buf_new = [0u8; 256];
+        let mut buf_uri = [0u8; MAX];
+        let mut buf_old = [0u8; MAX];
 
-        uri.copy_into_slice(&mut buf_uri[..uri_len.min(256)]);
-        old_prefix.copy_into_slice(&mut buf_old[..old_len.min(256)]);
-        new_prefix.copy_into_slice(&mut buf_new[..new_len.min(256)]);
+        uri.copy_into_slice(&mut buf_uri[..uri_len]);
+        old_prefix.copy_into_slice(&mut buf_old[..old_len]);
 
-        if buf_uri[..old_len] == buf_old[..old_len] {
-            let mut final_buf = [0u8; 512];
-            final_buf[..new_len].copy_from_slice(&buf_new[..new_len]);
-            let suffix_len = uri_len - old_len;
-            final_buf[new_len..new_len + suffix_len].copy_from_slice(&buf_uri[old_len..uri_len]);
-            let total_len = new_len + suffix_len;
-            // SAFETY: `final_buf` is assembled entirely from bytes copied
-            // out of soroban_sdk::String values, so the slice is valid UTF-8.
-            let text = unsafe { core::str::from_utf8_unchecked(&final_buf[..total_len]) };
-            return Some(String::from_str(env, text));
+        if buf_uri[..old_len] != buf_old[..old_len] {
+            return None;
         }
-        None
+
+        let suffix_len = uri_len - old_len;
+        let total_len = new_len + suffix_len;
+        // Reject instead of overflowing the output buffer (old bug #3) when a
+        // longer `new_prefix` would push the result past the max URI length.
+        if total_len > MAX {
+            return None;
+        }
+
+        let mut buf_new = [0u8; MAX];
+        new_prefix.copy_into_slice(&mut buf_new[..new_len]);
+
+        let mut final_buf = [0u8; MAX];
+        final_buf[..new_len].copy_from_slice(&buf_new[..new_len]);
+        final_buf[new_len..total_len].copy_from_slice(&buf_uri[old_len..uri_len]);
+
+        // SAFETY: `final_buf` is assembled entirely from bytes copied out of
+        // soroban_sdk::String values, so the slice is valid UTF-8. The split
+        // point `old_len` is a byte-for-byte match between `uri` and
+        // `old_prefix`, both independently valid UTF-8, so it falls on a
+        // codepoint boundary in both; concatenating `new_prefix` (itself
+        // valid UTF-8) with that boundary-aligned suffix cannot produce an
+        // invalid sequence.
+        let text = unsafe { core::str::from_utf8_unchecked(&final_buf[..total_len]) };
+        Some(String::from_str(env, text))
     }
 
     /// Updates mutable metadata fields (description, image_uri). Owner only.
