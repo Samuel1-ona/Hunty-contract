@@ -5950,7 +5950,23 @@ mod test {
                 .unwrap_err()
             });
 
+            let answer_hash = HuntyCore::normalize_and_hash_answer(&env, hunt_id, 1, &answer).unwrap();
+            let err_hash = as_core_contract(&env, &core_id, |env| {
+                HuntyCore::submit_answer_with_hash(
+                    env.clone(),
+                    hunt_id,
+                    1,
+                    player.clone(),
+                    answer_hash,
+                    9, /* nonce */
+                    env.ledger().timestamp(),
+                )
+                .unwrap_err()
+            });
+
             assert_eq!(err, HuntErrorCode::HuntNotActive);
+            assert_eq!(err_hash, HuntErrorCode::HuntNotActive);
+            assert_eq!(err, err_hash);
         }
 
         #[test]
