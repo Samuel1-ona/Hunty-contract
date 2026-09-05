@@ -20,6 +20,7 @@ pub fn emit_audit_event(
     };
 
     // Emit with indexed topics for efficient off-chain filtering
+    #[allow(deprecated)]
     env.events()
         .publish((TOPIC_AUDIT, action_type, admin_address.clone()), event);
 }

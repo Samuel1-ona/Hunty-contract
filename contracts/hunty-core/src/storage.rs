@@ -1490,7 +1490,6 @@ impl Storage {
         result
     }
 
-
     // ========== Ban Storage Functions ==========
 
     fn ban_key(hunt_id: u64, player: &Address) -> (soroban_sdk::Symbol, u64, Address) {

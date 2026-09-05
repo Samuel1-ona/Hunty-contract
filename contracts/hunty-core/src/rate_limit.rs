@@ -1,13 +1,13 @@
 use crate::errors::HuntErrorCode;
 use crate::storage::Storage;
 use crate::types::RateLimitStatus;
-use soroban_sdk::{address, Address, Env};
+use soroban_sdk::{contracttype, Address, Env};
 
 pub const SECONDS_PER_DAY: u64 = 86_400;
 pub const DEFAULT_HUNT_CREATION_LIMIT: u32 = 10;
 
-#derive(Clone, Debug, Eq, PartialEq)
-[#contracttype]
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct RateLimitData {
     pub day: u64,
     pub count: u32,
@@ -26,7 +26,7 @@ impl RateLimiter {
         let mut data = env
             .storage()
             .persistent()
-            .get:<Address, RateLimitData>(creator)
+            .get::<Address, RateLimitData>(creator)
             .unwrap_or(RateLimitData { day, count: 0 });
 
         if data.day != day {
@@ -43,14 +43,14 @@ impl RateLimiter {
         Ok(())
     }
 
-    #[allow(dead_code]
+    #[allow(dead_code)]
     pub fn get_status(env: &Env, creator: &Address, now: u64) -> RateLimitStatus {
         let day = now / SECONDS_PER_DAY;
         let limit = Storage::get_effective_hunt_creation_limit(env, creator);
         let data = env
             .storage()
             .persistent()
-            .get:<Address, RateLimitData>(creator)
+            .get::<Address, RateLimitData>(creator)
             .unwrap_or(RateLimitData { day, count: 0 });
 
         let count = if data.day == day { data.count } else { 0 };
@@ -64,14 +64,14 @@ impl RateLimiter {
         RateLimitStatus {
             creations_today: count,
             daily_limit: limit,
-            cooldown_seconds: cooldown_seconds,
+            cooldown_seconds,
         }
     }
 
     #[allow(dead_code)]
     pub fn require_rate_limit_admin(env: &Env, admin: &Address) -> Result<(), HuntErrorCode> {
         admin.require_auth();
-        let stored = Storage::get_rate_limit_admin(env).ok().ok_or(HuntErrorCode::Unauthorized)?;
+        let stored = Storage::get_rate_limit_admin(env).ok_or(HuntErrorCode::Unauthorized)?;
         if stored != *admin {
             return Err(HuntErrorCode::Unauthorized);
         }

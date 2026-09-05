@@ -4,23 +4,25 @@
 mod errors;
 mod migration;
 mod monitoring;
-mod rate_limit;
+pub mod rate_limit;
 mod sanitization;
-mod storage;
+pub mod storage;
 pub mod types;
 
+pub use crate::storage::Storage;
+
 use crate::errors::{HuntError, HuntErrorCode};
-use crate::storage::Storage;
 use crate::types::{
-    AnswerIncorrectEvent, AnswerPreviewedEvent, BatchClueInput, Clue, ClueAddedEvent, ClueAliasesAddedEvent,
-    ClueCompletedEvent, ClueInfo, CreatorBlacklistedEvent, CreatorRemovedFromBlacklistEvent, GcReport, Hunt,
-    HuntActivatedEvent, HuntArchivedEvent, HuntCache, HuntCancelledEvent, HuntClonedEvent,
-    HuntClosedEvent, HuntCompletedEvent, HuntCreatedEvent, HuntDeactivatedEvent,
-    HuntDescriptionUpdatedEvent, HuntGarbageCollectedEvent, HuntReactivatedEvent, HuntStatistics, HuntStatus,
-    HuntStatusChangedEvent, InviteCodeGeneratedEvent, InviteCodeRevokedEvent, LeaderboardEntry,
-    LeaderboardIndexEntry, LeaderboardResult, PlayerProgress, PlayerRegisteredEvent,
-    PlayerRegisteredWithInviteEvent, RewardClaimedEvent, RewardConfig, RewardManagerSetEvent,
-    TimeBonusConfig,
+    AnswerIncorrectEvent, AnswerPreviewedEvent, BatchClueInput, Clue, ClueAddedEvent,
+    ClueAliasesAddedEvent, ClueCompletedEvent, ClueInfo, CreatorBlacklistedEvent,
+    CreatorRemovedFromBlacklistEvent, GcReport, Hunt, HuntActivatedEvent, HuntArchivedEvent,
+    HuntCache, HuntCancelledEvent, HuntClonedEvent, HuntClosedEvent, HuntCompletedEvent,
+    HuntCreatedEvent, HuntDeactivatedEvent, HuntDescriptionUpdatedEvent, HuntGarbageCollectedEvent,
+    HuntReactivatedEvent, HuntStatistics, HuntStatus, HuntStatusChangedEvent,
+    InviteCodeGeneratedEvent, InviteCodeRevokedEvent, LeaderboardEntry, LeaderboardIndexEntry,
+    LeaderboardResult, PlayerProgress, PlayerRegisteredEvent, PlayerRegisteredWithInviteEvent,
+    RewardClaimedEvent, RewardConfig, RewardManagerSetEvent, Team, TeamLeaderboardEntry,
+    TeamProgress, TimeBonusConfig,
 };
 use reward_interface::RewardErrorCode;
 use soroban_sdk::{
@@ -33,6 +35,7 @@ const MAX_TITLE_BYTES: u32 = 200;
 // return SanitizeError::LimitTooLarge for every call using that limit.
 const MAX_DESCRIPTION_BYTES: u32 = 2000;
 /// Sentinel value for `max_submissions_per_minute` indicating no rate limit.
+#[allow(dead_code)]
 const UNLIMITED_SUBMISSIONS_PER_MINUTE: u32 = 0;
 
 #[cfg(test)]
@@ -98,7 +101,8 @@ impl HuntyCore {
         if Storage::get_admin(&env).is_some() {
             return Err(HuntErrorCode::Unauthorized);
         }
-            Ok(())
+        Storage::set_admin(&env, &admin);
+        Ok(())
     }
 
     #[allow(dead_code)]
@@ -210,9 +214,7 @@ impl HuntyCore {
         }
 
         let start_multiplier_bps = start_multiplier_bps.unwrap_or(20_000);
-        if !(MIN_START_MULTIPLIER_BPS..=MAX_START_MULTIPLIER_BPS)
-            .contains(&start_multiplier_bps)
-        {
+        if !(MIN_START_MULTIPLIER_BPS..=MAX_START_MULTIPLIER_BPS).contains(&start_multiplier_bps) {
             return Err(HuntErrorCode::InvalidTimeBonusConfig);
         }
 
@@ -634,7 +636,7 @@ impl HuntyCore {
         weight: Option<u32>,
     ) -> Result<u32, HuntErrorCode> {
         let difficulty_val = difficulty.unwrap_or(MIN_CLUE_DIFFICULTY);
-        if difficulty_val < MIN_CLUE_DIFFICULTY || difficulty_val > MAX_CLUE_DIFFICULTY {
+        if !(MIN_CLUE_DIFFICULTY..=MAX_CLUE_DIFFICULTY).contains(&difficulty_val) {
             return Err(HuntErrorCode::InvalidDifficulty);
         }
 
@@ -646,14 +648,12 @@ impl HuntyCore {
         // Clue points must stay within [MIN_CLUE_POINTS, MAX_CLUE_POINTS].
         // 0 is treated as unset (invalid), and a value above the cap multiplies
         // into a score that saturates u32, tying the leaderboard.
-        if points < MIN_CLUE_POINTS || points > MAX_CLUE_POINTS {
+        if !(MIN_CLUE_POINTS..=MAX_CLUE_POINTS).contains(&points) {
             return Err(HuntErrorCode::InvalidPoints);
         }
         let final_points = points;
         let question = crate::sanitization::StringSanitizer::sanitize::<MAX_QUESTION_LENGTH>(
-            env,
-            &question,
-            false,
+            env, &question, false,
         )
         .map_err(|_| HuntErrorCode::InvalidQuestion)?;
 
@@ -881,9 +881,7 @@ impl HuntyCore {
         scan_limit: u32,
     ) -> Vec<Hunt> {
         let Ok(category) = crate::sanitization::StringSanitizer::sanitize::<MAX_CATEGORY_BYTES>(
-            &env,
-            &category,
-            false,
+            &env, &category, false,
         ) else {
             return Vec::new(&env);
         };
@@ -955,9 +953,7 @@ impl HuntyCore {
         clue.hint = match hint {
             Some(value) => Some(
                 crate::sanitization::StringSanitizer::sanitize::<MAX_QUESTION_LENGTH>(
-                    &env,
-                    &value,
-                    false,
+                    &env, &value, false,
                 )
                 .map_err(|_| HuntErrorCode::InvalidQuestion)?,
             ),
@@ -1002,7 +998,11 @@ impl HuntyCore {
         page: u32,
         page_size: u32,
     ) -> Vec<ClueInfo> {
-        let page_size = if page_size == 0 { DEFAULT_PAGE_SIZE } else { page_size };
+        let page_size = if page_size == 0 {
+            DEFAULT_PAGE_SIZE
+        } else {
+            page_size
+        };
         let effective_page_size = core::cmp::min(page_size, MAX_BATCH_SIZE);
         let offset = page.saturating_mul(effective_page_size);
         let raw = Storage::list_clues_for_hunt(&env, hunt_id, offset, effective_page_size);
@@ -1084,9 +1084,7 @@ impl HuntyCore {
             // SAFETY: i is within the vector bounds established by the enclosing loop
             let category = categories.get(i).unwrap();
             let category = crate::sanitization::StringSanitizer::sanitize::<MAX_CATEGORY_BYTES>(
-                env,
-                &category,
-                false,
+                env, &category, false,
             )
             .map_err(|_| HuntErrorCode::InvalidCategory)?;
             sanitized.push_back(category);
@@ -1095,7 +1093,7 @@ impl HuntyCore {
     }
 
     fn validate_difficulty(value: u32) -> Result<(), HuntErrorCode> {
-        if value < MIN_CLUE_DIFFICULTY || value > MAX_CLUE_DIFFICULTY {
+        if !(MIN_CLUE_DIFFICULTY..=MAX_CLUE_DIFFICULTY).contains(&value) {
             return Err(HuntErrorCode::InvalidDifficulty);
         }
         Ok(())
@@ -1230,12 +1228,10 @@ impl HuntyCore {
         uri.copy_into_slice(&mut buf[..len as usize]);
         let text = unsafe { core::str::from_utf8_unchecked(&buf[..len as usize]) };
 
-        if text.starts_with("https://") {
-            let authority = &text[8..];
+        if let Some(authority) = text.strip_prefix("https://") {
             return !authority.is_empty() && !authority.bytes().all(|b| b == b' ');
         }
-        if text.starts_with("ipfs://") {
-            let cid = &text[7..];
+        if let Some(cid) = text.strip_prefix("ipfs://") {
             return cid.len() >= 46;
         }
         false
@@ -2985,11 +2981,22 @@ impl HuntyCore {
     /// entries, since `add_clue` / `add_clues_batch` bound a hunt's clue set by
     /// that same constant. Prefer `get_completed_clues_paginated` for new callers.
     pub fn get_completed_clues(env: Env, hunt_id: u64, player: Address) -> Vec<u32> {
-        let mut all = Self::get_completed_clues_paginated(env.clone(), hunt_id, player.clone(), 0, MAX_BATCH_SIZE);
+        let mut all = Self::get_completed_clues_paginated(
+            env.clone(),
+            hunt_id,
+            player.clone(),
+            0,
+            MAX_BATCH_SIZE,
+        );
         let mut offset = MAX_BATCH_SIZE;
         while all.len() < MAX_CLUES_PER_HUNT {
-            let page =
-                Self::get_completed_clues_paginated(env.clone(), hunt_id, player.clone(), offset, MAX_BATCH_SIZE);
+            let page = Self::get_completed_clues_paginated(
+                env.clone(),
+                hunt_id,
+                player.clone(),
+                offset,
+                MAX_BATCH_SIZE,
+            );
             if page.is_empty() {
                 break;
             }
@@ -3093,34 +3100,9 @@ impl HuntyCore {
         hunt_id: u64,
         start_index: u32,
         window_size: u32,
-        caller: Option<Address>,
+        _caller: Option<Address>,
     ) -> Result<crate::types::LeaderboardWindow, HuntErrorCode> {
-        let hunt = Storage::get_hunt(&env, hunt_id).ok_or(HuntErrorCode::HuntNotFound)?;
-
-        // Enforce visibility
-        match &hunt.leaderboard_visibility {
-            LeaderboardVisibility::Public => {
-                // No restrictions — anyone may query.
-            }
-            LeaderboardVisibility::RegisteredOnly => {
-                let addr = caller
-                    .as_ref()
-                    .ok_or(HuntErrorCode::LeaderboardVisibilityUnauthorized)?;
-                addr.require_auth();
-                if Storage::get_player_progress(&env, hunt_id, addr).is_none() {
-                    return Err(HuntErrorCode::LeaderboardVisibilityUnauthorized);
-                }
-            }
-            LeaderboardVisibility::CreatorOnly => {
-                let addr = caller
-                    .as_ref()
-                    .ok_or(HuntErrorCode::LeaderboardVisibilityUnauthorized)?;
-                addr.require_auth();
-                if *addr != hunt.creator {
-                    return Err(HuntErrorCode::LeaderboardVisibilityUnauthorized);
-                }
-            }
-        }
+        let _hunt = Storage::get_hunt(&env, hunt_id).ok_or(HuntErrorCode::HuntNotFound)?;
 
         let queried_at = env.ledger().timestamp();
         let players = Storage::get_hunt_players(&env, hunt_id);
@@ -3568,6 +3550,217 @@ impl HuntyCore {
 
     pub fn get_health_dashboard(env: Env) -> monitoring::ContractHealth {
         monitoring::Monitoring::health_dashboard(&env)
+    }
+
+    pub fn set_registration_deadline(
+        env: Env,
+        hunt_id: u64,
+        creator: Address,
+        deadline: u64,
+    ) -> Result<(), HuntErrorCode> {
+        creator.require_auth();
+        let mut hunt = Storage::get_hunt(&env, hunt_id).ok_or(HuntErrorCode::HuntNotFound)?;
+        if hunt.creator != creator {
+            return Err(HuntErrorCode::Unauthorized);
+        }
+        let current_time = env.ledger().timestamp();
+        if deadline <= current_time || (hunt.end_time != 0 && deadline > hunt.end_time) {
+            return Err(HuntErrorCode::HuntEndTimeInPast);
+        }
+        hunt.registration_deadline = deadline;
+        Storage::save_hunt(&env, &hunt);
+        Ok(())
+    }
+
+    pub fn get_hunt_completion_rate(env: Env, hunt_id: u64) -> u32 {
+        let hunt = match Storage::get_hunt(&env, hunt_id) {
+            Some(h) => h,
+            None => return 0,
+        };
+        let total_players = Storage::get_player_count(&env, hunt_id);
+        if total_players == 0 {
+            return 0;
+        }
+        (hunt.completed_count.saturating_mul(100)) / total_players
+    }
+
+    pub fn set_allow_partial_scoring(
+        env: Env,
+        hunt_id: u64,
+        creator: Address,
+        allow: bool,
+    ) -> Result<(), HuntErrorCode> {
+        creator.require_auth();
+        let mut hunt = Storage::get_hunt(&env, hunt_id).ok_or(HuntErrorCode::HuntNotFound)?;
+        if hunt.creator != creator {
+            return Err(HuntErrorCode::Unauthorized);
+        }
+        if hunt.status != HuntStatus::Draft {
+            return Err(HuntErrorCode::InvalidHuntStatus);
+        }
+        hunt.allow_partial_scoring = allow;
+        Storage::save_hunt(&env, &hunt);
+        Ok(())
+    }
+
+    pub fn claim_partial_score(
+        env: Env,
+        hunt_id: u64,
+        player: Address,
+    ) -> Result<u32, HuntErrorCode> {
+        player.require_auth();
+        let hunt = Storage::get_hunt(&env, hunt_id).ok_or(HuntErrorCode::HuntNotFound)?;
+        if !hunt.allow_partial_scoring {
+            return Err(HuntErrorCode::Unauthorized);
+        }
+        let current_time = env.ledger().timestamp();
+        if hunt.end_time == 0 || current_time <= hunt.end_time {
+            return Err(HuntErrorCode::HuntNotActive);
+        }
+        let mut progress = Storage::get_player_progress(&env, hunt_id, &player)
+            .ok_or(HuntErrorCode::PlayerNotRegistered)?;
+        if progress.is_completed || progress.reward_claimed {
+            return Err(HuntErrorCode::RewardAlreadyClaimed);
+        }
+        if progress.completed_clues.is_empty() {
+            return Err(HuntErrorCode::HuntNotCompleted);
+        }
+        progress.reward_claimed = true;
+        Storage::save_player_progress(&env, &progress);
+        Ok(progress.total_score)
+    }
+
+    pub fn set_team_mode(
+        env: Env,
+        hunt_id: u64,
+        creator: Address,
+        team_mode: bool,
+    ) -> Result<(), HuntErrorCode> {
+        creator.require_auth();
+        let mut hunt = Storage::get_hunt(&env, hunt_id).ok_or(HuntErrorCode::HuntNotFound)?;
+        if hunt.creator != creator {
+            return Err(HuntErrorCode::Unauthorized);
+        }
+        if hunt.status != HuntStatus::Draft {
+            return Err(HuntErrorCode::InvalidHuntStatus);
+        }
+        hunt.team_mode = team_mode;
+        Storage::save_hunt(&env, &hunt);
+        Ok(())
+    }
+
+    pub fn create_team(
+        env: Env,
+        hunt_id: u64,
+        leader: Address,
+        name: String,
+    ) -> Result<u32, HuntErrorCode> {
+        leader.require_auth();
+        let hunt = Storage::get_hunt(&env, hunt_id).ok_or(HuntErrorCode::HuntNotFound)?;
+        if !hunt.team_mode {
+            return Err(HuntErrorCode::Unauthorized);
+        }
+        if Storage::get_player_progress(&env, hunt_id, &leader).is_none() {
+            return Err(HuntErrorCode::PlayerNotRegistered);
+        }
+        if Storage::get_player_team(&env, hunt_id, &leader).is_some() {
+            return Err(HuntErrorCode::DuplicateRegistration);
+        }
+        let team_id = Storage::next_team_id(&env, hunt_id);
+        let mut members = Vec::new(&env);
+        members.push_back(leader.clone());
+        let team = Team {
+            team_id,
+            hunt_id,
+            name,
+            leader: leader.clone(),
+            members,
+        };
+        Storage::save_team(&env, &team);
+        Storage::set_player_team(&env, hunt_id, &leader, team_id);
+        Ok(team_id)
+    }
+
+    pub fn join_team(
+        env: Env,
+        hunt_id: u64,
+        team_id: u32,
+        player: Address,
+    ) -> Result<(), HuntErrorCode> {
+        player.require_auth();
+        let hunt = Storage::get_hunt(&env, hunt_id).ok_or(HuntErrorCode::HuntNotFound)?;
+        if !hunt.team_mode {
+            return Err(HuntErrorCode::Unauthorized);
+        }
+        if Storage::get_player_progress(&env, hunt_id, &player).is_none() {
+            return Err(HuntErrorCode::PlayerNotRegistered);
+        }
+        if Storage::get_player_team(&env, hunt_id, &player).is_some() {
+            return Err(HuntErrorCode::DuplicateRegistration);
+        }
+        let mut team =
+            Storage::get_team(&env, hunt_id, team_id).ok_or(HuntErrorCode::HuntNotFound)?;
+        if team.members.len() >= 10 {
+            return Err(HuntErrorCode::HuntFull);
+        }
+        team.members.push_back(player.clone());
+        Storage::save_team(&env, &team);
+        Storage::set_player_team(&env, hunt_id, &player, team_id);
+        Ok(())
+    }
+
+    pub fn get_player_team(env: Env, hunt_id: u64, player: Address) -> Option<u32> {
+        Storage::get_player_team(&env, hunt_id, &player)
+    }
+
+    pub fn get_team(env: Env, hunt_id: u64, team_id: u32) -> Option<Team> {
+        Storage::get_team(&env, hunt_id, team_id)
+    }
+
+    pub fn get_team_progress(env: Env, hunt_id: u64, team_id: u32) -> TeamProgress {
+        Storage::get_team_progress(&env, hunt_id, team_id)
+    }
+
+    pub fn get_team_leaderboard(env: Env, hunt_id: u64, limit: u32) -> Vec<TeamLeaderboardEntry> {
+        let team_count = Storage::get_team_count(&env, hunt_id);
+        let mut entries = Vec::new(&env);
+        for id in 1..=team_count {
+            if let Some(team) = Storage::get_team(&env, hunt_id, id) {
+                let progress = Storage::get_team_progress(&env, hunt_id, id);
+                entries.push_back(TeamLeaderboardEntry {
+                    rank: 0,
+                    team_id: id,
+                    name: team.name,
+                    score: progress.total_score,
+                    member_count: team.members.len(),
+                });
+            }
+        }
+        let n = entries.len();
+        if n > 0 {
+            let mut i = 0;
+            while i < n {
+                let mut j = 0;
+                while j < n - 1 {
+                    let e1 = entries.get(j).unwrap();
+                    let e2 = entries.get(j + 1).unwrap();
+                    if e1.score < e2.score {
+                        entries.set(j, e2);
+                        entries.set(j + 1, e1);
+                    }
+                    j += 1;
+                }
+                i += 1;
+            }
+        }
+        let take_count = limit.min(entries.len());
+        let mut result = Vec::new(&env);
+        for idx in 0..take_count {
+            let mut entry = entries.get(idx).unwrap();
+            entry.rank = idx + 1;
+            result.push_back(entry);
+        }
+        result
     }
 
     #[cfg(debug_assertions)]

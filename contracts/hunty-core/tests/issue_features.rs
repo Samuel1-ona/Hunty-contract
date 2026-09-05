@@ -25,6 +25,7 @@ fn setup_hunt(env: &Env, end_time: Option<u64>) -> (HuntyCoreClient<'_>, Address
         &end_time,
         &0u32,
         &None,
+        &None,
     );
     client.add_clue(
         &hunt_id,
@@ -238,7 +239,7 @@ fn test_team_hunt_shared_progress_and_leaderboard() {
     let beta = client.create_team(&hunt_id, &carol, &String::from_str(&env, "Beta"));
 
     assert_eq!(client.get_player_team(&hunt_id, &bob), Some(alpha));
-    assert_eq!(client.get_team(&hunt_id, &alpha).members.len(), 2);
+    assert_eq!(client.get_team(&hunt_id, &alpha).unwrap().members.len(), 2);
 
     // A player cannot join a second team
     assert!(client.try_join_team(&hunt_id, &beta, &bob).is_err());

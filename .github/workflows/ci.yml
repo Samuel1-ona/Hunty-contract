@@ -149,11 +149,10 @@ jobs:
           path: target
           key: ${{ runner.os }}-cargo-build-target-${{ hashFiles('**/Cargo.lock') }}
 
-      - name: Install cargo-binstall
-        run: curl -L --proto '=https' --tlsv1.2 -sSf https://raw.githubusercontent.com/cargo-bins/cargo-binstall/main/install.sh | sh
-
       - name: Install cargo-tarpaulin
-        run: cargo binstall -y cargo-tarpaulin
+        uses: taiki-e/install-action@b6ff580856c41316412a0b9b60540fbc6f8c82cc # v2
+        with:
+          tool: cargo-tarpaulin
 
       - name: Run code coverage
         run: cargo tarpaulin --verbose

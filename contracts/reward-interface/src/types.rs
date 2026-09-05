@@ -66,6 +66,10 @@ pub struct RewardPoolConfig {
     pub vesting_period_secs: u64,
     /// Unix timestamp after which claims are no longer allowed (0 = disabled).
     pub claim_deadline: u64,
+    /// Creator royalty basis points (0-10000) for NFT secondary market sales.
+    pub nft_royalty_bps: u32,
+    /// Whether reward NFTs minted from this pool are transferable.
+    pub nft_transferable: bool,
 }
 
 /// How rewards are calculated from the pool at distribution time.

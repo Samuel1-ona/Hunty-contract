@@ -1,9 +1,8 @@
 # Contract API Reference
 
-# Contract API Reference
-
 This file is generated automatically from the Rust contract sources in `contracts/`.
 Run `make build` to regenerate it whenever contract APIs change.
+
 
 ## `common` Contract
 
@@ -258,25 +257,25 @@ pub fn is_contract_paused(env: Env) -> bool
 Creates a new scavenger hunt with the provided metadata.
 
 # Arguments
-
-- `env` - The Soroban environment
-- `creator` - The address of the hunt creator (typically use env.invoker() from the caller)
-- `title` - The title of the hunt (max 200 characters)
-- `description` - The description of the hunt (max 2000 characters)
-- `start_time` - Optional start timestamp. When set, players cannot register
-  or submit answers until the ledger timestamp reaches this value. 0 means
-  no start time restriction (immediately playable once activated).
-- `end_time` - Optional end timestamp (0 means no end time restriction)
+* `env` - The Soroban environment
+* `creator` - The address of the hunt creator (typically use env.invoker() from the caller)
+* `title` - The title of the hunt (max 200 characters)
+* `description` - The description of the hunt (max 2000 characters)
+* `start_time` - Optional start timestamp (0 or None means no start time restriction).
+When set, players cannot register or submit answers until the ledger timestamp
+reaches this value. Must be strictly less than `end_time` if `end_time` is also set.
+* `end_time` - Optional end timestamp (0 or None means no end time restriction)
+* `max_submissions_per_minute` - Maximum number of submissions allowed per
+minute per player. [`UNLIMITED_SUBMISSIONS_PER_MINUTE`] (0) means no limit.
 
 # Returns
-
 The unique hunt ID of the newly created hunt
 
 # Errors
-
-- `InvalidTitle` - If title is empty or exceeds maximum length
-- `InvalidDescription` - If description exceeds maximum length
-- `InvalidAddress` - If creator address is invalid
+* `InvalidTitle` - If title is empty or exceeds maximum length
+* `InvalidDescription` - If description exceeds maximum length
+* `InvalidAddress` - If creator address is invalid
+* `InvalidTimeBonusConfig` - If the initial score multiplier is outside 1x..=5x
 
 **Signature:**
 
@@ -822,26 +821,28 @@ Adds a clue to a hunt. Only the hunt creator can add clues.
 Answers are hashed with SHA256 before storage; the hash is never exposed.
 
 # Arguments
-
-- `env` - The Soroban environment
-- `hunt_id` - The hunt to add the clue to
-- `question` - The clue question text (max 2000 chars, non-empty)
-- `answer` - Plain-text answer; normalized (trimmed, lowercased) then hashed
-- `points` - Points awarded for solving this clue
-- `is_required` - Whether this clue must be solved to complete the hunt
+* `env` - The Soroban environment
+* `hunt_id` - The hunt to add the clue to
+* `question` - The clue question text (max 2000 chars, non-empty)
+* `answer` - Plain-text answer; normalized (trimmed, lowercased) then hashed
+* `points` - Points awarded for solving this clue (must be within 1..=10_000)
+* `is_required` - Whether this clue must be solved to complete the hunt
+* `difficulty` - Optional difficulty tier (defaults to 1) used as a multiplier on
+the clue's points. Valid scale is 1..=5, where 1 is easiest and 5 is hardest.
+* `weight` - Optional weight multiplier (defaults to 1)
 
 # Returns
-
 The sequential clue ID assigned within the hunt
 
 # Errors
-
-- `HuntNotFound` - Hunt does not exist
-- `InvalidHuntStatus` - Hunt is not in Draft
-- `Unauthorized` - Caller is not the hunt creator
-- `TooManyClues` - Hunt already has max clues
-- `InvalidQuestion` - Question empty or too long
-- `InvalidAnswer` - Answer empty or too long
+* `HuntNotFound` - Hunt does not exist
+* `InvalidHuntStatus` - Hunt is not in Draft
+* `Unauthorized` - Caller is not the hunt creator
+* `TooManyClues` - Hunt already has max clues
+* `InvalidQuestion` - Question empty or too long
+* `InvalidAnswer` - Answer empty or too long
+* `InvalidPoints` - Points are outside the allowed 1..=10_000 range
+* `InvalidDifficulty` - Difficulty is outside the allowed 1..=5 tier scale
 
 **Signature:**
 
@@ -1003,19 +1004,17 @@ Adds alternative acceptable answers to an existing clue (synonyms).
 Only the hunt creator can add aliases, and only while the hunt is in Draft status.
 
 # Arguments
-
-- `env` - The Soroban environment
-- `hunt_id` - The hunt containing the clue
-- `clue_id` - The existing clue to add aliases to
-- `answers` - Alternative answers that should also be accepted
+* `env` - The Soroban environment
+* `hunt_id` - The hunt containing the clue
+* `clue_id` - The existing clue to add aliases to
+* `answers` - Alternative answers that should also be accepted
 
 # Errors
-
-- `HuntNotFound` - Hunt does not exist
-- `InvalidHuntStatus` - Hunt is not in Draft
-- `Unauthorized` - Caller is not the hunt creator
-- `ClueNotFound` - Clue does not exist
-- `InvalidAnswer` - Any answer is empty or exceeds max length
+* `HuntNotFound` - Hunt does not exist
+* `InvalidHuntStatus` - Hunt is not in Draft
+* `Unauthorized` - Caller is not the hunt creator
+* `ClueNotFound` - Clue does not exist
+* `InvalidAnswer` - Any answer is empty or exceeds max length
 
 **Signature:**
 
@@ -1167,6 +1166,7 @@ pub fn get_clue(env: Env, hunt_id: u64, clue_id: u32) -> Result<ClueInfo, HuntEr
 #### `list_clues`
 
 Returns paginated clues for a hunt. Answer hashes are not exposed.
+A `limit` of `0` defaults to `DEFAULT_PAGE_SIZE`.
 
 **Signature:**
 
@@ -1188,6 +1188,7 @@ pub fn list_clues(env: Env, hunt_id: u64, offset: u32, limit: u32) -> Vec<ClueIn
 #### `list_hunts`
 
 Returns a list of all hunts (paginated).
+A `limit` of `0` defaults to `DEFAULT_PAGE_SIZE`.
 
 **Signature:**
 
@@ -1560,6 +1561,7 @@ pub fn request_hint(env: Env, hunt_id: u64, clue_id: u32, player: Address) -> Re
 
 Returns a paginated slice of clues for a hunt. Useful for large hunts to bound gas.
 Page is 0-indexed. Max page_size is capped at MAX_BATCH_SIZE (50).
+A `page_size` of `0` defaults to `DEFAULT_PAGE_SIZE`.
 Estimated gas: O(page_size) ~5_000 gas per clue + 10_000 overhead.
 
 **Signature:**
@@ -1828,23 +1830,20 @@ Only the creator may close a hunt, and only while it is `Active` or
 or `Archived` hunt is rejected with `InvalidHuntStatus`.
 
 # Arguments
-
-- `env` - The Soroban environment
-- `hunt_id` - The hunt to close
-- `caller` - The creator (must authorize the call via require_auth)
+* `env` - The Soroban environment
+* `hunt_id` - The hunt to close
+* `caller` - The creator (must authorize the call via require_auth)
 
 # Returns
-
 `Ok(())` on success
 
 # Errors
-
-- `HuntNotFound` - Hunt does not exist
-- `Unauthorized` - Caller is not the hunt creator
-- `InvalidHuntStatus` - Hunt is not in an early-closable status
-- `RewardsPaused` - Reward distribution is globally paused
-- `InvalidRarity` - The hunt's configured NFT rarity is out of range
-- `RewardDistributionFailed` - A RewardManager cross-contract call failed
+* `HuntNotFound` - Hunt does not exist
+* `Unauthorized` - Caller is not the hunt creator
+* `InvalidHuntStatus` - Hunt is not in an early-closable status
+* `RewardsPaused` - Reward distribution is globally paused
+* `InvalidRarity` - The hunt's configured NFT rarity is out of range
+* `RewardDistributionFailed` - A RewardManager cross-contract call failed
 
 **Signature:**
 
@@ -2007,11 +2006,9 @@ The sweep is **idempotent**: running it twice reports zero the second
 time rather than failing, so an interrupted call is safe to retry.
 
 # Authorization
-
 The hunt creator or the contract admin.
 
 # Returns
-
 A [`GcReport`] describing what was reclaimed.
 
 **Signature:**
@@ -2120,6 +2117,85 @@ pub fn get_hunt_info(env: Env, hunt_id: u64) -> Result<Hunt, HuntErrorCode>
 - `hunt_id: u64`
 
 **Returns:** `Result<Hunt, HuntErrorCode>`
+
+**Error type:** `HuntErrorCode`
+
+**Error codes:**
+
+- `HuntNotFound` = 1
+- `ClueNotFound` = 2
+- `InvalidHuntStatus` = 3
+- `PlayerNotRegistered` = 4
+- `ClueAlreadyCompleted` = 5
+- `InvalidAnswer` = 6
+- `HuntNotActive` = 7
+- `Unauthorized` = 8
+- `InsufficientRewardPool` = 9
+- `DuplicateRegistration` = 10
+- `InvalidTitle` = 11
+- `InvalidDescription` = 12
+- `InvalidAddress` = 13
+- `TooManyClues` = 14
+- `InvalidQuestion` = 15
+- `RefundFailed` = 16
+- `NoCluesAdded` = 17
+- `HuntNotCompleted` = 18
+- `RewardAlreadyClaimed` = 19
+- `RewardDistributionFailed` = 20
+- `NoRewardsConfigured` = 21
+- `DuplicateSubmission` = 22
+- `SubmissionExpired` = 23
+- `BannedPlayer` = 24
+- `NoRequiredClues` = 25
+- `RateLimitExceeded` = 26
+- `ScoreOverflow` = 27
+- `RegistrationsPaused` = 28
+- `AnswersPaused` = 29
+- `RewardsPaused` = 30
+- `HuntEndTimeInPast` = 31
+- `NoPendingAdmin` = 32
+- `PendingAdminMismatch` = 33
+- `InvalidRarity` = 34
+- `InvalidTimeBonusConfig` = 35
+- `AddressBlacklisted` = 36
+- `ContractPaused` = 37
+- `InvalidMaxAttempts` = 38
+- `InvalidWeight` = 39
+- `HintNotAvailable` = 40
+- `HintAlreadyUnlocked` = 41
+- `InsufficientScore` = 42
+- `TooManyCategories` = 43
+- `InvalidCategory` = 44
+- `InvalidDifficulty` = 45
+- `CorruptPlayerProgress` = 46
+- `HuntNotStarted` = 47
+- `AdminAlreadyProposed` = 48
+- `InvalidPoints` = 49
+- `HuntFull` = 50
+
+---
+
+#### `set_reward_config`
+
+Convenience helper used in tests to set reward configuration on a hunt.
+Sets nft_image_uri to a placeholder when nft_enabled is true.
+
+**Signature:**
+
+```rust
+pub fn set_reward_config(env: Env, hunt_id: u64, max_winners: u32, xlm_pool: i128, nft_enabled: bool, nft_contract: Option<Address>) -> Result<(), HuntErrorCode>
+```
+
+**Parameters:**
+
+- `env: Env`
+- `hunt_id: u64`
+- `max_winners: u32`
+- `xlm_pool: i128`
+- `nft_enabled: bool`
+- `nft_contract: Option<Address>`
+
+**Returns:** `Result<(), HuntErrorCode>`
 
 **Error type:** `HuntErrorCode`
 
@@ -2438,25 +2514,22 @@ case the amount depends on `completion_at - started_at` for the
 completing player.
 
 # Arguments
-
-- `env` - The Soroban environment
-- `hunt_id` - The hunt ID
-- `player` - The player claiming completion/rewards
+* `env` - The Soroban environment
+* `hunt_id` - The hunt ID
+* `player` - The player claiming completion/rewards
 
 # Returns
-
 `Ok(())` on successful reward claim
 
 # Errors
-
-- `HuntNotFound` - Hunt does not exist
-- `InvalidHuntStatus` - Hunt is not Active (e.g. already Completed or Cancelled)
-- `PlayerNotRegistered` - Player is not registered
-- `HuntNotCompleted` - Player hasn't completed all required clues
-- `RewardAlreadyClaimed` - Player already claimed their reward
-- `NoRewardsConfigured` - No rewards set up for this hunt
-- `InsufficientRewardPool` - All reward slots taken
-- `RewardDistributionFailed` - Cross-contract call failed
+* `HuntNotFound` - Hunt does not exist
+* `InvalidHuntStatus` - Hunt is not Active (e.g. already Completed or Cancelled)
+* `PlayerNotRegistered` - Player is not registered
+* `HuntNotCompleted` - Player hasn't completed all required clues
+* `RewardAlreadyClaimed` - Player already claimed their reward
+* `NoRewardsConfigured` - No rewards set up for this hunt
+* `InsufficientRewardPool` - All reward slots taken
+* `RewardDistributionFailed` - Cross-contract call failed
 
 **Signature:**
 
@@ -2543,30 +2616,26 @@ The caller must ensure `progress.is_completed == true` and
 `progress.reward_claimed == false` before invoking this.
 
 # Errors
-
-- `InvalidRarity` - The hunt's configured NFT rarity is out of range
-- `RewardDistributionFailed` - The RewardManager cross-contract call failed
-  Registers a player for an active hunt. The caller must pass their address and authorize;
-  only that identity can register themselves. Initializes player progress and prevents
-  duplicate registrations. Registration is only allowed while the hunt is active and
-  (if set) before end_time.
+* `InvalidRarity` - The hunt's configured NFT rarity is out of range
+* `RewardDistributionFailed` - The RewardManager cross-contract call failed
+Registers a player for an active hunt. The caller must pass their address and authorize;
+only that identity can register themselves. Initializes player progress and prevents
+duplicate registrations. Registration is only allowed while the hunt is active and
+(if set) before end_time.
 
 # Arguments
-
-- `env` - The Soroban environment
-- `hunt_id` - The hunt to register for
-- `player` - The address of the player (must authorize the call via require_auth)
+* `env` - The Soroban environment
+* `hunt_id` - The hunt to register for
+* `player` - The address of the player (must authorize the call via require_auth)
 
 # Returns
-
 `Ok(())` on success
 
 # Errors
-
-- `HuntNotFound` - Hunt does not exist
-- `InvalidHuntStatus` - Hunt is not in Active status
-- `HuntNotActive` - Hunt has ended (past end_time)
-- `DuplicateRegistration` - Player is already registered for this hunt
+* `HuntNotFound` - Hunt does not exist
+* `InvalidHuntStatus` - Hunt is not in Active status
+* `HuntNotActive` - Hunt has ended (past end_time)
+* `DuplicateRegistration` - Player is already registered for this hunt
 
 **Signature:**
 
@@ -2648,21 +2717,18 @@ is stored on-chain. The plain-text code is never persisted or emitted in events.
 Calling this function overwrites any previously set invite code.
 
 # Arguments
-
-- `env` - The Soroban environment
-- `hunt_id` - The hunt to generate an invite code for
-- `creator` - The hunt creator (must authorize the call)
-- `invite_code` - The plain-text invite code to hash and store
+* `env` - The Soroban environment
+* `hunt_id` - The hunt to generate an invite code for
+* `creator` - The hunt creator (must authorize the call)
+* `invite_code` - The plain-text invite code to hash and store
 
 # Returns
-
 `Ok(())` on success
 
 # Errors
-
-- `HuntNotFound` - Hunt does not exist
-- `Unauthorized` - Caller is not the hunt creator
-- `InvalidHuntStatus` - Hunt is not in Draft status
+* `HuntNotFound` - Hunt does not exist
+* `Unauthorized` - Caller is not the hunt creator
+* `InvalidHuntStatus` - Hunt is not in Draft status
 
 **Signature:**
 
@@ -2745,21 +2811,18 @@ When making a hunt private, an invite code must already be configured via
 `generate_invite_code` before the hunt can be activated.
 
 # Arguments
-
-- `env` - The Soroban environment
-- `hunt_id` - The hunt to update privacy for
-- `creator` - The hunt creator (must authorize the call)
-- `is_private` - Whether the hunt should be invite-only
+* `env` - The Soroban environment
+* `hunt_id` - The hunt to update privacy for
+* `creator` - The hunt creator (must authorize the call)
+* `is_private` - Whether the hunt should be invite-only
 
 # Returns
-
 `Ok(())` on success
 
 # Errors
-
-- `HuntNotFound` - Hunt does not exist
-- `Unauthorized` - Caller is not the hunt creator
-- `InvalidHuntStatus` - Hunt is not in Draft status
+* `HuntNotFound` - Hunt does not exist
+* `Unauthorized` - Caller is not the hunt creator
+* `InvalidHuntStatus` - Hunt is not in Draft status
 
 **Signature:**
 
@@ -2839,20 +2902,17 @@ Clears the invite code for a private hunt, effectively pausing new registrations
 The hunt creator can generate a new code later via `generate_invite_code`.
 
 # Arguments
-
-- `env` - The Soroban environment
-- `hunt_id` - The hunt to revoke the invite code for
-- `creator` - The hunt creator (must authorize the call)
+* `env` - The Soroban environment
+* `hunt_id` - The hunt to revoke the invite code for
+* `creator` - The hunt creator (must authorize the call)
 
 # Returns
-
 `Ok(())` on success
 
 # Errors
-
-- `HuntNotFound` - Hunt does not exist
-- `Unauthorized` - Caller is not the hunt creator
-- `InvalidHuntStatus` - Hunt is not in Draft status
+* `HuntNotFound` - Hunt does not exist
+* `Unauthorized` - Caller is not the hunt creator
+* `InvalidHuntStatus` - Hunt is not in Draft status
 
 **Signature:**
 
@@ -2933,23 +2993,20 @@ The provided invite code is hashed (with hunt_id as salt) and compared against
 the stored `invite_code_hash`. If they match, the player is registered.
 
 # Arguments
-
-- `env` - The Soroban environment
-- `hunt_id` - The private hunt to register for
-- `player` - The address of the player (must authorize the call via require_auth)
-- `invite_code` - The plain-text invite code to validate
+* `env` - The Soroban environment
+* `hunt_id` - The private hunt to register for
+* `player` - The address of the player (must authorize the call via require_auth)
+* `invite_code` - The plain-text invite code to validate
 
 # Returns
-
 `Ok(())` on success
 
 # Errors
-
-- `HuntNotFound` - Hunt does not exist
-- `InvalidHuntStatus` - Hunt is not in Active status, is not private (use
-  `register_player` instead), or has no invite code configured
-- `InvalidAnswer` - The provided invite code is empty or does not match
-- `DuplicateRegistration` - Player is already registered for this hunt
+* `HuntNotFound` - Hunt does not exist
+* `InvalidHuntStatus` - Hunt is not in Active status, is not private (use
+`register_player` instead), or has no invite code configured
+* `InvalidAnswer` - The provided invite code is empty or does not match
+* `DuplicateRegistration` - Player is already registered for this hunt
 
 **Signature:**
 
@@ -3111,38 +3168,34 @@ with the stored answer hash. If correct, updates player progress and emits
 success events. If incorrect, emits an analytics event and returns an error.
 
 # Arguments
-
-- `env` - The Soroban environment
-- `hunt_id` - The hunt ID
-- `clue_id` - The clue ID to answer
-- `player` - The address of the player submitting the answer
-- `answer` - The plain-text answer submission
-- `submission_nonce` - Caller-chosen unique nonce for this submission envelope
-- `submitted_at` - Client timestamp captured when the submission was signed
+* `env` - The Soroban environment
+* `hunt_id` - The hunt ID
+* `clue_id` - The clue ID to answer
+* `player` - The address of the player submitting the answer
+* `answer` - The plain-text answer submission
+* `submission_nonce` - Caller-chosen unique nonce for this submission envelope
+* `submitted_at` - Client timestamp captured when the submission was signed
 
 # Returns
-
 `Ok(())` on successful answer verification and progress update
 
 # Errors
-
-- `HuntNotFound` - Hunt does not exist
-- `HuntNotActive` - Hunt is not currently active or has ended
-- `PlayerNotRegistered` - Player has not registered for this hunt
-- `ClueNotFound` - Clue does not exist in this hunt
-- `ClueAlreadyCompleted` - Player has already completed this clue
-- `InvalidAnswer` - Submitted answer does not match the stored hash
-- `DuplicateSubmission` - Submission nonce/timestamp envelope was already processed
-- `SubmissionExpired` - Submission timestamp is too old or too far in the future
+* `HuntNotFound` - Hunt does not exist
+* `HuntNotActive` - Hunt is not currently active or has ended
+* `PlayerNotRegistered` - Player has not registered for this hunt
+* `ClueNotFound` - Clue does not exist in this hunt
+* `ClueAlreadyCompleted` - Player has already completed this clue
+* `InvalidAnswer` - Submitted answer does not match the stored hash
+* `DuplicateSubmission` - Submission nonce/timestamp envelope was already processed
+* `SubmissionExpired` - Submission timestamp is too old or too far in the future
 
 # Events
-
-- `ClueCompleted` - Emitted when answer is correct
-- `HuntCompleted` - Emitted when all required clues are completed
-- `AnswerIncorrect` - Emitted when answer is wrong (for analytics)
-  In team mode, returns true if any teammate has already completed this clue.
-  In team mode, records a clue completion against the player's team so
-  teammates see it as already solved and share the earned score.
+* `ClueCompleted` - Emitted when answer is correct
+* `HuntCompleted` - Emitted when all required clues are completed
+* `AnswerIncorrect` - Emitted when answer is wrong (for analytics)
+In team mode, returns true if any teammate has already completed this clue.
+In team mode, records a clue completion against the player's team so
+teammates see it as already solved and share the earned score.
 
 **Signature:**
 
@@ -3306,13 +3359,11 @@ pub fn submit_answer_with_hash(env: Env, hunt_id: u64, clue_id: u32, player: Add
 Checks if a player has completed all required clues for a hunt.
 
 # Arguments
-
-- `env` - The Soroban environment
-- `hunt_id` - The hunt ID
-- `progress` - The player's progress data
+* `env` - The Soroban environment
+* `hunt_id` - The hunt ID
+* `progress` - The player's progress data
 
 # Returns
-
 `true` if all required clues are completed, `false` otherwise
 Returns player progress for a hunt (read-only).
 Includes completed clues, score, and completion status.
@@ -3394,6 +3445,10 @@ pub fn get_player_progress(env: Env, hunt_id: u64, player: Address) -> Result<Pl
 Returns the list of clue IDs that the player has completed for a hunt (read-only).
 Useful for UI to show progress. Returns empty vec if player is not registered.
 
+Thin backwards-compatible wrapper: returns at most `MAX_CLUES_PER_HUNT`
+entries, since `add_clue` / `add_clues_batch` bound a hunt's clue set by
+that same constant. Prefer `get_completed_clues_paginated` for new callers.
+
 **Signature:**
 
 ```rust
@@ -3405,6 +3460,31 @@ pub fn get_completed_clues(env: Env, hunt_id: u64, player: Address) -> Vec<u32>
 - `env: Env`
 - `hunt_id: u64`
 - `player: Address`
+
+**Returns:** `Vec<u32>`
+
+---
+
+#### `get_completed_clues_paginated`
+
+Paginated variant of `get_completed_clues` (read-only).
+`offset` is 0-indexed; `limit` is capped at `MAX_BATCH_SIZE`, matching
+`list_clues`. Returns an empty vec if the player is not registered or the
+offset is past the end of the completed set.
+
+**Signature:**
+
+```rust
+pub fn get_completed_clues_paginated(env: Env, hunt_id: u64, player: Address, offset: u32, limit: u32) -> Vec<u32>
+```
+
+**Parameters:**
+
+- `env: Env`
+- `hunt_id: u64`
+- `player: Address`
+- `offset: u32`
+- `limit: u32`
 
 **Returns:** `Vec<u32>`
 
@@ -3433,6 +3513,17 @@ pub fn get_hunt_count(env: Env) -> u64
 Returns ranked players for a hunt with pagination support (read-only).
 Sorted by score descending, then by completion time ascending (earlier = better).
 Limit is capped at 20 to control gas. Returns error if hunt does not exist.
+
+Access is governed by the hunt's `leaderboard_visibility` setting:
+* `Public` – any caller (pass `None` for anonymous access).
+* `RegisteredOnly` – caller must be a registered player for the hunt.
+* `CreatorOnly` – caller must be the hunt creator.
+
+# Arguments
+* `env` - The Soroban environment
+* `hunt_id` - The hunt to query
+* `limit` - Maximum entries to return (capped at `MAX_LEADERBOARD_SIZE`)
+* `caller` - Optional address of the requester; required for non-Public visibility
 
 **Signature:**
 
@@ -3516,7 +3607,7 @@ large on-chain scan.
 **Signature:**
 
 ```rust
-pub fn get_hunt_leaderboard_window(env: Env, hunt_id: u64, start_index: u32, window_size: u32) -> Result<crate::types::LeaderboardWindow, HuntErrorCode>
+pub fn get_hunt_leaderboard_window(env: Env, hunt_id: u64, start_index: u32, window_size: u32, _caller: Option<Address>) -> Result<crate::types::LeaderboardWindow, HuntErrorCode>
 ```
 
 **Parameters:**
@@ -3525,6 +3616,7 @@ pub fn get_hunt_leaderboard_window(env: Env, hunt_id: u64, start_index: u32, win
 - `hunt_id: u64`
 - `start_index: u32`
 - `window_size: u32`
+- `_caller: Option<Address>`
 
 **Returns:** `Result<crate::types::LeaderboardWindow, HuntErrorCode>`
 
@@ -3840,7 +3932,7 @@ pub fn get_view_only_list(env: Env, hunt_id: u64, offset: u32, limit: u32) -> Ve
 - `env: Env`
 - `hunt_id: u64`
 - `offset: u32`
-- `limit: u32` (capped at `MAX_BATCH_SIZE`)
+- `limit: u32`
 
 **Returns:** `Vec<Address>`
 
@@ -4344,7 +4436,7 @@ pub fn get_global_view_only_list(env: Env, offset: u32, limit: u32) -> Vec<Addre
 
 - `env: Env`
 - `offset: u32`
-- `limit: u32` (capped at `MAX_BATCH_SIZE`)
+- `limit: u32`
 
 **Returns:** `Vec<Address>`
 
@@ -4887,6 +4979,22 @@ pub fn rollback_migration(env: Env, admin: Address) -> Result<migration::Migrati
 
 ---
 
+#### `get_active_alerts`
+
+**Signature:**
+
+```rust
+pub fn get_active_alerts(env: Env) -> Vec<monitoring::HealthAlert>
+```
+
+**Parameters:**
+
+- `env: Env`
+
+**Returns:** `Vec<monitoring::HealthAlert>`
+
+---
+
 #### `get_health_dashboard`
 
 **Signature:**
@@ -4903,6 +5011,538 @@ pub fn get_health_dashboard(env: Env) -> monitoring::ContractHealth
 
 ---
 
+#### `set_registration_deadline`
+
+**Signature:**
+
+```rust
+pub fn set_registration_deadline(env: Env, hunt_id: u64, creator: Address, deadline: u64) -> Result<(), HuntErrorCode>
+```
+
+**Parameters:**
+
+- `env: Env`
+- `hunt_id: u64`
+- `creator: Address`
+- `deadline: u64`
+
+**Returns:** `Result<(), HuntErrorCode>`
+
+**Error type:** `HuntErrorCode`
+
+**Error codes:**
+
+- `HuntNotFound` = 1
+- `ClueNotFound` = 2
+- `InvalidHuntStatus` = 3
+- `PlayerNotRegistered` = 4
+- `ClueAlreadyCompleted` = 5
+- `InvalidAnswer` = 6
+- `HuntNotActive` = 7
+- `Unauthorized` = 8
+- `InsufficientRewardPool` = 9
+- `DuplicateRegistration` = 10
+- `InvalidTitle` = 11
+- `InvalidDescription` = 12
+- `InvalidAddress` = 13
+- `TooManyClues` = 14
+- `InvalidQuestion` = 15
+- `RefundFailed` = 16
+- `NoCluesAdded` = 17
+- `HuntNotCompleted` = 18
+- `RewardAlreadyClaimed` = 19
+- `RewardDistributionFailed` = 20
+- `NoRewardsConfigured` = 21
+- `DuplicateSubmission` = 22
+- `SubmissionExpired` = 23
+- `BannedPlayer` = 24
+- `NoRequiredClues` = 25
+- `RateLimitExceeded` = 26
+- `ScoreOverflow` = 27
+- `RegistrationsPaused` = 28
+- `AnswersPaused` = 29
+- `RewardsPaused` = 30
+- `HuntEndTimeInPast` = 31
+- `NoPendingAdmin` = 32
+- `PendingAdminMismatch` = 33
+- `InvalidRarity` = 34
+- `InvalidTimeBonusConfig` = 35
+- `AddressBlacklisted` = 36
+- `ContractPaused` = 37
+- `InvalidMaxAttempts` = 38
+- `InvalidWeight` = 39
+- `HintNotAvailable` = 40
+- `HintAlreadyUnlocked` = 41
+- `InsufficientScore` = 42
+- `TooManyCategories` = 43
+- `InvalidCategory` = 44
+- `InvalidDifficulty` = 45
+- `CorruptPlayerProgress` = 46
+- `HuntNotStarted` = 47
+- `AdminAlreadyProposed` = 48
+- `InvalidPoints` = 49
+- `HuntFull` = 50
+
+---
+
+#### `get_hunt_completion_rate`
+
+**Signature:**
+
+```rust
+pub fn get_hunt_completion_rate(env: Env, hunt_id: u64) -> u32
+```
+
+**Parameters:**
+
+- `env: Env`
+- `hunt_id: u64`
+
+**Returns:** `u32`
+
+---
+
+#### `set_allow_partial_scoring`
+
+**Signature:**
+
+```rust
+pub fn set_allow_partial_scoring(env: Env, hunt_id: u64, creator: Address, allow: bool) -> Result<(), HuntErrorCode>
+```
+
+**Parameters:**
+
+- `env: Env`
+- `hunt_id: u64`
+- `creator: Address`
+- `allow: bool`
+
+**Returns:** `Result<(), HuntErrorCode>`
+
+**Error type:** `HuntErrorCode`
+
+**Error codes:**
+
+- `HuntNotFound` = 1
+- `ClueNotFound` = 2
+- `InvalidHuntStatus` = 3
+- `PlayerNotRegistered` = 4
+- `ClueAlreadyCompleted` = 5
+- `InvalidAnswer` = 6
+- `HuntNotActive` = 7
+- `Unauthorized` = 8
+- `InsufficientRewardPool` = 9
+- `DuplicateRegistration` = 10
+- `InvalidTitle` = 11
+- `InvalidDescription` = 12
+- `InvalidAddress` = 13
+- `TooManyClues` = 14
+- `InvalidQuestion` = 15
+- `RefundFailed` = 16
+- `NoCluesAdded` = 17
+- `HuntNotCompleted` = 18
+- `RewardAlreadyClaimed` = 19
+- `RewardDistributionFailed` = 20
+- `NoRewardsConfigured` = 21
+- `DuplicateSubmission` = 22
+- `SubmissionExpired` = 23
+- `BannedPlayer` = 24
+- `NoRequiredClues` = 25
+- `RateLimitExceeded` = 26
+- `ScoreOverflow` = 27
+- `RegistrationsPaused` = 28
+- `AnswersPaused` = 29
+- `RewardsPaused` = 30
+- `HuntEndTimeInPast` = 31
+- `NoPendingAdmin` = 32
+- `PendingAdminMismatch` = 33
+- `InvalidRarity` = 34
+- `InvalidTimeBonusConfig` = 35
+- `AddressBlacklisted` = 36
+- `ContractPaused` = 37
+- `InvalidMaxAttempts` = 38
+- `InvalidWeight` = 39
+- `HintNotAvailable` = 40
+- `HintAlreadyUnlocked` = 41
+- `InsufficientScore` = 42
+- `TooManyCategories` = 43
+- `InvalidCategory` = 44
+- `InvalidDifficulty` = 45
+- `CorruptPlayerProgress` = 46
+- `HuntNotStarted` = 47
+- `AdminAlreadyProposed` = 48
+- `InvalidPoints` = 49
+- `HuntFull` = 50
+
+---
+
+#### `claim_partial_score`
+
+**Signature:**
+
+```rust
+pub fn claim_partial_score(env: Env, hunt_id: u64, player: Address) -> Result<u32, HuntErrorCode>
+```
+
+**Parameters:**
+
+- `env: Env`
+- `hunt_id: u64`
+- `player: Address`
+
+**Returns:** `Result<u32, HuntErrorCode>`
+
+**Error type:** `HuntErrorCode`
+
+**Error codes:**
+
+- `HuntNotFound` = 1
+- `ClueNotFound` = 2
+- `InvalidHuntStatus` = 3
+- `PlayerNotRegistered` = 4
+- `ClueAlreadyCompleted` = 5
+- `InvalidAnswer` = 6
+- `HuntNotActive` = 7
+- `Unauthorized` = 8
+- `InsufficientRewardPool` = 9
+- `DuplicateRegistration` = 10
+- `InvalidTitle` = 11
+- `InvalidDescription` = 12
+- `InvalidAddress` = 13
+- `TooManyClues` = 14
+- `InvalidQuestion` = 15
+- `RefundFailed` = 16
+- `NoCluesAdded` = 17
+- `HuntNotCompleted` = 18
+- `RewardAlreadyClaimed` = 19
+- `RewardDistributionFailed` = 20
+- `NoRewardsConfigured` = 21
+- `DuplicateSubmission` = 22
+- `SubmissionExpired` = 23
+- `BannedPlayer` = 24
+- `NoRequiredClues` = 25
+- `RateLimitExceeded` = 26
+- `ScoreOverflow` = 27
+- `RegistrationsPaused` = 28
+- `AnswersPaused` = 29
+- `RewardsPaused` = 30
+- `HuntEndTimeInPast` = 31
+- `NoPendingAdmin` = 32
+- `PendingAdminMismatch` = 33
+- `InvalidRarity` = 34
+- `InvalidTimeBonusConfig` = 35
+- `AddressBlacklisted` = 36
+- `ContractPaused` = 37
+- `InvalidMaxAttempts` = 38
+- `InvalidWeight` = 39
+- `HintNotAvailable` = 40
+- `HintAlreadyUnlocked` = 41
+- `InsufficientScore` = 42
+- `TooManyCategories` = 43
+- `InvalidCategory` = 44
+- `InvalidDifficulty` = 45
+- `CorruptPlayerProgress` = 46
+- `HuntNotStarted` = 47
+- `AdminAlreadyProposed` = 48
+- `InvalidPoints` = 49
+- `HuntFull` = 50
+
+---
+
+#### `set_team_mode`
+
+**Signature:**
+
+```rust
+pub fn set_team_mode(env: Env, hunt_id: u64, creator: Address, team_mode: bool) -> Result<(), HuntErrorCode>
+```
+
+**Parameters:**
+
+- `env: Env`
+- `hunt_id: u64`
+- `creator: Address`
+- `team_mode: bool`
+
+**Returns:** `Result<(), HuntErrorCode>`
+
+**Error type:** `HuntErrorCode`
+
+**Error codes:**
+
+- `HuntNotFound` = 1
+- `ClueNotFound` = 2
+- `InvalidHuntStatus` = 3
+- `PlayerNotRegistered` = 4
+- `ClueAlreadyCompleted` = 5
+- `InvalidAnswer` = 6
+- `HuntNotActive` = 7
+- `Unauthorized` = 8
+- `InsufficientRewardPool` = 9
+- `DuplicateRegistration` = 10
+- `InvalidTitle` = 11
+- `InvalidDescription` = 12
+- `InvalidAddress` = 13
+- `TooManyClues` = 14
+- `InvalidQuestion` = 15
+- `RefundFailed` = 16
+- `NoCluesAdded` = 17
+- `HuntNotCompleted` = 18
+- `RewardAlreadyClaimed` = 19
+- `RewardDistributionFailed` = 20
+- `NoRewardsConfigured` = 21
+- `DuplicateSubmission` = 22
+- `SubmissionExpired` = 23
+- `BannedPlayer` = 24
+- `NoRequiredClues` = 25
+- `RateLimitExceeded` = 26
+- `ScoreOverflow` = 27
+- `RegistrationsPaused` = 28
+- `AnswersPaused` = 29
+- `RewardsPaused` = 30
+- `HuntEndTimeInPast` = 31
+- `NoPendingAdmin` = 32
+- `PendingAdminMismatch` = 33
+- `InvalidRarity` = 34
+- `InvalidTimeBonusConfig` = 35
+- `AddressBlacklisted` = 36
+- `ContractPaused` = 37
+- `InvalidMaxAttempts` = 38
+- `InvalidWeight` = 39
+- `HintNotAvailable` = 40
+- `HintAlreadyUnlocked` = 41
+- `InsufficientScore` = 42
+- `TooManyCategories` = 43
+- `InvalidCategory` = 44
+- `InvalidDifficulty` = 45
+- `CorruptPlayerProgress` = 46
+- `HuntNotStarted` = 47
+- `AdminAlreadyProposed` = 48
+- `InvalidPoints` = 49
+- `HuntFull` = 50
+
+---
+
+#### `create_team`
+
+**Signature:**
+
+```rust
+pub fn create_team(env: Env, hunt_id: u64, leader: Address, name: String) -> Result<u32, HuntErrorCode>
+```
+
+**Parameters:**
+
+- `env: Env`
+- `hunt_id: u64`
+- `leader: Address`
+- `name: String`
+
+**Returns:** `Result<u32, HuntErrorCode>`
+
+**Error type:** `HuntErrorCode`
+
+**Error codes:**
+
+- `HuntNotFound` = 1
+- `ClueNotFound` = 2
+- `InvalidHuntStatus` = 3
+- `PlayerNotRegistered` = 4
+- `ClueAlreadyCompleted` = 5
+- `InvalidAnswer` = 6
+- `HuntNotActive` = 7
+- `Unauthorized` = 8
+- `InsufficientRewardPool` = 9
+- `DuplicateRegistration` = 10
+- `InvalidTitle` = 11
+- `InvalidDescription` = 12
+- `InvalidAddress` = 13
+- `TooManyClues` = 14
+- `InvalidQuestion` = 15
+- `RefundFailed` = 16
+- `NoCluesAdded` = 17
+- `HuntNotCompleted` = 18
+- `RewardAlreadyClaimed` = 19
+- `RewardDistributionFailed` = 20
+- `NoRewardsConfigured` = 21
+- `DuplicateSubmission` = 22
+- `SubmissionExpired` = 23
+- `BannedPlayer` = 24
+- `NoRequiredClues` = 25
+- `RateLimitExceeded` = 26
+- `ScoreOverflow` = 27
+- `RegistrationsPaused` = 28
+- `AnswersPaused` = 29
+- `RewardsPaused` = 30
+- `HuntEndTimeInPast` = 31
+- `NoPendingAdmin` = 32
+- `PendingAdminMismatch` = 33
+- `InvalidRarity` = 34
+- `InvalidTimeBonusConfig` = 35
+- `AddressBlacklisted` = 36
+- `ContractPaused` = 37
+- `InvalidMaxAttempts` = 38
+- `InvalidWeight` = 39
+- `HintNotAvailable` = 40
+- `HintAlreadyUnlocked` = 41
+- `InsufficientScore` = 42
+- `TooManyCategories` = 43
+- `InvalidCategory` = 44
+- `InvalidDifficulty` = 45
+- `CorruptPlayerProgress` = 46
+- `HuntNotStarted` = 47
+- `AdminAlreadyProposed` = 48
+- `InvalidPoints` = 49
+- `HuntFull` = 50
+
+---
+
+#### `join_team`
+
+**Signature:**
+
+```rust
+pub fn join_team(env: Env, hunt_id: u64, team_id: u32, player: Address) -> Result<(), HuntErrorCode>
+```
+
+**Parameters:**
+
+- `env: Env`
+- `hunt_id: u64`
+- `team_id: u32`
+- `player: Address`
+
+**Returns:** `Result<(), HuntErrorCode>`
+
+**Error type:** `HuntErrorCode`
+
+**Error codes:**
+
+- `HuntNotFound` = 1
+- `ClueNotFound` = 2
+- `InvalidHuntStatus` = 3
+- `PlayerNotRegistered` = 4
+- `ClueAlreadyCompleted` = 5
+- `InvalidAnswer` = 6
+- `HuntNotActive` = 7
+- `Unauthorized` = 8
+- `InsufficientRewardPool` = 9
+- `DuplicateRegistration` = 10
+- `InvalidTitle` = 11
+- `InvalidDescription` = 12
+- `InvalidAddress` = 13
+- `TooManyClues` = 14
+- `InvalidQuestion` = 15
+- `RefundFailed` = 16
+- `NoCluesAdded` = 17
+- `HuntNotCompleted` = 18
+- `RewardAlreadyClaimed` = 19
+- `RewardDistributionFailed` = 20
+- `NoRewardsConfigured` = 21
+- `DuplicateSubmission` = 22
+- `SubmissionExpired` = 23
+- `BannedPlayer` = 24
+- `NoRequiredClues` = 25
+- `RateLimitExceeded` = 26
+- `ScoreOverflow` = 27
+- `RegistrationsPaused` = 28
+- `AnswersPaused` = 29
+- `RewardsPaused` = 30
+- `HuntEndTimeInPast` = 31
+- `NoPendingAdmin` = 32
+- `PendingAdminMismatch` = 33
+- `InvalidRarity` = 34
+- `InvalidTimeBonusConfig` = 35
+- `AddressBlacklisted` = 36
+- `ContractPaused` = 37
+- `InvalidMaxAttempts` = 38
+- `InvalidWeight` = 39
+- `HintNotAvailable` = 40
+- `HintAlreadyUnlocked` = 41
+- `InsufficientScore` = 42
+- `TooManyCategories` = 43
+- `InvalidCategory` = 44
+- `InvalidDifficulty` = 45
+- `CorruptPlayerProgress` = 46
+- `HuntNotStarted` = 47
+- `AdminAlreadyProposed` = 48
+- `InvalidPoints` = 49
+- `HuntFull` = 50
+
+---
+
+#### `get_player_team`
+
+**Signature:**
+
+```rust
+pub fn get_player_team(env: Env, hunt_id: u64, player: Address) -> Option<u32>
+```
+
+**Parameters:**
+
+- `env: Env`
+- `hunt_id: u64`
+- `player: Address`
+
+**Returns:** `Option<u32>`
+
+---
+
+#### `get_team`
+
+**Signature:**
+
+```rust
+pub fn get_team(env: Env, hunt_id: u64, team_id: u32) -> Option<Team>
+```
+
+**Parameters:**
+
+- `env: Env`
+- `hunt_id: u64`
+- `team_id: u32`
+
+**Returns:** `Option<Team>`
+
+---
+
+#### `get_team_progress`
+
+**Signature:**
+
+```rust
+pub fn get_team_progress(env: Env, hunt_id: u64, team_id: u32) -> TeamProgress
+```
+
+**Parameters:**
+
+- `env: Env`
+- `hunt_id: u64`
+- `team_id: u32`
+
+**Returns:** `TeamProgress`
+
+---
+
+#### `get_team_leaderboard`
+
+**Signature:**
+
+```rust
+pub fn get_team_leaderboard(env: Env, hunt_id: u64, limit: u32) -> Vec<TeamLeaderboardEntry>
+```
+
+**Parameters:**
+
+- `env: Env`
+- `hunt_id: u64`
+- `limit: u32`
+
+**Returns:** `Vec<TeamLeaderboardEntry>`
+
+---
+
 ## `migration` Contract
 
 _No contract API functions found._
@@ -4914,7 +5554,6 @@ _No contract API functions found._
 #### `initialize`
 
 Initializes the NFT reward contract with an admin, minter, and optional max supply cap.
-Passing `Some(0)` as `max_supply` is rejected with `InvalidMaxSupply`; use `None` for unlimited minting.
 
 **Signature:**
 
@@ -4955,6 +5594,7 @@ pub fn initialize(env: Env, admin: Address, minter: Address, max_supply: Option<
 - `InvalidExtensionValue` = 17
 - `ExtensionNotFound` = 18
 - `InvalidMaxSupply` = 19
+- `InvalidRoyalty` = 20
 
 ---
 
@@ -4967,14 +5607,12 @@ contract has been initialized. Before initialization the check is skipped so
 that existing deployments remain functional.
 
 # Arguments
-
-- `minter` - Address performing the mint (must be whitelisted after init)
-- `hunt_id` - The hunt this NFT commemorates
-- `player_address` - The address of the player completing the hunt (initial owner)
-- `metadata` - NFT metadata (title, description, image URI, hunt_title, rarity, tier)
+* `minter` - Address performing the mint (must be whitelisted after init)
+* `hunt_id` - The hunt this NFT commemorates
+* `player_address` - The address of the player completing the hunt (initial owner)
+* `metadata` - NFT metadata (title, description, image URI, hunt_title, rarity, tier)
 
 # Returns
-
 The unique NFT ID of the minted NFT
 
 **Signature:**
@@ -5005,7 +5643,6 @@ on this crate's `NftMetadata` type directly.
 contract has been initialized.
 
 Expected keys in `metadata` (all optional, with sensible defaults):
-
 - "title": String
 - "description": String
 - "image_uri": String
@@ -5017,10 +5654,14 @@ Expected keys in `metadata` (all optional, with sensible defaults):
 - "transferable": bool
 - "extensions": Map<String, String> (optional, arbitrary key-value metadata)
 
+# Errors
+Returns `NftErrorCode::InvalidMetadata` when a key is **present** but holds
+a value of the wrong type. An **absent** key silently takes its documented default.
+
 **Signature:**
 
 ```rust
-pub fn mint_reward_nft_from_map(env: Env, minter: Address, hunt_id: u64, player_address: Address, metadata: Map<Symbol, Val>) -> u64
+pub fn mint_reward_nft_from_map(env: Env, minter: Address, hunt_id: u64, player_address: Address, metadata: Map<Symbol, Val>) -> Result<u64, crate::errors::NftErrorCode>
 ```
 
 **Parameters:**
@@ -5031,7 +5672,32 @@ pub fn mint_reward_nft_from_map(env: Env, minter: Address, hunt_id: u64, player_
 - `player_address: Address`
 - `metadata: Map<Symbol, Val>`
 
-**Returns:** `u64`
+**Returns:** `Result<u64, crate::errors::NftErrorCode>`
+
+**Error type:** `NftErrorCode`
+
+**Error codes:**
+
+- `NftNotFound` = 1
+- `Unauthorized` = 2
+- `NotOwner` = 3
+- `InvalidRecipient` = 4
+- `SoulboundNft` = 5
+- `InvalidRarity` = 6
+- `AlreadyInitialized` = 7
+- `MaxSupplyReached` = 8
+- `NotInitialized` = 9
+- `NotOperator` = 10
+- `NftNotTransferable` = 11
+- `NftLocked` = 12
+- `InvalidMetadata` = 13
+- `MetadataFrozen` = 14
+- `TooManyExtensions` = 15
+- `InvalidExtensionKey` = 16
+- `InvalidExtensionValue` = 17
+- `ExtensionNotFound` = 18
+- `InvalidMaxSupply` = 19
+- `InvalidRoyalty` = 20
 
 ---
 
@@ -5098,11 +5764,10 @@ Max 10 extension fields per NFT. If the key already exists, it is updated.
 If the maximum is reached and the key is new, it returns an error.
 
 # Arguments
-
-- `nft_id` - The NFT to extend
-- `owner` - The current owner (must authorize)
-- `key` - The extension key (max 64 bytes)
-- `value` - The extension value (max 512 bytes)
+* `nft_id` - The NFT to extend
+* `owner` - The current owner (must authorize)
+* `key` - The extension key (max 64 bytes)
+* `value` - The extension value (max 512 bytes)
 
 **Signature:**
 
@@ -5143,6 +5808,7 @@ pub fn set_nft_extension(env: Env, nft_id: u64, owner: Address, key: String, val
 - `InvalidExtensionValue` = 17
 - `ExtensionNotFound` = 18
 - `InvalidMaxSupply` = 19
+- `InvalidRoyalty` = 20
 
 ---
 
@@ -5151,12 +5817,10 @@ pub fn set_nft_extension(env: Env, nft_id: u64, owner: Address, key: String, val
 Gets the value of a specific extension field for an NFT.
 
 # Arguments
-
-- `nft_id` - The NFT to query
-- `key` - The extension key to look up
+* `nft_id` - The NFT to query
+* `key` - The extension key to look up
 
 # Returns
-
 The extension value if found, None otherwise.
 
 **Signature:**
@@ -5180,11 +5844,9 @@ pub fn get_nft_extension(env: Env, nft_id: u64, key: String) -> Option<String>
 Gets all extension fields for an NFT.
 
 # Arguments
-
-- `nft_id` - The NFT to query
+* `nft_id` - The NFT to query
 
 # Returns
-
 Map of all extension key-value pairs.
 
 **Signature:**
@@ -5207,10 +5869,9 @@ pub fn get_nft_extensions(env: Env, nft_id: u64) -> Option<Map<String, String>>
 Removes an extension field from an NFT. Only the NFT owner can call this.
 
 # Arguments
-
-- `nft_id` - The NFT to modify
-- `owner` - The current owner (must authorize)
-- `key` - The extension key to remove
+* `nft_id` - The NFT to modify
+* `owner` - The current owner (must authorize)
+* `key` - The extension key to remove
 
 **Signature:**
 
@@ -5250,6 +5911,7 @@ pub fn remove_nft_extension(env: Env, nft_id: u64, owner: Address, key: String) 
 - `InvalidExtensionValue` = 17
 - `ExtensionNotFound` = 18
 - `InvalidMaxSupply` = 19
+- `InvalidRoyalty` = 20
 
 ---
 
@@ -5312,6 +5974,7 @@ pub fn set_reward_manager(env: Env, admin: Address, reward_manager: Address) -> 
 - `InvalidExtensionValue` = 17
 - `ExtensionNotFound` = 18
 - `InvalidMaxSupply` = 19
+- `InvalidRoyalty` = 20
 
 ---
 
@@ -5356,6 +6019,7 @@ pub fn add_authorized_contract(env: Env, admin: Address, contract: Address) -> R
 - `InvalidExtensionValue` = 17
 - `ExtensionNotFound` = 18
 - `InvalidMaxSupply` = 19
+- `InvalidRoyalty` = 20
 
 ---
 
@@ -5400,6 +6064,7 @@ pub fn remove_authorized_contract(env: Env, admin: Address, contract: Address) -
 - `InvalidExtensionValue` = 17
 - `ExtensionNotFound` = 18
 - `InvalidMaxSupply` = 19
+- `InvalidRoyalty` = 20
 
 ---
 
@@ -5422,19 +6087,16 @@ already-migrated range updates nothing (those URIs already start with
 harmless.
 
 # Authorization
-
 Only the configured admin can call this function.
 
 # Arguments
-
-- `admin` - The admin address (must match the stored admin)
-- `old_prefix` - The prefix to match (e.g. "ipfs://oldgateway/")
-- `new_prefix` - The replacement prefix (e.g. "ipfs://newgateway/")
-- `offset` - The starting index for this batch (0-based)
-- `limit` - The maximum number of NFTs to scan in this batch (capped at MAX_SCAN_LIMIT)
+* `admin` - The admin address (must match the stored admin)
+* `old_prefix` - The prefix to match (e.g. "ipfs://oldgateway/")
+* `new_prefix` - The replacement prefix (e.g. "ipfs://newgateway/")
+* `offset` - The starting index for this batch (0-based)
+* `limit` - The maximum number of NFTs to scan in this batch (capped at MAX_SCAN_LIMIT)
 
 # Returns
-
 `(updated_count, next_offset)` — how many image URIs were updated in
 this batch, and the offset to resume from for the next one.
 
@@ -5478,11 +6140,28 @@ pub fn admin_update_image_uris(env: Env, admin: Address, old_prefix: String, new
 - `InvalidExtensionValue` = 17
 - `ExtensionNotFound` = 18
 - `InvalidMaxSupply` = 19
+- `InvalidRoyalty` = 20
 
 ---
 
 #### `update_nft_metadata`
 
+Replaces a matching `old_prefix` at the start of `uri` with `new_prefix`.
+
+Returns `None` — meaning "leave the URI untouched" — whenever the
+operation cannot be performed *exactly*:
+- `uri` does not start with `old_prefix`, or
+- any of `uri` / `old_prefix` / `new_prefix` exceeds `MAX_NFT_URI_BYTES`
+(all three are bounded by that constant elsewhere in the contract;
+this defends against callers that bypass those checks), or
+- the resulting URI would exceed `MAX_NFT_URI_BYTES`.
+
+Every early return above is an explicit, checked rejection. Unlike the
+previous implementation, nothing here is silently truncated (the old
+code copied at most 256 bytes into a fixed buffer but kept comparing
+against the untruncated length) and nothing can index out of bounds
+(the old code panicked when `old_prefix` exceeded 256 bytes, or when
+`new_prefix` was long enough to overflow the 512-byte output buffer).
 Updates mutable metadata fields (description, image_uri). Owner only.
 Title, hunt info, and attributes remain immutable for collectibility.
 
@@ -5525,6 +6204,7 @@ pub fn update_nft_metadata(env: Env, nft_id: u64, updater: Address, new_descript
 - `InvalidExtensionValue` = 17
 - `ExtensionNotFound` = 18
 - `InvalidMaxSupply` = 19
+- `InvalidRoyalty` = 20
 
 ---
 
@@ -5550,8 +6230,7 @@ pub fn total_supply(env: Env) -> u64
 
 Returns the configured maximum total supply of NFTs.
 
-- `None` → no cap was set (unlimited minting)
-- `Some(0)` → unlimited (explicit zero treated as unlimited)
+- `None`  → no cap was set (unlimited minting)
 - `Some(n)` → at most `n` NFTs may ever be minted
 
 **Signature:**
@@ -5573,15 +6252,14 @@ pub fn get_max_supply(env: Env) -> Option<u64>
 Updates the maximum total supply cap. Admin only.
 
 - Pass `None` to remove the cap (unlimited).
-- Pass `Some(n)` where `n > 0` and `n >= current total_supply` to set or raise the cap.
-  Attempting to set a cap of `0` or lower than the already-minted count is
-  rejected with `InvalidMaxSupply`.
+- Pass `Some(n)` where `n > 0` and `n >= current total_supply` to set a new cap.
+Attempting to set a cap of 0 or lower than the already-minted count is
+rejected with `InvalidMaxSupply` to prevent bricking the contract.
 
 # Errors
-
-- `NotInitialized` - Contract has not been initialized yet
-- `Unauthorized` - Caller is not the admin
-- `InvalidMaxSupply` - `new_max` is `Some(0)` or less than the current minted supply
+* `NotInitialized` - Contract has not been initialized yet
+* `Unauthorized`   - Caller is not the admin
+* `InvalidMaxSupply` - Attempting to set cap to Some(0) or below already-minted supply
 
 **Signature:**
 
@@ -5620,6 +6298,7 @@ pub fn set_max_supply(env: Env, admin: Address, new_max: Option<u64>) -> Result<
 - `InvalidExtensionValue` = 17
 - `ExtensionNotFound` = 18
 - `InvalidMaxSupply` = 19
+- `InvalidRoyalty` = 20
 
 ---
 
@@ -5627,7 +6306,7 @@ pub fn set_max_supply(env: Env, admin: Address, new_max: Option<u64>) -> Result<
 
 Returns the number of NFTs that can still be minted.
 
-- `None` → unlimited (no cap configured)
+- `None`  → unlimited (no cap configured)
 - `Some(n)` → exactly `n` more NFTs may be minted before the cap is hit
 
 Once the cap is reached this returns `Some(0)`, and any subsequent mint
@@ -5652,16 +6331,14 @@ pub fn get_remaining_supply(env: Env) -> Option<u64>
 Lists all NFTs minted by the contract with pagination support.
 
 Returns a vector of NftData structs, paginated by offset and limit.
-The limit is bounded to MAX_SCAN_LIMIT (1000) to prevent excessive gas consumption.
+The limit is bounded to MAX_SCAN_LIMIT (200) to prevent excessive gas consumption.
 
 # Arguments
-
-- `env` - The Soroban environment
-- `offset` - The starting index for pagination (0-based)
-- `limit` - The maximum number of NFTs to return (capped at MAX_SCAN_LIMIT)
+* `env` - The Soroban environment
+* `offset` - The starting index for pagination (0-based)
+* `limit` - The maximum number of NFTs to return (capped at MAX_SCAN_LIMIT)
 
 # Returns
-
 Vec<NftData> - A vector of NFT data structures, bounded by limit or remaining NFTs
 
 **Signature:**
@@ -5688,21 +6365,19 @@ Allows filtering NFTs by various metadata fields. All filter parameters are opti
 only provided filters are applied. Returns matching NFTs with pagination.
 
 # Arguments
-
-- `env` - The Soroban environment
-- `offset` - The starting index for pagination (0-based)
-- `limit` - The maximum number of NFTs to return (capped at MAX_SCAN_LIMIT)
-- `title_filter` - Optional filter for NFT title (exact match)
-- `hunt_title_filter` - Optional filter for hunt title (exact match)
-- `rarity_filter` - Optional filter for rarity tier (0-5)
-- `tier_filter` - Optional filter for custom tier
-- `creator_filter` - Optional filter for creator address
-- `hunt_id_filter` - Optional filter for hunt ID
-- `extension_key` - Optional extension key to search for
-- `extension_value` - Optional extension value to match (requires extension_key)
+* `env` - The Soroban environment
+* `offset` - The starting index for pagination (0-based)
+* `limit` - The maximum number of NFTs to return (capped at MAX_SCAN_LIMIT)
+* `title_filter` - Optional filter for NFT title (exact match)
+* `hunt_title_filter` - Optional filter for hunt title (exact match)
+* `rarity_filter` - Optional filter for rarity tier (0-5)
+* `tier_filter` - Optional filter for custom tier
+* `creator_filter` - Optional filter for creator address
+* `hunt_id_filter` - Optional filter for hunt ID
+* `extension_key` - Optional extension key to search for
+* `extension_value` - Optional extension value to match (requires extension_key)
 
 # Returns
-
 Vec<NftData> - A vector of matching NFT data structures, paginated by offset and limit
 
 **Signature:**
@@ -5773,6 +6448,7 @@ pub fn transfer_nft(env: Env, nft_id: u64, from_address: Address, to_address: Ad
 - `InvalidExtensionValue` = 17
 - `ExtensionNotFound` = 18
 - `InvalidMaxSupply` = 19
+- `InvalidRoyalty` = 20
 
 ---
 
@@ -5905,7 +6581,6 @@ pub fn get_hunt_nft_count(env: Env, hunt_id: u64) -> u32
 Grants `operator` the ability to manage all NFTs owned by `owner`.
 
 # Authorization
-
 `owner` must authorize this call.
 
 **Signature:**
@@ -5929,7 +6604,6 @@ pub fn set_operator(env: Env, owner: Address, operator: Address) -> ()
 Revokes operator approval for `operator` over `owner`'s NFTs.
 
 # Authorization
-
 `owner` must authorize this call.
 
 **Signature:**
@@ -5973,11 +6647,9 @@ pub fn is_operator(env: Env, owner: Address, operator: Address) -> bool
 Burns (permanently destroys) an NFT, removing it from storage and the owner's list.
 
 # Authorization
-
 The `owner` must authorize this call and be the current owner of the NFT.
 
 # Errors
-
 Returns `NftNotFound` if the NFT does not exist.
 Returns `NotOwner` if the caller is not the current owner.
 Returns `NftLocked` if the NFT is locked (e.g., staked elsewhere).
@@ -6019,6 +6691,202 @@ pub fn burn_nft(env: Env, nft_id: u64, owner: Address) -> Result<(), crate::erro
 - `InvalidExtensionValue` = 17
 - `ExtensionNotFound` = 18
 - `InvalidMaxSupply` = 19
+- `InvalidRoyalty` = 20
+
+---
+
+#### `get_schema_version`
+
+**Signature:**
+
+```rust
+pub fn get_schema_version(env: Env) -> u32
+```
+
+**Parameters:**
+
+- `env: Env`
+
+**Returns:** `u32`
+
+---
+
+#### `initialize_schema`
+
+**Signature:**
+
+```rust
+pub fn initialize_schema(env: Env, admin: Address) -> ()
+```
+
+**Parameters:**
+
+- `env: Env`
+- `admin: Address`
+
+**Returns:** `()`
+
+---
+
+#### `propose_upgrade`
+
+**Signature:**
+
+```rust
+pub fn propose_upgrade(env: Env, admin: Address, target_version: u32) -> Result<hunty_migration::UpgradeProposal, hunty_migration::UpgradeAuthError>
+```
+
+**Parameters:**
+
+- `env: Env`
+- `admin: Address`
+- `target_version: u32`
+
+**Returns:** `Result<hunty_migration::UpgradeProposal, hunty_migration::UpgradeAuthError>`
+
+**Error type:** `UpgradeAuthError`
+
+**Error codes:**
+
+- `Unauthorized` = 1
+- `NoProposal` = 2
+- `TimelockPending` = 3
+- `VersionMismatch` = 4
+- `InvalidTimelock` = 5
+
+---
+
+#### `set_upgrade_timelock`
+
+**Signature:**
+
+```rust
+pub fn set_upgrade_timelock(env: Env, admin: Address, delay_seconds: u64) -> Result<(), hunty_migration::UpgradeAuthError>
+```
+
+**Parameters:**
+
+- `env: Env`
+- `admin: Address`
+- `delay_seconds: u64`
+
+**Returns:** `Result<(), hunty_migration::UpgradeAuthError>`
+
+**Error type:** `UpgradeAuthError`
+
+**Error codes:**
+
+- `Unauthorized` = 1
+- `NoProposal` = 2
+- `TimelockPending` = 3
+- `VersionMismatch` = 4
+- `InvalidTimelock` = 5
+
+---
+
+#### `get_upgrade_proposal`
+
+**Signature:**
+
+```rust
+pub fn get_upgrade_proposal(env: Env) -> Option<hunty_migration::UpgradeProposal>
+```
+
+**Parameters:**
+
+- `env: Env`
+
+**Returns:** `Option<hunty_migration::UpgradeProposal>`
+
+---
+
+#### `get_upgrade_timelock`
+
+**Signature:**
+
+```rust
+pub fn get_upgrade_timelock(env: Env) -> u64
+```
+
+**Parameters:**
+
+- `env: Env`
+
+**Returns:** `u64`
+
+---
+
+#### `get_upgrade_history`
+
+**Signature:**
+
+```rust
+pub fn get_upgrade_history(env: Env, offset: u32, limit: u32) -> soroban_sdk::Vec<hunty_migration::UpgradeHistoryEntry>
+```
+
+**Parameters:**
+
+- `env: Env`
+- `offset: u32`
+- `limit: u32`
+
+**Returns:** `soroban_sdk::Vec<hunty_migration::UpgradeHistoryEntry>`
+
+---
+
+#### `run_migration`
+
+**Signature:**
+
+```rust
+pub fn run_migration(env: Env, admin: Address, target_version: u32, dry_run: bool) -> Result<migration::MigrationReport, hunty_migration::UpgradeAuthError>
+```
+
+**Parameters:**
+
+- `env: Env`
+- `admin: Address`
+- `target_version: u32`
+- `dry_run: bool`
+
+**Returns:** `Result<migration::MigrationReport, hunty_migration::UpgradeAuthError>`
+
+**Error type:** `UpgradeAuthError`
+
+**Error codes:**
+
+- `Unauthorized` = 1
+- `NoProposal` = 2
+- `TimelockPending` = 3
+- `VersionMismatch` = 4
+- `InvalidTimelock` = 5
+
+---
+
+#### `rollback_migration`
+
+**Signature:**
+
+```rust
+pub fn rollback_migration(env: Env, admin: Address) -> Result<migration::MigrationReport, hunty_migration::UpgradeAuthError>
+```
+
+**Parameters:**
+
+- `env: Env`
+- `admin: Address`
+
+**Returns:** `Result<migration::MigrationReport, hunty_migration::UpgradeAuthError>`
+
+**Error type:** `UpgradeAuthError`
+
+**Error codes:**
+
+- `Unauthorized` = 1
+- `NoProposal` = 2
+- `TimelockPending` = 3
+- `VersionMismatch` = 4
+- `InvalidTimelock` = 5
 
 ---
 
@@ -6027,6 +6895,85 @@ pub fn burn_nft(env: Env, nft_id: u64, owner: Address) -> Result<(), crate::erro
 _No contract API functions found._
 
 ## `reward-manager` Contract
+
+### `ReentrantFundingToken`
+
+#### `configure`
+
+Arms this token to attempt one reentrant `fund_reward_pool` call, with
+the same arguments, the next time its `transfer` is invoked.
+
+**Signature:**
+
+```rust
+pub fn configure(env: Env, target: Address, funder: Address, hunt_id: u64, amount: i128) -> ()
+```
+
+**Parameters:**
+
+- `env: Env`
+- `target: Address`
+- `funder: Address`
+- `hunt_id: u64`
+- `amount: i128`
+
+**Returns:** `()`
+
+---
+
+#### `reentry_was_rejected`
+
+Whether the reentrant call attempted during `transfer` was rejected.
+
+**Signature:**
+
+```rust
+pub fn reentry_was_rejected(env: Env) -> bool
+```
+
+**Parameters:**
+
+- `env: Env`
+
+**Returns:** `bool`
+
+---
+
+#### `balance`
+
+**Signature:**
+
+```rust
+pub fn balance(_env: Env, _id: Address) -> i128
+```
+
+**Parameters:**
+
+- `_env: Env`
+- `_id: Address`
+
+**Returns:** `i128`
+
+---
+
+#### `transfer`
+
+**Signature:**
+
+```rust
+pub fn transfer(env: Env, _from: Address, _to: Address, _amount: i128) -> ()
+```
+
+**Parameters:**
+
+- `env: Env`
+- `_from: Address`
+- `_to: Address`
+- `_amount: i128`
+
+**Returns:** `()`
+
+---
 
 ### `RewardManager`
 
@@ -6287,8 +7234,6 @@ pub fn set_hunty_core(env: Env, admin: Address, hunty_core: Address) -> Result<(
 Adds a contract to the authorized callers list for `distribute_rewards`.
 Only the contract admin can call this.
 
-The distribution gate is fail-closed: `distribute_rewards` reads the immediate invoker via `env.invoker()`, requires that address to authenticate, and then checks whether the address is present in the allowlist. If no contracts are allowlisted, or the invoker is not in the allowlist, the call returns `Unauthorized`.
-
 **Signature:**
 
 ```rust
@@ -6396,23 +7341,21 @@ For NFT-only pools (pools that distribute only NFTs without any token component)
 set `min_distribution_amount` to 0 and provide an `nft_contract` address.
 
 # Arguments
-
-- `creator` - The hunt creator who will own and fund the pool
-- `hunt_id` - The hunt this pool is for
-- `token_address` - Address of the SAC-compatible token contract (e.g., XLM, USDC)
-- `min_distribution_amount` - Minimum token amount per distribution (0 for NFT-only pools)
-- `nft_contract` - Optional NFT contract address for NFT rewards
-- `nft_royalty_bps` - Creator royalty basis points (0-10000) for secondary market sales
-- `nft_transferable` - Whether reward NFTs from this pool are transferable
+* `creator` - The hunt creator who will own and fund the pool
+* `hunt_id` - The hunt this pool is for
+* `token_address` - Address of the SAC-compatible token contract (e.g., XLM, USDC)
+* `min_distribution_amount` - Minimum token amount per distribution (0 for NFT-only pools)
+* `nft_contract` - Optional NFT contract address for NFT rewards
+* `nft_royalty_bps` - Creator royalty basis points (0-10000) for secondary market sales
+* `nft_transferable` - Whether reward NFTs from this pool are transferable
 
 # Errors
-
-- `PoolAlreadyExists` - A pool already exists for this hunt_id
-- `InvalidAmount` - min_distribution_amount is negative
-- `InvalidTokenContract` - token_address is not a valid SAC-compatible token
-- `InvalidConfig` - min_distribution_amount is 0 but no NFT contract provided
-- `NotInitialized` - hunty_core has not been configured (set during initialize)
-- `HuntNotFound` - hunt_id does not exist in HuntyCore
+* `PoolAlreadyExists` - A pool already exists for this hunt_id
+* `InvalidAmount` - min_distribution_amount is negative
+* `InvalidTokenContract` - token_address is not a valid SAC-compatible token
+* `InvalidConfig` - min_distribution_amount is 0 but no NFT contract provided
+* `NotInitialized` - hunty_core has not been configured (set during initialize)
+* `HuntNotFound` - hunt_id does not exist in HuntyCore
 
 **Signature:**
 
@@ -6473,21 +7416,19 @@ after creation (see `fund_reward_pool`); the token contract must be
 SAC-compatible.
 
 # Arguments
-
-- `creator` - The hunt creator who will own and fund the pool
-- `hunt_id` - The hunt this pool is for
-- `token_address` - Address of the SAC-compatible token contract (e.g., XLM, USDC)
-- `min_distribution_amount` - Minimum token amount per distribution (0 = no minimum)
-- `nft_royalty_bps` - Creator royalty basis points (0-10000) for secondary market sales
-- `nft_transferable` - Whether reward NFTs from this pool are transferable
+* `creator` - The hunt creator who will own and fund the pool
+* `hunt_id` - The hunt this pool is for
+* `token_address` - Address of the SAC-compatible token contract (e.g., XLM, USDC)
+* `min_distribution_amount` - Minimum token amount per distribution (0 = no minimum)
+* `nft_royalty_bps` - Creator royalty basis points (0-10000) for secondary market sales
+* `nft_transferable` - Whether reward NFTs from this pool are transferable
 
 # Errors
-
-- `PoolAlreadyExists` - A pool already exists for this hunt_id
-- `InvalidAmount` - min_distribution_amount is negative
-- `InvalidTokenContract` - token_address is not a valid SAC-compatible token
-- `NotInitialized` - hunty_core has not been configured (set during initialize)
-- `HuntNotFound` - hunt_id does not exist in HuntyCore
+* `PoolAlreadyExists` - A pool already exists for this hunt_id
+* `InvalidAmount` - min_distribution_amount is negative
+* `InvalidTokenContract` - token_address is not a valid SAC-compatible token
+* `NotInitialized` - hunty_core has not been configured (set during initialize)
+* `HuntNotFound` - hunt_id does not exist in HuntyCore
 
 **Signature:**
 
@@ -6547,16 +7488,14 @@ has underfunded the pool and needs to lower the minimum so distributions
 can proceed.
 
 # Arguments
-
-- `creator` - The pool creator (must match the stored creator)
-- `hunt_id` - The hunt whose pool config to update
-- `min_distribution_amount` - New minimum XLM per distribution (0 = no minimum)
+* `creator` - The pool creator (must match the stored creator)
+* `hunt_id` - The hunt whose pool config to update
+* `min_distribution_amount` - New minimum XLM per distribution (0 = no minimum)
 
 # Errors
-
-- `PoolNotFound` - No pool exists for this hunt_id
-- `Unauthorized` - Caller is not the pool creator
-- `InvalidAmount` - min_distribution_amount is negative
+* `PoolNotFound` - No pool exists for this hunt_id
+* `Unauthorized` - Caller is not the pool creator
+* `InvalidAmount` - min_distribution_amount is negative
 
 **Signature:**
 
@@ -6771,18 +7710,16 @@ persisted immediately and become effective for any subsequent distribution
 call. Already-distributed rewards are not affected.
 
 # Arguments
-
-- `creator` - The pool creator (must match the stored creator)
-- `hunt_id` - The hunt whose pool config to update
-- `time_based_tiers` - New tier list (strictly ascending by time, all amounts > 0;
-  an empty list disables tier-based rewards)
+* `creator` - The pool creator (must match the stored creator)
+* `hunt_id` - The hunt whose pool config to update
+* `time_based_tiers` - New tier list (strictly ascending by time, all amounts > 0;
+an empty list disables tier-based rewards)
 
 # Errors
-
-- `PoolNotFound` - No pool exists for this hunt_id
-- `Unauthorized` - Caller is not the pool creator
-- `InvalidConfig` - Tier list (when non-empty) contains a zero/negative
-  amount or is not strictly ascending
+* `PoolNotFound` - No pool exists for this hunt_id
+* `Unauthorized` - Caller is not the pool creator
+* `InvalidConfig` - Tier list (when non-empty) contains a zero/negative
+amount or is not strictly ascending
 
 **Signature:**
 
@@ -6836,15 +7773,13 @@ Sets or updates the NFT contract address for an existing reward pool.
 This allows pools to distribute NFTs alongside or instead of tokens.
 
 # Arguments
-
-- `creator` - The pool creator (must match the stored creator)
-- `hunt_id` - The hunt whose pool config to update
-- `nft_contract` - NFT contract address (or None to disable NFT rewards)
+* `creator` - The pool creator (must match the stored creator)
+* `hunt_id` - The hunt whose pool config to update
+* `nft_contract` - NFT contract address (or None to disable NFT rewards)
 
 # Errors
-
-- `PoolNotFound` - No pool exists for this hunt_id
-- `Unauthorized` - Caller is not the pool creator
+* `PoolNotFound` - No pool exists for this hunt_id
+* `Unauthorized` - Caller is not the pool creator
 
 **Signature:**
 
@@ -7045,7 +7980,6 @@ Transfers tokens from the funder to this contract and records the balance.
 Uses the token address specified when the pool was created.
 
 # Validation
-
 - Minimum funding: 1 XLM equivalent (10,000,000 base units) to prevent dust attacks
 - Maximum single funding: 1 billion tokens to prevent overflow
 - Pool balance limit: 1 billion tokens total to prevent overflow
@@ -7053,20 +7987,18 @@ Uses the token address specified when the pool was created.
 - At most `MAX_FUNDERS_PER_POOL` distinct funders are tracked per pool
 
 # Arguments
-
-- `funder` - The address funding the pool (must authorize this call)
-- `hunt_id` - The hunt to fund
-- `amount` - Token amount to add to the pool (must be > 0)
+* `funder` - The address funding the pool (must authorize this call)
+* `hunt_id` - The hunt to fund
+* `amount` - Token amount to add to the pool (must be > 0)
 
 # Errors
-
-- `PoolNotFound` - Pool has not been created yet
-- `InvalidAmount` - Amount is <= 0
-- `BelowMinimumFunding` - Amount is less than minimum (dust attack prevention)
-- `ExceedsMaximumFunding` - Amount exceeds maximum limit
-- `PoolBalanceOverflow` - Adding this amount would exceed pool balance limit
-- `TooManyFunders` - This would be a new funder and the pool already
-  tracks the maximum number of distinct funders
+* `PoolNotFound` - Pool has not been created yet
+* `InvalidAmount` - Amount is <= 0
+* `BelowMinimumFunding` - Amount is less than minimum (dust attack prevention)
+* `ExceedsMaximumFunding` - Amount exceeds maximum limit
+* `PoolBalanceOverflow` - Adding this amount would exceed pool balance limit
+* `TooManyFunders` - This would be a new funder and the pool already
+tracks the maximum number of distinct funders
 
 **Signature:**
 
@@ -7134,9 +8066,7 @@ before calling this function, as any remaining unclaimed rewards cannot be distr
 after the pool is refunded.
 
 # Accounting
-
 This function updates:
-
 - Pool balance: Set to 0
 - Total refunded: Incremented by the refund amount
 - Audit log: Entry recorded with PoolOperation::Refund
@@ -7145,21 +8075,18 @@ After a refund, the accounting identity is:
 `total_deposited == balance + total_distributed + total_refunded`
 
 # Events
-
 Emits one `PoolRefundedEvent` per funder paid out (a single event for
 the common single-funder case).
 
 # Arguments
-
-- `creator` - The pool creator (must authorize this call)
-- `hunt_id` - The hunt whose pool is being refunded
+* `creator` - The pool creator (must authorize this call)
+* `hunt_id` - The hunt whose pool is being refunded
 
 # Errors
-
-- `PoolNotFound` - Pool has not been created yet
-- `InvalidHuntStatus` - The hunt is not cancelled or ended (only when
-  `set_hunty_core` has been called)
-- `Unauthorized` - Caller is not the pool creator
+* `PoolNotFound` - Pool has not been created yet
+* `InvalidHuntStatus` - The hunt is not cancelled or ended (only when
+`set_hunty_core` has been called)
+* `Unauthorized` - Caller is not the pool creator
 
 **Signature:**
 
@@ -7216,36 +8143,32 @@ hunt without withdrawing and re-depositing. The XLM never leaves this
 contract; only the internal per-hunt balance accounting is re-keyed.
 
 # Eligibility (acceptance criteria)
-
-- The source pool's hunt must be **expired or cancelled** — verified via
-  a cross-contract call to the configured HuntyCore contract
-  (`is_hunt_expired_or_cancelled`). If HuntyCore is not configured, the
-  source cannot be shown eligible and migration is rejected.
-- The **destination pool must already exist** (created via
-  `create_reward_pool`).
-- **Both pools must have the same creator**, who must authorize the call.
+* The source pool's hunt must be **expired or cancelled** — verified via
+a cross-contract call to the configured HuntyCore contract
+(`is_hunt_expired_or_cancelled`). If HuntyCore is not configured, the
+source cannot be shown eligible and migration is rejected.
+* The **destination pool must already exist** (created via
+`create_reward_pool`).
+* **Both pools must have the same creator**, who must authorize the call.
 
 # Arguments
-
-- `creator` - The shared creator of both pools (must authorize the call)
-- `source_hunt_id` - The expired/cancelled hunt to drain
-- `dest_hunt_id` - The destination hunt to credit
+* `creator` - The shared creator of both pools (must authorize the call)
+* `source_hunt_id` - The expired/cancelled hunt to drain
+* `dest_hunt_id` - The destination hunt to credit
 
 # Returns
-
 The amount of XLM migrated from the source pool to the destination pool.
 
 # Errors
-
-- `InvalidMigration` - source and destination are the same hunt, or the
-  source pool has no balance to migrate
-- `PoolNotFound` - the source pool does not exist
-- `DestinationPoolNotFound` - the destination pool does not exist
-- `Unauthorized` - the caller does not own both pools
-- `SourcePoolNotEligible` - the source hunt is neither expired nor cancelled
-- `PoolBalanceOverflow` - crediting the destination would overflow the pool cap
-- `TooManyFunders` - the destination already tracks the maximum number of
-  distinct funders and the creator is not already one of them
+* `InvalidMigration` - source and destination are the same hunt, or the
+source pool has no balance to migrate
+* `PoolNotFound` - the source pool does not exist
+* `DestinationPoolNotFound` - the destination pool does not exist
+* `Unauthorized` - the caller does not own both pools
+* `SourcePoolNotEligible` - the source hunt is neither expired nor cancelled
+* `PoolBalanceOverflow` - crediting the destination would overflow the pool cap
+* `TooManyFunders` - the destination already tracks the maximum number of
+distinct funders and the creator is not already one of them
 
 **Signature:**
 
@@ -7384,7 +8307,6 @@ pub fn get_pool_statistics(env: Env, hunt_id: u64) -> Option<RewardPoolStatistic
 Validates whether a pool can cover a given distribution amount.
 
 Checks that:
-
 - The pool exists (was created via create_reward_pool)
 - The required_amount is positive
 - The pool balance >= required_amount
@@ -7417,14 +8339,12 @@ Can be called by either the pool creator or the contract admin.
 Emits a `PoolFrozenEvent`.
 
 # Arguments
-
-- `caller` - The address calling freeze (must be pool creator or admin)
-- `hunt_id` - The hunt whose pool to freeze
+* `caller` - The address calling freeze (must be pool creator or admin)
+* `hunt_id` - The hunt whose pool to freeze
 
 # Errors
-
-- `PoolNotFound` - No pool exists for this hunt_id
-- `Unauthorized` - Caller is neither the pool creator nor the contract admin
+* `PoolNotFound` - No pool exists for this hunt_id
+* `Unauthorized` - Caller is neither the pool creator nor the contract admin
 
 **Signature:**
 
@@ -7479,14 +8399,12 @@ Can be called by either the pool creator or the contract admin.
 Emits a `PoolUnfrozenEvent`.
 
 # Arguments
-
-- `caller` - The address calling unfreeze (must be pool creator or admin)
-- `hunt_id` - The hunt whose pool to unfreeze
+* `caller` - The address calling unfreeze (must be pool creator or admin)
+* `hunt_id` - The hunt whose pool to unfreeze
 
 # Errors
-
-- `PoolNotFound` - No pool exists for this hunt_id
-- `Unauthorized` - Caller is neither the pool creator nor the contract admin
+* `PoolNotFound` - No pool exists for this hunt_id
+* `Unauthorized` - Caller is neither the pool creator nor the contract admin
 
 **Signature:**
 
@@ -7562,18 +8480,16 @@ a pool in a single day (24-hour rolling window). This is a live operational cont
 and should be validated to prevent silent misconfiguration.
 
 # Arguments
-
-- `admin` - The contract admin address (must match the stored admin)
-- `hunt_id` - The hunt whose pool cap to set
-- `cap` - The maximum amount to distribute per day. Must be positive (> 0).
-  A cap of 0 means no distributions are allowed (use to disable).
+* `admin` - The contract admin address (must match the stored admin)
+* `hunt_id` - The hunt whose pool cap to set
+* `cap` - The maximum amount to distribute per day. Must be positive (> 0).
+A cap of 0 means no distributions are allowed (use to disable).
 
 # Errors
-
-- `NotInitialized` - Contract has not been initialized (no admin set)
-- `Unauthorized` - Caller is not the contract admin
-- `PoolNotFound` - No pool exists for this hunt_id
-- `InvalidAmount` - Cap is negative (negative caps silently block distributions)
+* `NotInitialized` - Contract has not been initialized (no admin set)
+* `Unauthorized` - Caller is not the contract admin
+* `PoolNotFound` - No pool exists for this hunt_id
+* `InvalidAmount` - Cap is negative (negative caps silently block distributions)
 
 **Signature:**
 
@@ -7728,10 +8644,9 @@ fails validation, the entire batch is rejected with no state changes.
 
 The two-phase design (validate-all, execute-all) means callers get a
 simple all-or-nothing contract:
-
 - If the function returns `Ok(())`, every entry was processed.
 - If it returns `Err(_)`, no tokens were moved and no distribution
-  records were created.
+records were created.
 
 # Gas limit consideration
 
@@ -7740,21 +8655,19 @@ transaction within Soroban's per-transaction instruction budget even
 when every entry performs both XLM and NFT operations.
 
 # Arguments
-
-- `distributions` - A `Vec` of `BatchDistributionEntry`, each containing
-  a `hunt_id`, `player_address`, and `reward_config`.
+* `distributions` - A `Vec` of `BatchDistributionEntry`, each containing
+a `hunt_id`, `player_address`, and `reward_config`.
 
 # Errors
-
-- `InvalidConfig` - Batch is empty or an entry has an invalid config.
-- `BatchTooLarge` - Batch exceeds `MAX_BATCH_SIZE`.
-- `AlreadyDistributed` - A player has already received a reward for this hunt.
-- `ReplayDetected` - Distribution nonce inconsistency for an entry.
-- `InsufficientPool` - A pool cannot cover the combined XLM amount for its hunt.
-- `BelowMinimumAmount` - An entry's XLM amount is below the pool's minimum.
-- `PoolNotFound` - No pool exists for an entry's hunt_id.
-- `NotInitialized` - XLM token address not set.
-- `Unauthorized` - Caller is not an authorized contract.
+* `InvalidConfig` - Batch is empty or an entry has an invalid config.
+* `BatchTooLarge` - Batch exceeds `MAX_BATCH_SIZE`.
+* `AlreadyDistributed` - A player has already received a reward for this hunt.
+* `ReplayDetected` - Distribution nonce inconsistency for an entry.
+* `InsufficientPool` - A pool cannot cover the combined XLM amount for its hunt.
+* `BelowMinimumAmount` - An entry's XLM amount is below the pool's minimum.
+* `PoolNotFound` - No pool exists for an entry's hunt_id.
+* `NotInitialized` - XLM token address not set.
+* `Unauthorized` - Caller is not an authorized contract.
 
 **Signature:**
 
@@ -7809,21 +8722,18 @@ and the pending mint data is stored. This function allows the admin to
 retry the failed NFT mint and update the distribution record.
 
 # Arguments
-
-- `admin` - The contract admin address
-- `hunt_id` - The hunt associated with the failed NFT mint
-- `player` - The player who should receive the NFT
+* `admin` - The contract admin address
+* `hunt_id` - The hunt associated with the failed NFT mint
+* `player` - The player who should receive the NFT
 
 # Returns
-
 The NFT ID of the successfully minted NFT
 
 # Errors
-
-- `NotInitialized` - Contract not initialized
-- `Unauthorized` - Caller is not the contract admin
-- `NftMintPendingNotFound` - No pending failed NFT mint for this hunt/player
-- `NftMintFailed` - NFT mint attempt failed again
+* `NotInitialized` - Contract not initialized
+* `Unauthorized` - Caller is not the contract admin
+* `NftMintPendingNotFound` - No pending failed NFT mint for this hunt/player
+* `NftMintFailed` - NFT mint attempt failed again
 
 **Signature:**
 
@@ -7903,11 +8813,10 @@ All new integrations must use `distribute_rewards` instead.
 
 This function wraps `distribute_rewards` and therefore inherits all the same
 security constraints:
-
 - Replays are rejected via the same nonce-based mechanism
 - The ReentrancyGuard is acquired identically
 - `min_distribution_amount` and daily caps are enforced
-- Authorization checks are identical (fail-open by caller)
+- Authorization is fail-closed: the immediate invoker must be an approved contract and the allowlist must not be empty
 
 **Removal timeline:** This function is scheduled for removal in a future major release.
 The exact deprecation timeline will be announced in contract release notes.
@@ -7917,19 +8826,16 @@ The exact deprecation timeline will be announced in contract release notes.
 The legacy path is not a bypass vector.
 
 # Arguments
-
-- `player` - The address receiving the distribution
-- `hunt_id` - The hunt pool to distribute from
-- `xlm_amount` - Token amount to distribute (0 = no token transfer)
-- `_nft_enabled` - Ignored; NFTs are not supported on this path
+* `player` - The address receiving the distribution
+* `hunt_id` - The hunt pool to distribute from
+* `xlm_amount` - Token amount to distribute (0 = no token transfer)
+* `_nft_enabled` - Ignored; NFTs are not supported on this path
 
 # Returns
-
 - `true` if the distribution succeeded
 - `false` if the distribution failed (check the transaction result for the error code)
 
 # Differences from `distribute_rewards`
-
 - Returns `bool` instead of `Result<(), RewardErrorCode>` (loses error detail)
 - Discards `_nft_enabled` parameter (NFTs cannot be distributed)
 - No structured logging of the error
@@ -8043,7 +8949,7 @@ pub fn verify_distribution(env: Env, pool_id: u64, player: Address, amount: i128
 
 Distribute a proportional share of the pool based on player score.
 
-Amount = floor((player_score / total_scores) \* pool_balance).
+Amount = floor((player_score / total_scores) * pool_balance).
 Remainder stays in the pool. Enforces min_distribution_amount when set.
 Requires the pool's distribution_mode to be Proportional (or will still
 compute proportionally when called via this entry point).
@@ -8169,15 +9075,13 @@ Setting this to `0` disables vesting and reverts to instant payouts for
 future distributions (already-pending vesting records are unaffected).
 
 # Arguments
-
-- `creator` - Pool owner (must match stored creator)
-- `hunt_id` - The hunt whose pool to configure
-- `vesting_period_secs` - Vesting duration in seconds (0 = disabled)
+* `creator` - Pool owner (must match stored creator)
+* `hunt_id` - The hunt whose pool to configure
+* `vesting_period_secs` - Vesting duration in seconds (0 = disabled)
 
 # Errors
-
-- `PoolNotFound` - Pool does not exist
-- `Unauthorized` - Caller is not the pool creator
+* `PoolNotFound` - Pool does not exist
+* `Unauthorized` - Caller is not the pool creator
 
 **Signature:**
 
@@ -8236,20 +9140,17 @@ Each call transfers whatever has newly vested since the last claim.
 Once `claimed_amount == total_amount` the schedule is fully exhausted.
 
 # Arguments
-
-- `player` - The player claiming their vested reward
-- `hunt_id` - The hunt whose vesting record to claim from
+* `player` - The player claiming their vested reward
+* `hunt_id` - The hunt whose vesting record to claim from
 
 # Returns
-
 The XLM amount (in stroops) transferred to the player.
 
 # Errors
-
-- `VestingNotStarted` - No vesting record exists for this (hunt_id, player)
-- `VestingAlreadyClaimed` - Full vesting amount has already been claimed
-- `NothingToVest` - Nothing has vested yet at the current timestamp
-- `InsufficientPool` - Contract token balance is too low (should not normally occur)
+* `VestingNotStarted` - No vesting record exists for this (hunt_id, player)
+* `VestingAlreadyClaimed` - Full vesting amount has already been claimed
+* `NothingToVest` - Nothing has vested yet at the current timestamp
+* `InsufficientPool` - Contract token balance is too low (should not normally occur)
 
 **Signature:**
 
@@ -8329,17 +9230,15 @@ or `Refunded` when the automatic distribution process could not finish
 operation and does not move funds.
 
 # Arguments
-
-- `admin` - The contract admin address (must match the stored admin)
-- `hunt_id` - The hunt whose distribution to resolve
-- `player` - The player whose distribution to resolve
-- `resolution` - Outcome: `ResolutionStatus::Completed` or `ResolutionStatus::Refunded`
+* `admin` - The contract admin address (must match the stored admin)
+* `hunt_id` - The hunt whose distribution to resolve
+* `player` - The player whose distribution to resolve
+* `resolution` - Outcome: `ResolutionStatus::Completed` or `ResolutionStatus::Refunded`
 
 # Errors
-
-- `NotInitialized` - Contract has not been initialized (no admin set)
-- `Unauthorized` - Caller is not the contract admin
-- `DistributionNotFound` - No distribution record exists for this hunt/player
+* `NotInitialized` - Contract has not been initialized (no admin set)
+* `Unauthorized` - Caller is not the contract admin
+* `DistributionNotFound` - No distribution record exists for this hunt/player
 
 **Signature:**
 
@@ -8393,13 +9292,11 @@ pub fn admin_resolve_distribution(env: Env, admin: Address, hunt_id: u64, player
 Returns a paginated list of distributions made from a specific reward pool.
 
 # Arguments
-
-- `hunt_id` - The hunt whose pool distributions to query
-- `offset` - Starting index for pagination (0-based)
-- `limit` - Maximum number of entries to return
+* `hunt_id` - The hunt whose pool distributions to query
+* `offset` - Starting index for pagination (0-based)
+* `limit` - Maximum number of entries to return
 
 # Returns
-
 A Vec of PoolDistribution entries containing player addresses and distribution details.
 Returns an empty Vec if the pool has no distributions or offset is beyond the list.
 
@@ -8425,11 +9322,9 @@ pub fn get_pool_distributions(env: Env, hunt_id: u64, offset: u32, limit: u32) -
 Returns the total count of distributions made from a specific reward pool.
 
 # Arguments
-
-- `hunt_id` - The hunt whose pool distribution count to query
+* `hunt_id` - The hunt whose pool distribution count to query
 
 # Returns
-
 The total number of distributions for the pool.
 
 **Signature:**
@@ -8460,13 +9355,11 @@ distributions are processed. If the pool has more entries than this limit,
 only the most recent entries (up to the limit) are analysed.
 
 # Arguments
-
-- `hunt_id` - The hunt whose pool analytics to query
-- `start_time` - Optional lower bound (inclusive) ledger timestamp filter
-- `end_time` - Optional upper bound (exclusive) ledger timestamp filter
+* `hunt_id` - The hunt whose pool analytics to query
+* `start_time` - Optional lower bound (inclusive) ledger timestamp filter
+* `end_time` - Optional upper bound (exclusive) ledger timestamp filter
 
 # Returns
-
 A `DistributionAnalytics` struct with count, total, average, median, min, max.
 All fields are zero when the pool has no distributions or no entries match
 the time filter.
@@ -8501,19 +9394,17 @@ cancelled. This prevents draining pools while a hunt is active and players may
 still be mid-game. When HuntyCore is configured, the hunt status is verified.
 
 # Arguments
-
-- `admin` - The contract admin address (must match the stored admin)
-- `hunt_id` - The hunt whose remaining pool balance to withdraw
-- `recipient` - The address that will receive the withdrawn XLM
-- `amount` - The amount to withdraw. Must be positive (> 0).
+* `admin` - The contract admin address (must match the stored admin)
+* `hunt_id` - The hunt whose remaining pool balance to withdraw
+* `recipient` - The address that will receive the withdrawn XLM
+* `amount` - The amount to withdraw. Must be positive (> 0).
 
 # Errors
-
-- `NotInitialized` - Contract has not been initialized (no admin set)
-- `Unauthorized` - Caller is not the contract admin
-- `PoolNotFound` - No pool exists for this hunt_id
-- `InvalidAmount` - Amount is <= 0, or exceeds the available pool balance
-- `SourcePoolNotEligible` - Hunt is still active (not ended or cancelled)
+* `NotInitialized` - Contract has not been initialized (no admin set)
+* `Unauthorized` - Caller is not the contract admin
+* `PoolNotFound` - No pool exists for this hunt_id
+* `InvalidAmount` - Amount is <= 0, or exceeds the available pool balance
+* `SourcePoolNotEligible` - Hunt is still active (not ended or cancelled)
 
 **Signature:**
 
@@ -8575,18 +9466,16 @@ cancelled. This prevents draining pools while a hunt is active and players may
 still be mid-game. When HuntyCore is configured, the hunt status is verified.
 
 # Arguments
-
-- `admin` - The contract admin address (must match the stored admin)
-- `hunt_id` - The hunt whose pool to drain completely
-- `recipient` - The address that will receive the full pool balance
+* `admin` - The contract admin address (must match the stored admin)
+* `hunt_id` - The hunt whose pool to drain completely
+* `recipient` - The address that will receive the full pool balance
 
 # Errors
-
-- `NotInitialized` - Contract has not been initialized (no admin set)
-- `Unauthorized` - Caller is not the contract admin
-- `PoolNotFound` - No pool exists for this hunt_id
-- `InvalidAmount` - Pool balance is zero (nothing to withdraw)
-- `SourcePoolNotEligible` - Hunt is still active (not ended or cancelled)
+* `NotInitialized` - Contract has not been initialized (no admin set)
+* `Unauthorized` - Caller is not the contract admin
+* `PoolNotFound` - No pool exists for this hunt_id
+* `InvalidAmount` - Pool balance is zero (nothing to withdraw)
+* `SourcePoolNotEligible` - Hunt is still active (not ended or cancelled)
 
 **Signature:**
 
@@ -8947,7 +9836,7 @@ pub fn unpause_distribution(env: Env, admin: Address) -> Result<(), RewardErrorC
 
 Effective pause state as `(global, funding, distribution)`.
 
-The two granular values are the _effective_ ones, so they read `true`
+The two granular values are the *effective* ones, so they read `true`
 whenever the global stop is engaged. Mirrors `HuntyCore::get_pause_state`.
 
 **Signature:**
@@ -8993,18 +9882,16 @@ When `hunt_id` is 0, all pools with non-zero balances are drained.
 When `all_pools` is true, iterates all hunts up to `max_hunt_id` and withdraws.
 
 # Arguments
-
-- `admin` - The contract admin address
-- `hunt_id` - Specific hunt pool to drain (0 = all pools up to max_hunt_id)
-- `recipient` - Address to receive the withdrawn funds
-- `reason` - Reason for the emergency withdrawal (emitted in events)
-- `max_hunt_id` - When hunt_id is 0, drains all pools from 1..=max_hunt_id
+* `admin` - The contract admin address
+* `hunt_id` - Specific hunt pool to drain (0 = all pools up to max_hunt_id)
+* `recipient` - Address to receive the withdrawn funds
+* `reason` - Reason for the emergency withdrawal (emitted in events)
+* `max_hunt_id` - When hunt_id is 0, drains all pools from 1..=max_hunt_id
 
 # Errors
-
-- `NotInitialized` - Contract not initialized
-- `Unauthorized` - Caller is not admin
-- `ContractPaused` - Contract must be paused to call this
+* `NotInitialized` - Contract not initialized
+* `Unauthorized` - Caller is not admin
+* `ContractPaused` - Contract must be paused to call this
 
 **Signature:**
 
@@ -9417,6 +10304,7 @@ pub fn get_pool_audit_log(env: Env, hunt_id: u64, start_after: Option<u64>, limi
 - `InvalidExtensionValue` = 17
 - `ExtensionNotFound` = 18
 - `InvalidMaxSupply` = 19
+- `InvalidRoyalty` = 20
 
 ## `RewardErrorCode`
 

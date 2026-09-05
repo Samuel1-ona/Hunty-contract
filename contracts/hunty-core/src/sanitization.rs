@@ -23,26 +23,21 @@ pub struct StringSanitizer;
 
 impl StringSanitizer {
     /// Validates UTF-8, rejects disallowed control characters, and enforces a byte limit.
-    ///
-    /// # Errors
-    ///
-    /// - [`SanitizeError::LimitTooLarge`] — `max_bytes` exceeds [`SANITIZE_STACK_CAP`]
-    ///   (misconfiguration; not a user-input length failure).
-    /// - [`SanitizeError::ExceedsMaxBytes`] — input is longer than `max_bytes`.
-    /// - [`SanitizeError::Empty`] — empty input when `allow_empty` is false.
-    /// - [`SanitizeError::InvalidUtf8`] / [`SanitizeError::ControlCharacter`] — content rules.
-    pub fn sanitize(
+    pub fn sanitize<const MAX_BYTES: u32>(
+        env: &Env,
+        input: &String,
+        allow_empty: bool,
+    ) -> Result<String, SanitizeError> {
+        Self::sanitize_runtime(env, input, MAX_BYTES, allow_empty)
+    }
+
+    pub fn sanitize_runtime(
         env: &Env,
         input: &String,
         max_bytes: u32,
         allow_empty: bool,
     ) -> Result<String, SanitizeError> {
         // Distinguish programming errors (limit > stack CAP) from oversized user input.
-        debug_assert!(
-            (max_bytes as usize) <= SANITIZE_STACK_CAP,
-            "max_bytes must be <= SANITIZE_STACK_CAP ({})",
-            SANITIZE_STACK_CAP
-        );
         if (max_bytes as usize) > SANITIZE_STACK_CAP {
             return Err(SanitizeError::LimitTooLarge);
         }
@@ -150,7 +145,7 @@ mod test {
     fn test_sanitize_rejects_control_characters() {
         let env = Env::default();
         let input = String::from_str(&env, "hello\x07world");
-        let result = StringSanitizer::sanitize(&env, &input, 100, false);
+        let result = StringSanitizer::sanitize_runtime(&env, &input, 100, false);
         assert_eq!(result, Err(SanitizeError::ControlCharacter));
     }
 
@@ -159,7 +154,7 @@ mod test {
         let env = Env::default();
         let input = String::from_str(&env, " ");
 
-        let result = StringSanitizer::sanitize(&env, &input, 200, false);
+        let result = StringSanitizer::sanitize_runtime(&env, &input, 200, false);
 
         assert_eq!(result, Err(SanitizeError::Empty));
     }
@@ -169,7 +164,7 @@ mod test {
         let env = Env::default();
         let input = String::from_str(&env, " hi ");
 
-        let result = StringSanitizer::sanitize(&env, &input, 200, false);
+        let result = StringSanitizer::sanitize_runtime(&env, &input, 200, false);
 
         assert_eq!(result, Ok(String::from_str(&env, "hi")));
     }
@@ -178,7 +173,7 @@ mod test {
     fn test_sanitize_enforces_byte_limit() {
         let env = Env::default();
         let input = String::from_str(&env, &"a".repeat(201));
-        let result = StringSanitizer::sanitize(&env, &input, 200, false);
+        let result = StringSanitizer::sanitize_runtime(&env, &input, 200, false);
         assert_eq!(result, Err(SanitizeError::ExceedsMaxBytes));
     }
 
@@ -186,7 +181,7 @@ mod test {
     fn test_sanitize_allows_whitespace_controls() {
         let env = Env::default();
         let input = String::from_str(&env, "line\nbreak");
-        let result = StringSanitizer::sanitize(&env, &input, 100, false);
+        let result = StringSanitizer::sanitize_runtime(&env, &input, 100, false);
         assert!(result.is_ok());
     }
 
@@ -195,7 +190,7 @@ mod test {
         let env = Env::default();
         let input = String::from_str(&env, "ok");
         let over = (SANITIZE_STACK_CAP as u32).saturating_add(1);
-        let result = StringSanitizer::sanitize(&env, &input, over, false);
+        let result = StringSanitizer::sanitize_runtime(&env, &input, over, false);
         assert_eq!(result, Err(SanitizeError::LimitTooLarge));
     }
 
@@ -203,7 +198,7 @@ mod test {
     fn test_input_over_max_bytes_is_exceeds_not_limit_too_large() {
         let env = Env::default();
         let input = String::from_str(&env, &"a".repeat(50));
-        let result = StringSanitizer::sanitize(&env, &input, 40, false);
+        let result = StringSanitizer::sanitize_runtime(&env, &input, 40, false);
         assert_eq!(result, Err(SanitizeError::ExceedsMaxBytes));
     }
 }

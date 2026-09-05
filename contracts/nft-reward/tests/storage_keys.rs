@@ -72,7 +72,7 @@ fn mint_transferable(
         metadata.hunt_title.clone().into_val(env),
     );
     map.set(Symbol::new(env, "transferable"), true.into_val(env));
-    client.mint_reward_nft_from_map(minter, &hunt_id, owner, &map).unwrap()
+    client.mint_reward_nft_from_map(minter, &hunt_id, owner, &map)
 }
 
 #[test]

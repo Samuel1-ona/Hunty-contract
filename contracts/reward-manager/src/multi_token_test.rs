@@ -26,9 +26,16 @@ fn test_create_pool_with_xlm_token() {
     let creator = Address::generate(&env);
     let (xlm_token, _xlm_admin) = create_mock_token(&env);
 
+    let hunty_core = Address::generate(&env);
     env.as_contract(&contract_id, || {
         // Initialize with XLM token
-        RewardManager::initialize(env.clone(), admin.clone(), xlm_token.clone()).unwrap();
+        RewardManager::initialize(
+            env.clone(),
+            admin.clone(),
+            xlm_token.clone(),
+            hunty_core.clone(),
+        )
+        .unwrap();
 
         // Create pool with XLM token. Zero-minimum pools are NFT-only pools
         // and must declare an NFT contract address.
@@ -39,6 +46,8 @@ fn test_create_pool_with_xlm_token() {
             xlm_token.clone(),
             0,
             Some(Address::generate(&env)),
+            0,
+            true,
         );
 
         assert!(result.is_ok());
@@ -61,9 +70,11 @@ fn test_create_pool_with_usdc_token() {
     let (xlm_token, _xlm_admin) = create_mock_token(&env);
     let (usdc_token, _usdc_admin) = create_mock_token(&env); // Different token (e.g., USDC)
 
+    let hunty_core = Address::generate(&env);
     env.as_contract(&contract_id, || {
         // Initialize with XLM token (still needed for backward compatibility)
-        RewardManager::initialize(env.clone(), admin.clone(), xlm_token.clone()).unwrap();
+        RewardManager::initialize(env.clone(), admin.clone(), xlm_token.clone(), hunty_core)
+            .unwrap();
 
         // Create pool with USDC token. Zero-minimum pools are NFT-only pools
         // and must declare an NFT contract address.
@@ -74,6 +85,8 @@ fn test_create_pool_with_usdc_token() {
             usdc_token.clone(),
             0,
             Some(Address::generate(&env)),
+            0,
+            true,
         );
 
         assert!(result.is_ok());
@@ -96,8 +109,10 @@ fn test_create_multiple_pools_with_different_tokens() {
     let (usdc_token, _usdc_admin) = create_mock_token(&env);
     let (eurc_token, _eurc_admin) = create_mock_token(&env);
 
+    let hunty_core = Address::generate(&env);
     env.as_contract(&contract_id, || {
-        RewardManager::initialize(env.clone(), admin.clone(), xlm_token.clone()).unwrap();
+        RewardManager::initialize(env.clone(), admin.clone(), xlm_token.clone(), hunty_core)
+            .unwrap();
 
         // Create pool 1 with XLM
         RewardManager::create_reward_pool_with_nft(
@@ -107,6 +122,8 @@ fn test_create_multiple_pools_with_different_tokens() {
             xlm_token.clone(),
             0,
             Some(Address::generate(&env)),
+            0,
+            true,
         )
         .unwrap();
 
@@ -118,6 +135,8 @@ fn test_create_multiple_pools_with_different_tokens() {
             usdc_token.clone(),
             0,
             Some(Address::generate(&env)),
+            0,
+            true,
         )
         .unwrap();
 
@@ -129,6 +148,8 @@ fn test_create_multiple_pools_with_different_tokens() {
             eurc_token.clone(),
             0,
             Some(Address::generate(&env)),
+            0,
+            true,
         )
         .unwrap();
 
@@ -155,12 +176,21 @@ fn test_invalid_token_contract_rejected() {
     let (xlm_token, _xlm_admin) = create_mock_token(&env);
     let invalid_token = Address::generate(&env); // Not a token contract
 
+    let hunty_core = Address::generate(&env);
     env.as_contract(&contract_id, || {
-        RewardManager::initialize(env.clone(), admin.clone(), xlm_token.clone()).unwrap();
+        RewardManager::initialize(env.clone(), admin.clone(), xlm_token.clone(), hunty_core)
+            .unwrap();
 
         // Try to create pool with invalid token contract
-        let result =
-            RewardManager::create_reward_pool(env.clone(), creator.clone(), 1, invalid_token, 1);
+        let result = RewardManager::create_reward_pool(
+            env.clone(),
+            creator.clone(),
+            1,
+            invalid_token,
+            1,
+            0,
+            true,
+        );
 
         // Should fail with InvalidTokenContract error
         assert_eq!(result, Err(RewardErrorCode::InvalidTokenContract));
@@ -181,8 +211,10 @@ fn test_fund_pool_uses_correct_token() {
     // The creator needs a USDC balance before the pool can be funded.
     mint_tokens(&env, &usdc_token, &creator, 50_000_000);
 
+    let hunty_core = Address::generate(&env);
     env.as_contract(&contract_id, || {
-        RewardManager::initialize(env.clone(), admin.clone(), xlm_token.clone()).unwrap();
+        RewardManager::initialize(env.clone(), admin.clone(), xlm_token.clone(), hunty_core)
+            .unwrap();
 
         // Create pool with USDC
         RewardManager::create_reward_pool_with_nft(
@@ -192,6 +224,8 @@ fn test_fund_pool_uses_correct_token() {
             usdc_token.clone(),
             0,
             Some(Address::generate(&env)),
+            0,
+            true,
         )
         .unwrap();
 
@@ -223,8 +257,10 @@ fn test_distribute_rewards_uses_pool_token() {
     // The creator needs a USDC balance before the pool can be funded.
     mint_tokens(&env, &usdc_token, &creator, 100_000_000);
 
+    let hunty_core = Address::generate(&env);
     env.as_contract(&contract_id, || {
-        RewardManager::initialize(env.clone(), admin.clone(), xlm_token.clone()).unwrap();
+        RewardManager::initialize(env.clone(), admin.clone(), xlm_token.clone(), hunty_core)
+            .unwrap();
 
         // Create pool with USDC
         RewardManager::create_reward_pool_with_nft(
@@ -234,6 +270,8 @@ fn test_distribute_rewards_uses_pool_token() {
             usdc_token.clone(),
             0,
             Some(Address::generate(&env)),
+            0,
+            true,
         )
         .unwrap();
 
@@ -279,8 +317,10 @@ fn test_refund_pool_uses_correct_token() {
     // The creator needs a USDC balance before the pool can be funded.
     mint_tokens(&env, &usdc_token, &creator, 50_000_000);
 
+    let hunty_core = Address::generate(&env);
     env.as_contract(&contract_id, || {
-        RewardManager::initialize(env.clone(), admin.clone(), xlm_token.clone()).unwrap();
+        RewardManager::initialize(env.clone(), admin.clone(), xlm_token.clone(), hunty_core)
+            .unwrap();
 
         // Create and fund pool with USDC
         RewardManager::create_reward_pool_with_nft(
@@ -290,6 +330,8 @@ fn test_refund_pool_uses_correct_token() {
             usdc_token.clone(),
             0,
             Some(Address::generate(&env)),
+            0,
+            true,
         )
         .unwrap();
 
