@@ -160,7 +160,7 @@ def gather_contract_data() -> Dict[str, Dict[str, object]]:
             'errors': {},
         }
         for rust_file in sorted(src_dir.glob('*.rs')):
-            text = rust_file.read_text()
+            text = rust_file.read_text(encoding='utf-8')
             enums = parse_error_enums(text)
             for key, variants in enums.items():
                 if key not in error_enums:
@@ -244,7 +244,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     data = gather_contract_data()
     markdown = render_markdown(data)
     output_path = Path(args.output)
-    output_path.write_text(markdown)
+    output_path.write_text(markdown, encoding='utf-8')
     print(f'Generated API docs: {output_path}')
     return 0
 

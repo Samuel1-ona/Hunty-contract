@@ -32,8 +32,9 @@ fn setup() -> Fixture {
     let stranger = Address::generate(&env);
     let xlm_token = Address::generate(&env);
 
+    let hunty_core = Address::generate(&env);
     env.as_contract(&contract_id, || {
-        RewardManager::initialize(env.clone(), admin.clone(), xlm_token).unwrap();
+        RewardManager::initialize(env.clone(), admin.clone(), xlm_token, hunty_core).unwrap();
     });
 
     Fixture {

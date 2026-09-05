@@ -81,6 +81,7 @@ A CI/script check (`scripts/ci/check_storage_keys_doc.sh`) asserts that every
 | `FAILURES_KEY` | `FAILCT` |
 | `GAS_UNITS_KEY` | `GASUN` |
 | `ALERTS_KEY` | `ALERT` |
+| `ALERT_MAP_KEY` | `ALERTMAP` |
 
 ---
 
