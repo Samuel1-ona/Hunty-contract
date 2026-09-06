@@ -91,6 +91,7 @@ sequenceDiagram
 - Answers are hashed using SHA256 before storage - this keeps them secret until someone solves them
 - Only the creator can add clues and activate the hunt
 - Once active, players can register and start playing
+- In `create_hunt`, `max_submissions_per_minute = 0` is the `UNLIMITED_SUBMISSIONS_PER_MINUTE` sentinel and means **unlimited submissions**; pass `1` or higher to enforce a per-minute rate limit.
 
 #### Playing a Hunt
 

@@ -48,12 +48,7 @@ impl StringSanitizer {
         }
 
         let byte_len = input.len();
-        if byte_len == 0 {
-            if allow_empty {
-                return Ok(String::from_str(env, ""));
-            }
-            return Err(SanitizeError::Empty);
-        }
+
         if byte_len > max_bytes {
             return Err(SanitizeError::ExceedsMaxBytes);
         }
@@ -73,10 +68,32 @@ impl StringSanitizer {
             }
         }
 
-        Ok(String::from_bytes(env, &buf[..len]))
+        let mut start = 0;
+        let mut end = len;
+
+        while start < end && is_ascii_whitespace(buf[start]) {
+            start += 1;
+        }
+
+        while end > start && is_ascii_whitespace(buf[end - 1]) {
+            end -= 1;
+        }
+
+        if start == end {
+            if allow_empty {
+                return Ok(String::from_str(env, ""));
+            }
+
+            return Err(SanitizeError::Empty);
+        }
+
+        Ok(String::from_bytes(env, &buf[start..end]))
     }
 }
 
+fn is_ascii_whitespace(b: u8) -> bool {
+    matches!(b, b' ' | b'\t' | b'\n' | b'\r')
+}
 fn is_disallowed_control(b: u8) -> bool {
     b < 0x20 && b != b'\t' && b != b'\n' && b != b'\r'
 }
@@ -135,6 +152,26 @@ mod test {
         let input = String::from_str(&env, "hello\x07world");
         let result = StringSanitizer::sanitize(&env, &input, 100, false);
         assert_eq!(result, Err(SanitizeError::ControlCharacter));
+    }
+
+    #[test]
+    fn test_sanitize_rejects_whitespace_only() {
+        let env = Env::default();
+        let input = String::from_str(&env, " ");
+
+        let result = StringSanitizer::sanitize(&env, &input, 200, false);
+
+        assert_eq!(result, Err(SanitizeError::Empty));
+    }
+
+    #[test]
+    fn test_sanitize_trims_ascii_whitespace() {
+        let env = Env::default();
+        let input = String::from_str(&env, " hi ");
+
+        let result = StringSanitizer::sanitize(&env, &input, 200, false);
+
+        assert_eq!(result, Ok(String::from_str(&env, "hi")));
     }
 
     #[test]

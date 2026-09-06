@@ -19,6 +19,11 @@ const MAX_EXTENSION_VALUE_BYTES: u32 = 512;
 /// (200). `MAX_BATCH_SIZE` (50) is the tighter write-batch cap used elsewhere;
 /// 200 is the read-scan cap so listing stays inside a similar gas budget.
 const MAX_SCAN_LIMIT: u32 = 200;
+/// Maximum royalty in basis points (10,000 bp = 100%).
+/// Royalty values above this ceiling would make NFTs unsellable on marketplaces,
+/// as the payout calculation would underflow or the sale would be rejected.
+/// A policy ceiling nearer 1,000 (10%) is typical for most NFT collections.
+const MAX_ROYALTY_BPS: u32 = 10_000;
 
 /// Core display metadata for an NFT (title, description, image URI).
 /// Supports off-chain storage references to keep gas costs low.
@@ -539,30 +544,16 @@ impl NftReward {
         Ok(())
     }
 
-    /// no_std-safe u64 → decimal-as-bytes conversion (avoids `format!`,
-    /// which is unavailable in the contract's no_std profile).
-    fn u64_to_bytes(env: &Env, mut n: u64) -> Bytes {
-        let mut buf = [0u8; 20];
-        let mut i = 20;
-        if n == 0 {
-            buf[19] = b'0';
-            i = 19;
-        } else {
-            while n > 0 {
-                i -= 1;
-                buf[i] = b'0' + (n % 10) as u8;
-                n /= 10;
+    fn validate_royalty_bps(
+        _env: &Env,
+        royalty_bps: Option<u32>,
+    ) -> Result<(), NftErrorCode> {
+        if let Some(bps) = royalty_bps {
+            if bps > MAX_ROYALTY_BPS {
+                return Err(NftErrorCode::InvalidRoyalty);
             }
         }
-        Bytes::from_slice(env, &buf[i..])
-    }
-
-    fn collection_stats_string(env: &Env, total_supply: u64) -> String {
-        let mut b = Bytes::new(env);
-        b.append(&Bytes::from_slice(env, b"total_supply="));
-        b.append(&Self::u64_to_bytes(env, total_supply));
-        b.append(&Bytes::from_slice(env, b",total_hunts=0,total_owners=0"));
-        b.to_string()
+        Ok(())
     }
 
     fn mint_reward_nft_impl(
@@ -582,6 +573,11 @@ impl NftReward {
 
         // Validate extensions
         if let Err(e) = Self::validate_extensions(&env, &metadata.extensions) {
+            panic_with_error!(&env, e);
+        }
+
+        // Validate royalty_bps
+        if let Err(e) = Self::validate_royalty_bps(&env, metadata.royalty_bps) {
             panic_with_error!(&env, e);
         }
 

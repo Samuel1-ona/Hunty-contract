@@ -1,9 +1,28 @@
-use soroban_sdk::{symbol_short, Address, Env, Vec};
+use soroban_sdk::{contracttype, symbol_short, Address, Env, Vec};
 
 use crate::types::{
-    DistributionProof, DistributionRecord, PoolAuditEntry, PoolDistribution, ResolutionStatus,
-    RewardPoolConfig, VestingRecord,
+    DistributionProof, DistributionRecord, PoolDistribution, ResolutionStatus, RewardPoolConfig,
+    VestingRecord,
 };
+
+#[contracttype]
+#[derive(Clone, Debug, PartialEq)]
+pub enum PoolOperation {
+    Create,
+    Fund,
+    Distribute,
+    Refund,
+    Withdraw,
+}
+
+#[contracttype]
+#[derive(Clone, Debug, PartialEq)]
+pub struct PoolAuditEntry {
+    pub operation: PoolOperation,
+    pub actor: Address,
+    pub amount: i128,
+    pub timestamp: u64,
+}
 
 pub struct Storage;
 
