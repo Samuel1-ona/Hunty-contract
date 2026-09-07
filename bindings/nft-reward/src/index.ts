@@ -155,25 +155,25 @@ export interface AdminImageUrisUpdatedEvent {
 }
 
 export const NftErrorCode = {
-  1: {message:"NftNotFound"},
-  2: {message:"Unauthorized"},
-  3: {message:"NotOwner"},
-  4: {message:"InvalidRecipient"},
-  5: {message:"SoulboundNft"},
-  6: {message:"InvalidRarity"},
-  7: {message:"AlreadyInitialized"},
-  8: {message:"MaxSupplyReached"},
-  9: {message:"NotInitialized"},
-  10: {message:"NotOperator"},
-  11: {message:"NftNotTransferable"},
-  12: {message:"NftLocked"},
-  13: {message:"InvalidMetadata"},
-  14: {message:"MetadataFrozen"},
-  15: {message:"TooManyExtensions"},
-  16: {message:"InvalidExtensionKey"},
-  17: {message:"InvalidExtensionValue"},
-  18: {message:"ExtensionNotFound"},
-  19: {message:"InvalidMaxSupply"}
+  3001: {message:"NftNotFound"},
+  3002: {message:"Unauthorized"},
+  3003: {message:"NotOwner"},
+  3004: {message:"InvalidRecipient"},
+  3005: {message:"SoulboundNft"},
+  3006: {message:"InvalidRarity"},
+  3007: {message:"AlreadyInitialized"},
+  3008: {message:"MaxSupplyReached"},
+  3009: {message:"NotInitialized"},
+  3010: {message:"NotOperator"},
+  3011: {message:"NftNotTransferable"},
+  3012: {message:"NftLocked"},
+  3013: {message:"InvalidMetadata"},
+  3014: {message:"MetadataFrozen"},
+  3015: {message:"TooManyExtensions"},
+  3016: {message:"InvalidExtensionKey"},
+  3017: {message:"InvalidExtensionValue"},
+  3018: {message:"ExtensionNotFound"},
+  3019: {message:"InvalidMaxSupply"}
 }
 
 

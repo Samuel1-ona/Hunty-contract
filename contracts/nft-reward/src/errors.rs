@@ -1,5 +1,10 @@
 use soroban_sdk::contracterror;
 
+// NAMESPACE: nft-reward error codes occupy the range 3001–3999.
+//   hunty-core      uses 1001–1999 (see contracts/hunty-core/src/errors.rs).
+//   reward-manager  uses 2001–2999 (see contracts/reward-manager/src/errors.rs).
+// Keeping ranges disjoint means a numeric code in a transaction envelope is
+// unambiguous regardless of which contract frame produced it.
 #[contracterror]
 #[derive(Clone, Copy, Debug, Eq, PartialEq, PartialOrd, Ord)]
 #[repr(u32)]
