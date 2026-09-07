@@ -11,6 +11,11 @@ impl Storage {
     const NFT_CORE_KEY: soroban_sdk::Symbol = symbol_short!("NC");
     const NFT_META_KEY: soroban_sdk::Symbol = symbol_short!("NM");
     const NFT_COUNTER_KEY: soroban_sdk::Symbol = symbol_short!("CN");
+    /// Currently-live NFT count: incremented on mint, decremented on burn.
+    /// Distinct from `NFT_COUNTER_KEY`, which is the monotonic lifetime
+    /// mint counter (also used to allocate IDs and to enforce `max_supply`
+    /// against ever-minted count) and never decreases.
+    const LIVE_SUPPLY_KEY: soroban_sdk::Symbol = symbol_short!("LIVES");
     const OWNER_NFT_COUNT_KEY: soroban_sdk::Symbol = symbol_short!("ONFC");
     const MAX_SUPPLY_KEY: soroban_sdk::Symbol = symbol_short!("MAXS");
     const INITIALIZED_KEY: soroban_sdk::Symbol = symbol_short!("INIT");
@@ -291,6 +296,31 @@ impl Storage {
             .persistent()
             .get(&Self::NFT_COUNTER_KEY)
             .unwrap_or(0)
+    }
+
+    /// Number of NFTs that currently exist (minted minus burned).
+    pub fn get_live_supply(env: &Env) -> u64 {
+        env.storage()
+            .persistent()
+            .get(&Self::LIVE_SUPPLY_KEY)
+            .unwrap_or(0)
+    }
+
+    /// Increments the live-supply counter. Call once per successful mint.
+    pub fn increment_live_supply(env: &Env) {
+        let current = Self::get_live_supply(env);
+        env.storage()
+            .persistent()
+            .set(&Self::LIVE_SUPPLY_KEY, &(current + 1));
+    }
+
+    /// Decrements the live-supply counter. Call once per successful burn.
+    /// Saturating: never underflows even if called out of sync.
+    pub fn decrement_live_supply(env: &Env) {
+        let current = Self::get_live_supply(env);
+        env.storage()
+            .persistent()
+            .set(&Self::LIVE_SUPPLY_KEY, &current.saturating_sub(1));
     }
 
     pub fn get_nft_count_for_hunt(env: &Env, hunt_id: u64) -> u64 {
