@@ -57,8 +57,8 @@ const MAX_LEADERBOARD_SCAN_SIZE: u32 = 200;
 const MAX_BATCH_SIZE: u32 = 50;
 /// Maximum hunt records scanned by discovery queries in one invocation.
 const MAX_HUNT_SEARCH_SCAN_SIZE: u32 = 200;
-/// Default page size for paginated queries.
-#[allow(dead_code)]
+/// Default page size for paginated queries. Used when a caller passes `0`
+/// for `limit`/`page_size`, which would otherwise return an empty vector.
 const DEFAULT_PAGE_SIZE: u32 = 20;
 /// Maximum allowed age for a submission envelope before it is considered stale.
 pub(crate) const ANSWER_SUBMISSION_WINDOW_SECS: u64 = 300;
@@ -151,10 +151,10 @@ impl HuntyCore {
     /// * `creator` - The address of the hunt creator (typically use env.invoker() from the caller)
     /// * `title` - The title of the hunt (max 200 characters)
     /// * `description` - The description of the hunt (max 2000 characters)
-    /// * `start_time` - Optional start timestamp. When set, players cannot register
-    ///   or submit answers until the ledger timestamp reaches this value. 0 means
-    ///   no start time restriction (immediately playable once activated).
-    /// * `end_time` - Optional end timestamp (0 means no end time restriction)
+    /// * `start_time` - Optional start timestamp (0 or None means no start time restriction).
+    ///   When set, players cannot register or submit answers until the ledger timestamp
+    ///   reaches this value. Must be strictly less than `end_time` if `end_time` is also set.
+    /// * `end_time` - Optional end timestamp (0 or None means no end time restriction)
     /// * `max_submissions_per_minute` - Maximum number of submissions allowed per
     ///   minute per player. [`UNLIMITED_SUBMISSIONS_PER_MINUTE`] (0) means no limit.
     ///
@@ -200,8 +200,12 @@ impl HuntyCore {
         let current_time = env.ledger().timestamp();
         rate_limit::RateLimiter::check_and_increment(&env, &creator, current_time)?;
 
+        let start_time_val = start_time.unwrap_or(0);
         let end_time_val = end_time.unwrap_or(0);
         if end_time_val != 0 && end_time_val < current_time.saturating_add(MIN_HUNT_DURATION) {
+            return Err(HuntErrorCode::HuntEndTimeInPast);
+        }
+        if start_time_val != 0 && end_time_val != 0 && start_time_val >= end_time_val {
             return Err(HuntErrorCode::HuntEndTimeInPast);
         }
 
@@ -238,7 +242,7 @@ impl HuntyCore {
             status: HuntStatus::Draft,
             created_at: current_time,
             activated_at: 0, // Will be set when hunt is activated
-            start_time: start_time.unwrap_or(0),
+            start_time: start_time_val,
             end_time: end_time_val,
             reward_config,
             time_bonus_start_bps: None,
@@ -772,7 +776,9 @@ impl HuntyCore {
     }
 
     /// Returns paginated clues for a hunt. Answer hashes are not exposed.
+    /// A `limit` of `0` defaults to `DEFAULT_PAGE_SIZE`.
     pub fn list_clues(env: Env, hunt_id: u64, offset: u32, limit: u32) -> Vec<ClueInfo> {
+        let limit = if limit == 0 { DEFAULT_PAGE_SIZE } else { limit };
         let raw = Storage::list_clues_for_hunt(&env, hunt_id, offset, limit.min(MAX_BATCH_SIZE));
         let mut out = Vec::new(&env);
         let limit = core::cmp::min(raw.len(), MAX_BATCH_SIZE);
@@ -794,7 +800,9 @@ impl HuntyCore {
     }
 
     /// Returns a list of all hunts (paginated).
+    /// A `limit` of `0` defaults to `DEFAULT_PAGE_SIZE`.
     pub fn list_hunts(env: Env, offset: u32, limit: u32) -> Vec<Hunt> {
+        let limit = if limit == 0 { DEFAULT_PAGE_SIZE } else { limit };
         let counter = Storage::get_hunt_counter(&env);
         let mut hunts = Vec::new(&env);
         let mut current = offset;
@@ -986,6 +994,7 @@ impl HuntyCore {
 
     /// Returns a paginated slice of clues for a hunt. Useful for large hunts to bound gas.
     /// Page is 0-indexed. Max page_size is capped at MAX_BATCH_SIZE (50).
+    /// A `page_size` of `0` defaults to `DEFAULT_PAGE_SIZE`.
     /// Estimated gas: O(page_size) ~5_000 gas per clue + 10_000 overhead.
     pub fn list_clues_paginated(
         env: Env,
@@ -993,6 +1002,7 @@ impl HuntyCore {
         page: u32,
         page_size: u32,
     ) -> Vec<ClueInfo> {
+        let page_size = if page_size == 0 { DEFAULT_PAGE_SIZE } else { page_size };
         let effective_page_size = core::cmp::min(page_size, MAX_BATCH_SIZE);
         let offset = page.saturating_mul(effective_page_size);
         let raw = Storage::list_clues_for_hunt(&env, hunt_id, offset, effective_page_size);
@@ -3394,7 +3404,7 @@ impl HuntyCore {
             return Err(HuntErrorCode::Unauthorized);
         }
 
-        Storage::add_view_only(&env, hunt_id, &viewer);
+        Storage::add_view_only(&env, hunt_id, &viewer)?;
         Ok(())
     }
 
@@ -3420,8 +3430,8 @@ impl HuntyCore {
         Storage::is_view_only(&env, hunt_id, &address)
     }
 
-    pub fn get_view_only_list(env: Env, hunt_id: u64) -> Vec<Address> {
-        Storage::get_view_only_list(&env, hunt_id)
+    pub fn get_view_only_list(env: Env, hunt_id: u64, offset: u32, limit: u32) -> Vec<Address> {
+        Storage::get_view_only_list(&env, hunt_id, offset, limit.min(MAX_BATCH_SIZE))
     }
 
     pub fn add_co_creator(
@@ -3519,7 +3529,7 @@ impl HuntyCore {
     ) -> Result<(), HuntErrorCode> {
         Self::require_admin(&env, &admin)?;
 
-        Storage::add_global_view_only(&env, &viewer);
+        Storage::add_global_view_only(&env, &viewer)?;
         Ok(())
     }
 
@@ -3538,8 +3548,8 @@ impl HuntyCore {
         Storage::is_global_view_only(&env, &address)
     }
 
-    pub fn get_global_view_only_list(env: Env) -> Vec<Address> {
-        Storage::get_global_view_only_list(&env)
+    pub fn get_global_view_only_list(env: Env, offset: u32, limit: u32) -> Vec<Address> {
+        Storage::get_global_view_only_list(&env, offset, limit.min(MAX_BATCH_SIZE))
     }
 
     // Pause controls

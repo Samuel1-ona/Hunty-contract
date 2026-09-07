@@ -124,6 +124,7 @@ pub enum HuntError {
     CorruptPlayerProgress,
     HuntNotStarted,
     AttemptCooldownNotExpired,
+    HuntFull,
 }
 
 impl From<HuntError> for HuntErrorCode {
@@ -179,6 +180,7 @@ impl From<HuntError> for HuntErrorCode {
             HuntError::CorruptPlayerProgress => HuntErrorCode::CorruptPlayerProgress,
             HuntError::HuntNotStarted => HuntErrorCode::HuntNotStarted,
             HuntError::AttemptCooldownNotExpired => HuntErrorCode::RateLimitExceeded,
+            HuntError::HuntFull => HuntErrorCode::HuntFull,
         }
     }
 }
