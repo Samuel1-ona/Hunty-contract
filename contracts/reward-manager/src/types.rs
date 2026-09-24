@@ -1,7 +1,9 @@
 use soroban_sdk::{contracttype, Address, BytesN, Vec};
 
 pub use reward_interface::{
-    resolve_tier_amount, tiers_are_strictly_ascending, RewardConfig, TierError, TimeBasedRewardTier,
+    rank_tiers_are_strictly_ascending, resolve_rank_tier_amount, resolve_tier_amount,
+    tiers_are_strictly_ascending, RankBasedRewardTier, RankRewardTier, RewardConfig, TierError,
+    TimeBasedRewardTier,
 };
 
 /// How XLM rewards are calculated from the pool at distribution time.
@@ -83,12 +85,11 @@ pub struct DistributionRecord {
 ///
 /// `time_based_tiers` is an optional list of (max_elapsed_seconds, xlm_amount)
 /// pairs that define a conditional reward schedule based on how quickly a
-/// player completes a hunt. When the list is empty, time-based conditional
-/// rewards are disabled and the rest of the system behaves exactly as
-/// before this feature was added. When the list is non-empty it must be
-/// sorted in strictly ascending order of `max_completion_secs` (validated
-/// in `set_pool_tiers`). The list can be updated after pool creation via
-/// `set_pool_tiers` and queried via `get_pool_config`.
+/// player completes a hunt. `rank_based_tiers` is an optional list of exact
+/// one-based completion ranks and their amounts; a matching rank takes
+/// precedence over time and flat rewards. When both lists are empty the pool
+/// behaves exactly as before. Tier lists can be updated after pool creation
+/// and queried via `get_pool_config`.
 #[contracttype]
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct RewardPoolConfig {
@@ -135,6 +136,9 @@ pub struct RewardPoolConfig {
     /// Whether reward NFTs minted from this pool are transferable.
     /// If false, NFTs are soulbound to the initial recipient.
     pub nft_transferable: bool,
+    /// Optional exact-rank reward tiers. A matching frozen completion rank
+    /// takes precedence over flat and time-based amounts.
+    pub rank_based_tiers: Vec<RankRewardTier>,
 }
 
 /// Full status of a reward pool, returned by get_reward_pool().

@@ -6830,6 +6830,25 @@ pub fn set_pool_tiers(env: Env, creator: Address, hunt_id: u64, time_based_tiers
 
 ---
 
+#### `set_pool_rank_tiers`
+
+Configures exact one-based completion-rank amounts for a reward pool. The
+HuntyCore completion rank is frozen when the player finishes, so a delayed
+claim cannot change the selected tier. A matching rank takes precedence over
+flat and time-based rewards; unconfigured ranks retain the existing fallback.
+
+Tiers must have strictly increasing ranks and strictly positive amounts. An
+empty list disables rank-based rewards. Only the pool creator may update the
+schedule, and already-recorded distributions are not changed.
+
+**Signature:**
+
+```rust
+pub fn set_pool_rank_tiers(env: Env, creator: Address, hunt_id: u64, rank_based_tiers: Vec<RankRewardTier>) -> Result<(), RewardErrorCode>
+```
+
+---
+
 #### `set_pool_nft_contract`
 
 Sets or updates the NFT contract address for an existing reward pool.

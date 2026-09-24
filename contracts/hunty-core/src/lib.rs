@@ -1243,13 +1243,14 @@ impl HuntyCore {
 
     /// Resolves the XLM amount for the completing player.
     ///
-    /// If the hunt's rewardManager-configured pool has a non-empty
-    /// `time_based_tiers` list, this returns the tier's `xlm_amount`
+    /// If the hunt's rewardManager-configured pool has a matching
+    /// `rank_based_tiers` entry, that exact completion-rank amount wins.
+    /// Otherwise, a non-empty `time_based_tiers` list selects the first tier
     /// whose `max_completion_secs >= (completion_at - registration_at)`.
     /// If the elapsed time exceeds every configured tier, the last
-    /// (slowest) tier's amount is used as a fallback. If the pool has no
-    /// tiers configured (or is unreachable), this falls back to the
-    /// flat `hunt.reward_config.reward_per_winner()` amount.
+    /// (slowest) tier's amount is used as a fallback. If no tier applies (or
+    /// the pool is unreachable), this falls back to the flat
+    /// `hunt.reward_config.reward_per_winner()` amount.
     fn resolve_reward_amount(env: &Env, hunt: &Hunt, progress: &PlayerProgress) -> i128 {
         let reward_manager_addr = match Storage::get_reward_manager(env) {
             Some(addr) => addr,
@@ -1273,10 +1274,24 @@ impl HuntyCore {
             .and_then(|r| r.ok())
             .flatten();
 
-        let tiers = match pool_config.as_ref() {
-            Some(cfg) => &cfg.time_based_tiers,
+        let config = match pool_config.as_ref() {
+            Some(config) => config,
             None => return hunt.reward_config.reward_per_winner(),
         };
+
+        // Rank tiers take precedence over the existing time/flat policy. The
+        // rank is frozen when the player completes, so delayed reward claims
+        // cannot change the configured tier.
+        if let Some(amount) = reward_interface::resolve_rank_tier_amount(
+            &config.rank_based_tiers,
+            progress.completion_rank,
+        ) {
+            if amount > 0 {
+                return amount;
+            }
+        }
+
+        let tiers = &config.time_based_tiers;
 
         if tiers.is_empty() {
             return hunt.reward_config.reward_per_winner();
@@ -1529,8 +1544,9 @@ impl HuntyCore {
     ///
     /// Unlike [`cancel_hunt`], closing preserves all player scores and any
     /// rewards already collected: it marks the hunt `Completed` and triggers a
-    /// final reward distribution for every player who has completed the hunt but
-    /// not yet claimed. Players who have not completed the hunt keep their
+    /// final reward distribution for eligible players who have completed the
+    /// hunt but have not yet claimed. Players who have not completed the hunt,
+    /// or whose frozen completion rank is outside `max_winners`, keep their
     /// progress and are simply not rewarded. Any unspent reward-pool balance is
     /// left intact (a creator can refund it separately via [`cancel_hunt`] flows
     /// only while a hunt is still cancellable — see project docs).
@@ -1577,14 +1593,24 @@ impl HuntyCore {
         // Load full hunt from persistent for mutation
         let mut hunt = Storage::get_hunt(&env, hunt_id).ok_or(HuntErrorCode::HuntNotFound)?;
 
-        // Trigger final reward distribution for every completed, unclaimed player.
-        // Scores and previously-claimed rewards are preserved untouched.
+        // Trigger final reward distribution for eligible completed players.
+        // Completion rank is frozen, so iteration order cannot change which
+        // player receives a rank-based amount. Lower-ranked completions are
+        // skipped rather than consuming winner slots.
         let players = Storage::get_hunt_players(&env, hunt_id);
         let mut rewarded_players = 0u32;
         for i in 0..players.len() {
+            if hunt.reward_config.claimed_count >= hunt.reward_config.max_winners {
+                break;
+            }
+
             // SAFETY: i is within the vector bounds established by the enclosing loop
             let mut progress = players.get(i).unwrap();
-            if progress.is_completed && !progress.reward_claimed {
+            if progress.is_completed
+                && !progress.reward_claimed
+                && progress.completion_rank > 0
+                && progress.completion_rank <= hunt.reward_config.max_winners
+            {
                 Self::distribute_player_reward(&env, &mut hunt, &mut progress)?;
                 rewarded_players = rewarded_players.saturating_add(1);
             }
@@ -1819,10 +1845,10 @@ impl HuntyCore {
     /// then distributes rewards via the RewardManager contract (if configured)
     /// and updates the player's reward status.
     ///
-    /// Reward amounts can be either flat (`xlm_pool / max_winners`) or
-    /// time-based (configured via `RewardManager::set_pool_tiers`), in which
-    /// case the amount depends on `completion_at - started_at` for the
-    /// completing player.
+    /// Reward amounts can be flat (`xlm_pool / max_winners`), time-based
+    /// (configured via `RewardManager::set_pool_tiers`), or exact-rank based
+    /// (configured via `RewardManager::set_pool_rank_tiers`). Rank-based
+    /// amounts use the completion rank frozen by HuntyCore.
     ///
     /// # Arguments
     /// * `env` - The Soroban environment
@@ -1873,7 +1899,14 @@ impl HuntyCore {
             return Err(HuntErrorCode::NoRewardsConfigured);
         }
 
-        // #832: Enforce max_winners cap before any reward movement
+        // #832: Enforce max_winners cap before any reward movement. Rank
+        // eligibility is checked separately so a late/out-of-order claim by
+        // rank 11 cannot consume a top-10 winner slot.
+        if progress.completion_rank == 0
+            || progress.completion_rank > hunt.reward_config.max_winners
+        {
+            return Err(HuntErrorCode::InsufficientRewardPool);
+        }
         if hunt.reward_config.claimed_count >= hunt.reward_config.max_winners {
             return Err(HuntErrorCode::InsufficientRewardPool);
         }
@@ -1889,8 +1922,9 @@ impl HuntyCore {
 
     /// Distributes the reward for a single completed, unclaimed player.
     ///
-    /// Resolves the player's XLM amount (flat or tier-based), invokes the
-    /// RewardManager (if configured and there is at least one reward type),
+    /// Resolves the player's XLM amount (flat, time-tier, or exact-rank
+    /// tier-based), invokes the RewardManager (if configured and there is at
+    /// least one reward type),
     /// marks the player's progress as claimed, increments the hunt's
     /// `claimed_count` (in memory — the caller is responsible for persisting
     /// the hunt), and emits a `RewardClaimed` event.
@@ -1907,9 +1941,8 @@ impl HuntyCore {
         progress: &mut PlayerProgress,
     ) -> Result<(), HuntErrorCode> {
         // ===================== TIER-BASED AMOUNT RESOLUTION =====================
-        // If the reward pool has a tier schedule configured, the appropriate
-        // tier's xlm_amount replaces the flat `xlm_pool / max_winners` amount.
-        // Tier resolution is `(max_completion_secs - registration_time)` based.
+        // Exact completion-rank tiers take precedence, followed by time tiers
+        // and finally the hunt's flat per-winner amount.
         let reward_amount = Self::resolve_reward_amount(env, hunt, progress);
         // =======================================================================
         let nft_awarded = hunt.reward_config.nft_enabled;

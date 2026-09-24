@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `reward-manager`: exact one-based completion-rank reward tiers can be configured per hunt with `set_pool_rank_tiers`; matching frozen completion ranks take precedence over flat and time-based rewards.
+
 ### Fixed
 
 - `hunty-core`: view-only, admin-rotation, and pause functions are exported inside `#[contractimpl]` and present in the contract ABI/spec (#604).
