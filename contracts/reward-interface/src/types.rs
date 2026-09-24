@@ -66,6 +66,13 @@ pub struct RewardPoolConfig {
     pub vesting_period_secs: u64,
     /// Unix timestamp after which claims are no longer allowed (0 = disabled).
     pub claim_deadline: u64,
+    /// Creator royalty basis points (0-10000) for NFT secondary-market sales.
+    pub nft_royalty_bps: u32,
+    /// Whether reward NFTs minted from this pool are transferable.
+    pub nft_transferable: bool,
+    /// Optional exact-rank reward tiers. A matching frozen completion rank
+    /// takes precedence over flat and time-based amounts.
+    pub rank_based_tiers: Vec<RankRewardTier>,
 }
 
 /// How rewards are calculated from the pool at distribution time.
@@ -111,6 +118,87 @@ impl TimeBasedRewardTier {
             xlm_amount,
         })
     }
+}
+
+/// One exact completion-rank reward tier.
+///
+/// Ranks are one-based: rank `1` is the first finisher. A rank tier applies
+/// only to the exact rank it names; ranks without an entry use the normal
+/// flat/time-based reward path. The list is kept in strictly increasing rank
+/// order so configuration is deterministic and cheap to validate on-chain.
+#[contracttype]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RankRewardTier {
+    /// One-based completion rank awarded by HuntyCore.
+    pub rank: u32,
+    /// Token amount awarded to the player who finishes at this rank.
+    pub xlm_amount: i128,
+}
+
+/// Descriptive alias for callers that prefer the same naming as
+/// `TimeBasedRewardTier`.
+pub type RankBasedRewardTier = RankRewardTier;
+
+impl RankRewardTier {
+    /// Creates a rank tier with a strictly positive amount.
+    pub fn new(rank: u32, xlm_amount: i128) -> Result<Self, TierError> {
+        if rank == 0 {
+            return Err(TierError::NotStrictlyAscending);
+        }
+        if xlm_amount <= 0 {
+            return Err(TierError::NonPositiveAmount);
+        }
+        Ok(Self { rank, xlm_amount })
+    }
+}
+
+/// Returns the amount configured for an exact completion rank.
+///
+/// `None` means the rank is not configured (or the rank is zero), allowing
+/// callers to fall back to the existing flat/time-based reward policy.
+pub fn resolve_rank_tier_amount(tiers: &Vec<RankRewardTier>, rank: u32) -> Option<i128> {
+    if rank == 0 {
+        return None;
+    }
+
+    for i in 0..tiers.len() {
+        let tier = tiers.get(i).unwrap();
+        if tier.rank == rank {
+            return Some(tier.xlm_amount);
+        }
+    }
+    None
+}
+
+/// Validates that rank tiers use one-based ranks, positive amounts, and
+/// strictly increasing rank order. The caller may use an empty list to disable
+/// rank-based rewards; this helper treats an empty list as invalid so that
+/// non-empty configuration always has an explicit validation contract.
+pub fn rank_tiers_are_strictly_ascending(tiers: &Vec<RankRewardTier>) -> Result<(), TierError> {
+    if tiers.is_empty() {
+        return Err(TierError::Empty);
+    }
+
+    let mut previous: Option<u32> = None;
+    for i in 0..tiers.len() {
+        let tier = tiers.get(i).unwrap();
+        if tier.rank == 0 || tier.xlm_amount <= 0 {
+            return Err(if tier.rank == 0 {
+                TierError::NotStrictlyAscending
+            } else {
+                TierError::NonPositiveAmount
+            });
+        }
+
+        if let Some(previous_rank) = previous {
+            if tier.rank <= previous_rank {
+                return Err(TierError::NotStrictlyAscending);
+            }
+        }
+        previous = Some(tier.rank);
+    }
+
+    Ok(())
 }
 
 /// Reason a tier or tier list failed validation.

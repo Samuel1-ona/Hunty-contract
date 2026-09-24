@@ -10,11 +10,13 @@ use crate::nft_handler::NftHandler;
 use crate::storage::Storage;
 use crate::token_handler::TokenHandler;
 pub use crate::types::{
-    resolve_tier_amount, tiers_are_strictly_ascending, BatchDistributionEntry,
-    DistributionAnalytics, DistributionMode, DistributionProof, DistributionRecord,
-    DistributionStatus, PendingNftMint, PoolAuditEntry, PoolDistribution, PoolOperation,
-    ResolutionStatus, RewardConfig, RewardPoolConfig, RewardPoolStatistics, RewardPoolStatus,
-    SemVer, TierError, TimeBasedRewardTier, ValidationResult, VestingRecord, VestingStatus,
+    rank_tiers_are_strictly_ascending, resolve_rank_tier_amount, resolve_tier_amount,
+    tiers_are_strictly_ascending, BatchDistributionEntry, DistributionAnalytics, DistributionMode,
+    DistributionProof, DistributionRecord, DistributionStatus, PendingNftMint, PoolAuditEntry,
+    PoolDistribution, PoolOperation, RankBasedRewardTier, RankRewardTier, ResolutionStatus,
+    RewardConfig,
+    RewardPoolConfig, RewardPoolStatistics, RewardPoolStatus, SemVer, TierError,
+    TimeBasedRewardTier, ValidationResult, VestingRecord, VestingStatus,
 };
 use crate::xlm_handler::XlmHandler;
 
@@ -551,6 +553,7 @@ impl RewardManager {
             claim_deadline: 0,
             nft_royalty_bps,
             nft_transferable,
+            rank_based_tiers: Vec::new(&env),
         };
         Storage::set_pool_config(&env, hunt_id, &config);
 
@@ -781,6 +784,49 @@ impl RewardManager {
         Ok(())
     }
 
+    /// Updates (or installs) exact completion-rank reward tiers on an existing pool.
+    ///
+    /// Ranks are one-based and the list must contain strictly increasing ranks
+    /// with strictly positive amounts. A matching rank is selected using the
+    /// immutable completion rank supplied by HuntyCore; ranks not present in
+    /// the list retain the existing flat/time-based behavior. Passing an empty
+    /// list disables rank-based rewards.
+    ///
+    /// Only the pool creator may change this configuration. Changes affect
+    /// subsequent distributions and never rewrite an already-recorded payout.
+    pub fn set_pool_rank_tiers(
+        env: Env,
+        creator: Address,
+        hunt_id: u64,
+        rank_based_tiers: Vec<RankRewardTier>,
+    ) -> Result<(), RewardErrorCode> {
+        creator.require_auth();
+
+        let mut config =
+            Storage::get_pool_config(&env, hunt_id).ok_or(RewardErrorCode::PoolNotFound)?;
+
+        if creator != config.creator {
+            return Err(RewardErrorCode::Unauthorized);
+        }
+
+        if !rank_based_tiers.is_empty()
+            && rank_tiers_are_strictly_ascending(&rank_based_tiers).is_err()
+        {
+            return Err(RewardErrorCode::InvalidConfig);
+        }
+
+        let tier_count = rank_based_tiers.len();
+        config.rank_based_tiers = rank_based_tiers;
+        Storage::set_pool_config(&env, hunt_id, &config);
+
+        env.events().publish(
+            (symbol_short!("PL_RTIERS"), hunt_id),
+            (creator, tier_count),
+        );
+
+        Ok(())
+    }
+
     /// Sets or updates the NFT contract address for an existing reward pool.
     /// This allows pools to distribute NFTs alongside or instead of tokens.
     ///
@@ -868,11 +914,11 @@ impl RewardManager {
         Ok(())
     }
 
-    /// Returns the full configuration of a reward pool, including its tier list.
-    /// `None` when no pool has been created for the given `hunt_id`.
+    /// Returns the full configuration of a reward pool, including its time
+    /// and exact-rank tier lists. `None` when no pool exists for the hunt.
     ///
-    /// This is the primary read path used by HuntyCore at completion time to
-    /// resolve which tier (if any) applies to a player's completion time.
+    /// This is the read path used by HuntyCore at completion time to resolve
+    /// rank- and time-based amounts without duplicating pool state.
     pub fn get_pool_config(env: Env, hunt_id: u64) -> Option<RewardPoolConfig> {
         Storage::get_pool_config(&env, hunt_id)
     }
@@ -1617,12 +1663,29 @@ impl RewardManager {
         Ok(())
     }
 
+    /// Resolves the configured amount for a frozen completion rank, if any.
+    /// Rank zero is used by legacy/direct callers and deliberately does not
+    /// match a tier.
+    fn rank_tier_amount(pool_config: &RewardPoolConfig, rank: u32) -> Option<i128> {
+        resolve_rank_tier_amount(&pool_config.rank_based_tiers, rank)
+    }
+
+    /// Applies the canonical rank-tier amount, if one matches. The completion
+    /// rank is supplied by the trusted HuntyCore boundary and is already
+    /// frozen at completion time.
+    fn apply_rank_tier(pool_config: &RewardPoolConfig, reward_config: &mut RewardConfig) {
+        if let Some(amount) = Self::rank_tier_amount(pool_config, reward_config.completion_rank) {
+            reward_config.xlm_amount = Some(amount);
+        }
+    }
+
     pub fn distribute_rewards(
         env: Env,
         hunt_id: u64,
         player_address: Address,
         reward_config: RewardConfig,
     ) -> Result<(), RewardErrorCode> {
+        let mut reward_config = reward_config;
         Self::require_authorized_distributor(&env)?;
 
         // Issue #628: distribution is blocked by its own pause flag or the global stop.
@@ -1630,6 +1693,12 @@ impl RewardManager {
 
         let pool_config =
             Storage::get_pool_config(&env, hunt_id).ok_or(RewardErrorCode::PoolNotFound)?;
+
+        // The completion rank is frozen by HuntyCore before this call. When
+        // an exact rank tier exists, make that configured amount authoritative
+        // instead of trusting a caller-supplied flat amount. Unmatched ranks
+        // retain the existing flat/time-based behavior.
+        Self::apply_rank_tier(&pool_config, &mut reward_config);
 
         // Validate configuration
         if !reward_config.is_valid() {
@@ -1984,6 +2053,23 @@ impl RewardManager {
             return Err(RewardErrorCode::BatchTooLarge);
         }
 
+        // Resolve rank-based amounts before validation. This keeps the batch
+        // path subject to the same canonical tier policy as single payouts and
+        // allows an NFT-only entry to receive a configured rank amount.
+        let mut normalized_distributions: Vec<BatchDistributionEntry> = Vec::new(&env);
+        for i in 0..batch_len {
+            let entry = distributions.get(i).unwrap();
+            let pool_config =
+                Storage::get_pool_config(&env, entry.hunt_id).ok_or(RewardErrorCode::PoolNotFound)?;
+            let mut reward_config = entry.reward_config.clone();
+            Self::apply_rank_tier(&pool_config, &mut reward_config);
+            normalized_distributions.push_back(BatchDistributionEntry {
+                hunt_id: entry.hunt_id,
+                player_address: entry.player_address.clone(),
+                reward_config,
+            });
+        }
+
         // ── Phase 1: Validate all entries (read-only, no state changes) ──
 
         // Track cumulative XLM required per hunt_id across the entire batch
@@ -1991,7 +2077,7 @@ impl RewardManager {
         let mut hunt_xlm_totals: Vec<(u64, i128)> = Vec::new(&env);
 
         for i in 0..batch_len {
-            let entry = distributions.get(i).unwrap();
+            let entry = normalized_distributions.get(i).unwrap();
 
             // 1a. Config validity
             if !entry.reward_config.is_valid() {
@@ -2071,7 +2157,7 @@ impl RewardManager {
         let day = env.ledger().timestamp() / 86400;
 
         for i in 0..batch_len {
-            let entry = distributions.get(i).unwrap();
+            let entry = normalized_distributions.get(i).unwrap();
             let mut xlm_amount = 0i128;
             let mut nft_id: Option<u64> = None;
 
