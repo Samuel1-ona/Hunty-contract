@@ -3376,13 +3376,24 @@ impl RewardManager {
                 client.transfer(&contract_addr, &recipient, &balance);
                 Storage::set_pool_balance(&env, hunt_id, 0);
                 total_withdrawn = balance;
+                let timestamp = env.ledger().timestamp();
                 let log_entry = EmergencyWithdrawalLogEntry {
                     hunt_id,
                     amount: balance,
                     reason: reason.clone(),
-                    timestamp: env.ledger().timestamp(),
+                    timestamp,
                 };
                 Storage::log_emergency_withdrawal(&env, &log_entry);
+                Storage::append_audit_entry(
+                    &env,
+                    hunt_id,
+                    PoolAuditEntry {
+                        actor: admin.clone(),
+                        operation: PoolOperation::Withdraw,
+                        timestamp,
+                        amount: Some(balance),
+                    },
+                );
                 env.events().publish(
                     (symbol_short!("EMERG_WDR"), hunt_id),
                     EmergencyWithdrawalEvent {
@@ -3390,7 +3401,7 @@ impl RewardManager {
                         hunt_id,
                         amount: balance,
                         reason: reason.clone(),
-                        timestamp: env.ledger().timestamp(),
+                        timestamp,
                     },
                 );
             }
@@ -3402,13 +3413,24 @@ impl RewardManager {
                     client.transfer(&contract_addr, &recipient, &balance);
                     Storage::set_pool_balance(&env, pid, 0);
                     total_withdrawn += balance;
+                    let timestamp = env.ledger().timestamp();
                     let log_entry = EmergencyWithdrawalLogEntry {
                         hunt_id: pid,
                         amount: balance,
                         reason: reason.clone(),
-                        timestamp: env.ledger().timestamp(),
+                        timestamp,
                     };
                     Storage::log_emergency_withdrawal(&env, &log_entry);
+                    Storage::append_audit_entry(
+                        &env,
+                        pid,
+                        PoolAuditEntry {
+                            actor: admin.clone(),
+                            operation: PoolOperation::Withdraw,
+                            timestamp,
+                            amount: Some(balance),
+                        },
+                    );
                     env.events().publish(
                         (symbol_short!("EMERG_WDR"), pid),
                         EmergencyWithdrawalEvent {
@@ -3416,7 +3438,7 @@ impl RewardManager {
                             hunt_id: pid,
                             amount: balance,
                             reason: reason.clone(),
-                            timestamp: env.ledger().timestamp(),
+                            timestamp,
                         },
                     );
                 }
@@ -3545,28 +3567,30 @@ impl RewardManager {
         start_after: Option<u64>,
         limit: Option<u32>,
     ) -> PoolAuditLogResponse {
-        let max_limit = 50;
+        // `start_after` is an offset within the retained rolling window. This
+        // keeps pagination stable even when the ring buffer has wrapped.
         let default_limit = 20;
+        let max_limit = Storage::MAX_AUDIT_ENTRIES_PER_POOL as u32;
         let query_limit = limit.unwrap_or(default_limit).min(max_limit) as u64;
-
         let total = Storage::get_pool_audit_count(&env, hunt_id);
         let mut entries = Vec::new(&env);
 
-        if total == 0 {
+        if total == 0 || query_limit == 0 {
             return PoolAuditLogResponse { entries, total };
         }
 
-        // Determine start index. start_after is a cursor index, so we start at start_after + 1.
-        // If None, we start at 0.
-        let mut current_idx = start_after.map(|idx| idx + 1).unwrap_or(0);
-
-        let mut count = 0;
-        while count < query_limit && current_idx < total {
-            if let Some(entry) = Storage::get_pool_audit_entry(&env, hunt_id, current_idx) {
+        let capacity = Storage::MAX_AUDIT_ENTRIES_PER_POOL;
+        let window_len = total.min(capacity);
+        let oldest = total.saturating_sub(window_len);
+        let offset = start_after.unwrap_or(0).min(window_len);
+        let first = oldest.saturating_add(offset);
+        let end = total.min(first.saturating_add(query_limit));
+        let mut sequence = first;
+        while sequence < end {
+            if let Some(entry) = Storage::get_pool_audit_entry(&env, hunt_id, sequence) {
                 entries.push_back(entry);
             }
-            current_idx += 1;
-            count += 1;
+            sequence = sequence.saturating_add(1);
         }
 
         PoolAuditLogResponse { entries, total }
@@ -3611,32 +3635,11 @@ pub mod storage;
 mod token_handler;
 #[path = "types.rs"]
 mod types_impl;
+/// Public contract types are defined in one place (`types.rs`). Re-exporting
+/// that module keeps the historical `reward_manager::types::*` API without
+/// maintaining a second, potentially incompatible audit schema.
 pub mod types {
     pub use crate::types_impl::*;
-
-    use soroban_sdk::{contracttype, Address};
-
-    #[contracttype]
-    #[derive(Clone, Debug, PartialEq, Eq)]
-    pub enum PoolOperation {
-        Create,
-        Fund,
-        Distribute,
-        Refund,
-        Withdraw,
-        Migrate,
-        Freeze,
-        Unfreeze,
-    }
-
-    #[contracttype]
-    #[derive(Clone, Debug, PartialEq, Eq)]
-    pub struct PoolAuditEntry {
-        pub actor: Address,
-        pub operation: PoolOperation,
-        pub timestamp: u64,
-        pub amount: Option<i128>,
-    }
 }
 mod xlm_handler;
 

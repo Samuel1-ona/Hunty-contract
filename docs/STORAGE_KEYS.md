@@ -173,7 +173,7 @@ A CI/script check (`scripts/ci/check_storage_keys_doc.sh`) asserts that every
 
 | Constant | Value | Notes |
 |---|---|---|
-| `MAX_AUDIT_ENTRIES_PER_POOL` | `50` | Ring-buffer cap per hunt; not a storage key — bounds `(AUDL, hunt_id, index)` slots |
+| `MAX_AUDIT_ENTRIES_PER_POOL` | `50` | Ring-buffer cap per hunt; not a storage key — bounds `(AUDL, hunt_id, index)` slots. Count/slot keys receive an explicit persistent TTL refresh on append and read. |
 
 ### Inline / helper symbols (reward-manager)
 
