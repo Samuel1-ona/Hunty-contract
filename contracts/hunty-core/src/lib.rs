@@ -1181,7 +1181,13 @@ impl HuntyCore {
 
     fn get_hunt_cache_or_load(env: &Env, hunt_id: u64) -> Result<HuntCache, HuntErrorCode> {
         if let Some(cache) = Storage::get_hunt_cache(env, hunt_id) {
-            return Ok(cache);
+            // A cache is only an optimization. During a rolling upgrade a
+            // legacy instance hunt may still have a cache even though its
+            // authoritative persistent record has not been promoted yet; do
+            // not let that cache hide the migration path.
+            if Storage::has_persistent_hunt(env, hunt_id) {
+                return Ok(cache);
+            }
         }
         let hunt = Storage::get_hunt(env, hunt_id).ok_or(HuntErrorCode::HuntNotFound)?;
         Storage::save_hunt_cache(env, &hunt);
