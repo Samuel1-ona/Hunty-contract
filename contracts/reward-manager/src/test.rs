@@ -13,7 +13,38 @@ mod test {
     use soroban_sdk::testutils::Address as _;
     use soroban_sdk::testutils::Events as _;
     use soroban_sdk::testutils::Ledger as _;
-    use soroban_sdk::{symbol_short, token, Address, Env, IntoVal, Symbol, TryFromVal, Val, Vec};
+    use soroban_sdk::{
+        symbol_short, token, xdr, Address, Env, IntoVal, Symbol, TryFromVal, Val, Vec,
+    };
+
+    /// Returns the recorded contract events as `(contract, topics, data)` tuples.
+    ///
+    /// Soroban SDK 27 only exposes recorded events in XDR form, so decode them
+    /// back into SDK values for the assertions below.
+    fn all_events_legacy(env: &Env) -> std::vec::Vec<(Address, Vec<Val>, Val)> {
+        env.events()
+            .all()
+            .events()
+            .iter()
+            .filter_map(|event| {
+                let xdr::ContractEventBody::V0(body) = &event.body else {
+                    return None;
+                };
+                let contract = event.contract_id.as_ref()?;
+                let contract_val =
+                    Val::try_from_val(env, &xdr::ScVal::Address(contract.clone())).ok()?;
+                let contract = Address::try_from_val(env, &contract_val).ok()?;
+                let topics = body
+                    .topics
+                    .iter()
+                    .map(|topic| Val::try_from_val(env, topic))
+                    .collect::<Result<std::vec::Vec<Val>, _>>()
+                    .ok()?;
+                let data = Val::try_from_val(env, &body.data).ok()?;
+                Some((contract, topics, data))
+            })
+            .collect()
+    }
 
     /// Registers the RewardManager contract and a mock SAC token.
     /// Returns (contract_id, token_address, token_admin).
@@ -158,7 +189,7 @@ mod test {
 
     fn find_event<T: TryFromVal<Env, Val>>(env: &Env, topic: Symbol) -> Option<(Vec<Val>, T)> {
         let expected_topic: Val = topic.into_val(env);
-        let events: Vec<(Address, Vec<Val>, Val)> = env.events().all();
+        let events: std::vec::Vec<(Address, Vec<Val>, Val)> = all_events_legacy(&env);
         let mut idx = 0;
         while idx < events.len() {
             let event = events.get(idx).unwrap();
@@ -4582,15 +4613,12 @@ mod test {
 
             RewardManager::refund_pool(env.clone(), creator.clone(), 1).unwrap();
 
-            let events = env.events().all();
-            let refund_events: Vec<_> = events
+            let events = all_events_legacy(&env);
+            let refund_events: std::vec::Vec<_> = events
                 .iter()
-                .filter_map(|e| {
-                    if e.0.topics.get(0) == Some(&symbol_short!("POOL_RFD").into_val(&env)) {
-                        Some(e)
-                    } else {
-                        None
-                    }
+                .filter(|e| {
+                    e.1.get(0).map(|topic| topic.get_payload())
+                        == Some(symbol_short!("POOL_RFD").into_val(&env).get_payload())
                 })
                 .collect();
 
