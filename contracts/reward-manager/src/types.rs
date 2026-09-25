@@ -191,19 +191,26 @@ pub struct ValidationResult {
 }
 
 /// Operation type for the pool audit log.
+///
+/// Values are explicit and append-only so adding operations does not renumber
+/// records written by older deployments.
 #[contracttype]
 #[derive(Clone, Debug, PartialEq, Eq)]
+#[repr(u32)]
 pub enum PoolOperation {
-    Create,
-    Fund,
-    Distribute,
-    Withdraw,
-    Freeze,
-    Unfreeze,
+    Create = 0,
+    Fund = 1,
+    Distribute = 2,
+    /// Funds were withdrawn by an administrator.
+    Withdraw = 3,
+    /// The pool was frozen by its creator or the administrator.
+    Freeze = 4,
+    /// The pool was unfrozen by its creator or the administrator.
+    Unfreeze = 5,
     /// Unused balance was migrated out to (or into) another hunt's pool.
-    Migrate,
-    /// Pool balance was refunded to the pool creator.
-    Refund,
+    Migrate = 6,
+    /// Unused balance was refunded to the pool creator.
+    Refund = 7,
 }
 
 /// Comprehensive statistics for a reward pool, returned by get_pool_statistics().

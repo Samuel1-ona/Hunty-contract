@@ -1,28 +1,10 @@
-use soroban_sdk::{contracttype, symbol_short, Address, Env, Vec};
+use soroban_sdk::{contracttype, symbol_short, Address, Env, IntoVal, TryFromVal, Val, Vec};
 
 use crate::types::{
     DistributionProof, DistributionRecord, PoolDistribution, ResolutionStatus, RewardPoolConfig,
     VestingRecord,
 };
-
-#[contracttype]
-#[derive(Clone, Debug, PartialEq)]
-pub enum PoolOperation {
-    Create,
-    Fund,
-    Distribute,
-    Refund,
-    Withdraw,
-}
-
-#[contracttype]
-#[derive(Clone, Debug, PartialEq)]
-pub struct PoolAuditEntry {
-    pub operation: PoolOperation,
-    pub actor: Address,
-    pub amount: i128,
-    pub timestamp: u64,
-}
+pub use crate::types::{PoolAuditEntry, PoolOperation};
 
 pub struct Storage;
 
@@ -34,7 +16,9 @@ impl Storage {
     const XLM_TOKEN_KEY: soroban_sdk::Symbol = symbol_short!("X");
     const NFT_CONTRACT_KEY: soroban_sdk::Symbol = symbol_short!("NFTA");
     /// Ring-buffer capacity for the per-pool audit log.
-    const MAX_AUDIT_ENTRIES_PER_POOL: u64 = 50;
+    pub const MAX_AUDIT_ENTRIES_PER_POOL: u64 = 50;
+    const AUDIT_TTL_THRESHOLD: u32 = 172_800;
+    const AUDIT_TTL_EXTEND_TO: u32 = 518_400;
     // Daily spending caps
     const DAILY_POOL_CAP_KEY: soroban_sdk::Symbol = symbol_short!("DPC");
     const DAILY_GLOBAL_CAP_KEY: soroban_sdk::Symbol = symbol_short!("DGR");
@@ -589,31 +573,96 @@ impl Storage {
 
     // ========== Audit Log ==========
 
+    /// Append one entry to a fixed-size ring buffer. `count` is a monotonically
+    /// increasing sequence number; the actual storage footprint is capped at
+    /// `MAX_AUDIT_ENTRIES_PER_POOL` slots.
     pub fn append_audit_entry(env: &Env, hunt_id: u64, entry: PoolAuditEntry) {
         let count_key = (Self::AUDIT_COUNT_KEY, hunt_id);
-        let current_count: u64 = env.storage().persistent().get(&count_key).unwrap_or(0);
-
+        let current_count: u64 = Self::get_pool_audit_count(env, hunt_id);
         let index = current_count % Self::MAX_AUDIT_ENTRIES_PER_POOL;
         let log_key = (Self::AUDIT_LOG_KEY, hunt_id, index);
 
         env.storage().persistent().set(&log_key, &entry);
+        Self::touch_audit_key(env, &log_key);
         env.storage()
             .persistent()
-            .set(&count_key, &(current_count + 1));
+            .set(&count_key, &current_count.saturating_add(1));
+        Self::touch_audit_key(env, &count_key);
     }
 
+    /// Returns the cumulative number of entries ever appended for a pool.
     pub fn get_pool_audit_count(env: &Env, hunt_id: u64) -> u64 {
         let count_key = (Self::AUDIT_COUNT_KEY, hunt_id);
-        env.storage().persistent().get(&count_key).unwrap_or(0)
+        let count: u64 = env.storage().persistent().get(&count_key).unwrap_or(0);
+        if env.storage().persistent().has(&count_key) {
+            Self::touch_audit_key(env, &count_key);
+        }
+        count
     }
 
+    /// Reads an entry by its sequence number. Sequence numbers are reduced
+    /// modulo the ring capacity for storage, so callers can page across wraps.
     pub fn get_pool_audit_entry(env: &Env, hunt_id: u64, index: u64) -> Option<PoolAuditEntry> {
         let log_key = (
             Self::AUDIT_LOG_KEY,
             hunt_id,
             index % Self::MAX_AUDIT_ENTRIES_PER_POOL,
         );
-        env.storage().persistent().get(&log_key)
+        let raw: Option<Val> = env.storage().persistent().get(&log_key);
+        let entry = raw.and_then(|value| {
+            if let Ok(entry) = PoolAuditEntry::try_from_val(env, &value) {
+                return Some(entry);
+            }
+
+            // The first audit implementation used a compact legacy record
+            // with a non-optional amount and a different field order. Decode it
+            // on read so upgrading the contract does not hide old entries.
+            #[contracttype]
+            #[derive(Clone, Debug)]
+            enum LegacyPoolOperation {
+                Create,
+                Fund,
+                Distribute,
+                Refund,
+                Withdraw,
+            }
+
+            #[contracttype]
+            #[derive(Clone, Debug)]
+            struct LegacyPoolAuditEntry {
+                operation: LegacyPoolOperation,
+                actor: Address,
+                amount: i128,
+                timestamp: u64,
+            }
+
+            let legacy = LegacyPoolAuditEntry::try_from_val(env, &value).ok()?;
+            let operation = match legacy.operation {
+                LegacyPoolOperation::Create => PoolOperation::Create,
+                LegacyPoolOperation::Fund => PoolOperation::Fund,
+                LegacyPoolOperation::Distribute => PoolOperation::Distribute,
+                LegacyPoolOperation::Refund => PoolOperation::Refund,
+                LegacyPoolOperation::Withdraw => PoolOperation::Withdraw,
+            };
+            Some(PoolAuditEntry {
+                actor: legacy.actor,
+                operation,
+                timestamp: legacy.timestamp,
+                amount: Some(legacy.amount),
+            })
+        });
+        if entry.is_some() {
+            Self::touch_audit_key(env, &log_key);
+        }
+        entry
+    }
+
+    fn touch_audit_key<K: IntoVal<Env, Val>>(env: &Env, key: &K) {
+        env.storage().persistent().extend_ttl(
+            key,
+            Self::AUDIT_TTL_THRESHOLD,
+            Self::AUDIT_TTL_EXTEND_TO,
+        );
     }
 
     // ========== Pause / Emergency State ==========
