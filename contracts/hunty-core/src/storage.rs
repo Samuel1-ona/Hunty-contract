@@ -10,6 +10,9 @@ const INSTANCE_TTL_THRESHOLD: u32 = 518_400;
 const INSTANCE_TTL_EXTEND_TO: u32 = 518_400;
 const PERSISTENT_TTL_THRESHOLD: u32 = 172_800;
 const PERSISTENT_TTL_EXTEND_TO: u32 = 518_400;
+/// Legacy indexes are bounded by the contract's 100-clue limit during a lazy
+/// migration, even if an old/corrupt count key contains a larger value.
+const MAX_MIGRATED_CLUE_INDEX_ENTRIES: u32 = 100;
 /// Maximum number of addresses in a hunt's view-only list, and in the global
 /// view-only list. Keeps enumeration bounded so `get_view_only_list` and
 /// `is_view_only` stay within the invocation budget as the list grows.
@@ -83,6 +86,7 @@ impl Storage {
     const PLAYER_COUNT_KEY: soroban_sdk::Symbol = symbol_short!("PLCT");
     const CLUE_ENTRY_KEY: soroban_sdk::Symbol = symbol_short!("CLST");
     const CLUE_LIST_COUNT_KEY: soroban_sdk::Symbol = symbol_short!("CLCT");
+    const CLUE_EXISTS_KEY: soroban_sdk::Symbol = symbol_short!("CLEX");
     const HUNT_COUNTER_KEY: soroban_sdk::Symbol = symbol_short!("CN");
     const CLUE_COUNTER_KEY: soroban_sdk::Symbol = symbol_short!("CC");
     const REWARD_MGR_KEY: soroban_sdk::Symbol = symbol_short!("R");
@@ -171,8 +175,12 @@ impl Storage {
     /// Panics if storage operation fails
     pub fn save_hunt(env: &Env, hunt: &Hunt) {
         let key = Self::hunt_key(hunt.hunt_id);
+        // The hunt record is authoritative persistent data. Remove a legacy
+        // instance copy only after the persistent write succeeds so an upgrade
+        // can never leave a hunt with two disagreeing records.
         env.storage().persistent().set(&key, hunt);
-        Self::save_hunt_cache(env, hunt);
+        env.storage().instance().remove(&key);
+
         let policy = match hunt.status {
             crate::types::HuntStatus::Active => TtlPolicy::Active,
             crate::types::HuntStatus::Completed | crate::types::HuntStatus::Cancelled => {
@@ -181,7 +189,8 @@ impl Storage {
             _ => TtlPolicy::Default,
         };
         extend_ttl(env, &key, policy);
-        // Keep the instance-storage cache coherent with persistent state.
+        // HuntCache is deliberately an instance-storage read optimization; it
+        // is rebuilt from the persistent record and is never authoritative.
         Self::save_hunt_cache(env, hunt);
     }
 
@@ -195,9 +204,13 @@ impl Storage {
     /// * `Some(Hunt)` if the hunt exists, `None` otherwise
     pub fn get_hunt(env: &Env, hunt_id: u64) -> Option<Hunt> {
         let key = Self::hunt_key(hunt_id);
-        let raw: Option<Val> = env.storage().persistent().get(&key);
-        let mut result = raw.and_then(|value| {
-            if let Ok(hunt) = Hunt::try_from_val(env, &value) {
+        let persistent_raw: Option<Val> = env.storage().persistent().get(&key);
+
+        // Decode both the current layout and the layout used by older
+        // deployments. The same decoder is used for the persistent and legacy
+        // instance locations so a migration cannot change the value semantics.
+        let decode = |value: &Val| -> Option<Hunt> {
+            if let Ok(hunt) = Hunt::try_from_val(env, value) {
                 return Some(hunt);
             }
 
@@ -224,7 +237,7 @@ impl Storage {
                 pub start_multiplier_bps: u32,
             }
 
-            LegacyHunt::try_from_val(env, &value)
+            LegacyHunt::try_from_val(env, value)
                 .ok()
                 .map(|legacy| Hunt {
                     hunt_id: legacy.hunt_id,
@@ -252,14 +265,38 @@ impl Storage {
                     registration_deadline: 0,
                     allow_partial_scoring: false,
                     team_mode: false,
-                    default_points: 100, // Default value for legacy hunts
+                    default_points: 100,
                     attempt_cooldown_secs: 0,
                     max_players: 0,
                     is_private: false,
                     invite_code_hash: None,
                     remaining_slots: 0,
                 })
-        });
+        };
+
+        let mut result = persistent_raw.as_ref().and_then(|value| decode(value));
+        let mut promoted_legacy = false;
+        if result.is_none() {
+            // Before the storage-tier fix, HUNT lived in instance storage. A
+            // lazy promotion is safe and idempotent: callers can migrate data
+            // while the old entries are still live, without requiring a
+            // destructive all-at-once state rewrite.
+            if let Some(legacy_raw) = env.storage().instance().get::<_, Val>(&key) {
+                result = decode(&legacy_raw);
+                promoted_legacy = result.is_some();
+            }
+        }
+
+        if promoted_legacy {
+            if let Some(ref hunt) = result {
+                env.storage().persistent().set(&key, hunt);
+                env.storage().instance().remove(&key);
+            }
+        } else if result.is_some() {
+            // Clear a stale legacy copy after a successful canonical read.
+            env.storage().instance().remove(&key);
+        }
+
         if let Some(ref mut hunt) = result {
             let policy = match hunt.status {
                 crate::types::HuntStatus::Active => TtlPolicy::Active,
@@ -270,7 +307,7 @@ impl Storage {
             };
             extend_ttl(env, &key, policy);
 
-            // Dynamically calculate remaining slots
+            // Dynamically calculate remaining slots.
             let count_key = Self::player_count_key(hunt_id);
             let count: u32 = env.storage().persistent().get(&count_key).unwrap_or(0);
             hunt.remaining_slots = if hunt.max_players == 0 {
@@ -280,6 +317,13 @@ impl Storage {
             };
         }
         result
+    }
+
+    /// Returns whether the authoritative persistent hunt record exists.
+    /// A cache hit alone is not sufficient because it can outlive (or mask)
+    /// a legacy instance record during an upgrade.
+    pub fn has_persistent_hunt(env: &Env, hunt_id: u64) -> bool {
+        env.storage().persistent().has(&Self::hunt_key(hunt_id))
     }
 
     /// Retrieves a hunt by ID or returns an error if not found.
@@ -389,12 +433,14 @@ impl Storage {
     /// * `hunt_id` - The hunt this clue belongs to
     /// * `clue` - The Clue struct to store
     pub fn save_clue(env: &Env, hunt_id: u64, clue: &Clue) {
-        // Store the clue with composite key
+        // Store the clue with a per-clue persistent key and per-key TTL. Remove
+        // the pre-migration instance copy only after the canonical write.
         let key = Self::clue_key(hunt_id, clue.clue_id);
         env.storage().persistent().set(&key, clue);
+        env.storage().instance().remove(&key);
         extend_ttl(env, &key, TtlPolicy::Active);
 
-        // Update the list of clue IDs for this hunt
+        // Update the persistent clue index and required-clue index.
         Self::add_clue_to_list(env, hunt_id, clue.clue_id);
         if clue.is_required {
             Self::add_required_clue(env, hunt_id, clue.clue_id);
@@ -412,14 +458,16 @@ impl Storage {
     /// * `Some(Clue)` if the clue exists, `None` otherwise
     pub fn get_clue(env: &Env, hunt_id: u64, clue_id: u32) -> Option<Clue> {
         let key = Self::clue_key(hunt_id, clue_id);
-        let val: Option<Val> = env.storage().persistent().get(&key);
+        let persistent_raw: Option<Val> = env.storage().persistent().get(&key);
 
-        let result = val.and_then(|v| {
-            // First try to deserialize as new Clue
-            if let Ok(clue) = Clue::try_from_val(env, &v) {
+        let decode = |value: &Val| -> Option<Clue> {
+            // First try to deserialize as the current Clue layout.
+            if let Ok(clue) = Clue::try_from_val(env, value) {
                 return Some(clue);
             }
-            // If that fails, try to deserialize as LegacyClue and convert
+
+            // If that fails, try the pre-tier-migration layout and fill fields
+            // introduced later with safe defaults.
             #[contracttype]
             #[derive(Clone, Debug)]
             struct LegacyClue {
@@ -431,8 +479,9 @@ impl Storage {
                 pub difficulty: u32,
             }
 
-            if let Ok(legacy) = LegacyClue::try_from_val(env, &v) {
-                Some(Clue {
+            LegacyClue::try_from_val(env, value)
+                .ok()
+                .map(|legacy| Clue {
                     clue_id: legacy.clue_id,
                     question: legacy.question,
                     answer_hashes: legacy.answer_hashes,
@@ -443,10 +492,28 @@ impl Storage {
                     hint: None,
                     hint_penalty_points: 0,
                 })
-            } else {
-                None
+        };
+
+        let mut result = persistent_raw.as_ref().and_then(|value| decode(value));
+        let mut promoted_legacy = false;
+        if result.is_none() {
+            // Older deployments kept the clue record in instance storage. Read
+            // and promote it on first access, preserving compatibility during a
+            // rolling upgrade.
+            if let Some(legacy_raw) = env.storage().instance().get::<_, Val>(&key) {
+                result = decode(&legacy_raw);
+                promoted_legacy = result.is_some();
             }
-        });
+        }
+
+        if promoted_legacy {
+            if let Some(ref clue) = result {
+                env.storage().persistent().set(&key, clue);
+                env.storage().instance().remove(&key);
+            }
+        } else if result.is_some() {
+            env.storage().instance().remove(&key);
+        }
 
         if result.is_some() {
             extend_ttl(env, &key, TtlPolicy::Active);
@@ -679,7 +746,7 @@ impl Storage {
     }
 
     fn clue_exists_key(hunt_id: u64, clue_id: u32) -> (soroban_sdk::Symbol, u64, u32) {
-        (symbol_short!("CLEX"), hunt_id, clue_id)
+        (Self::CLUE_EXISTS_KEY, hunt_id, clue_id)
     }
 
     fn leaderboard_key(hunt_id: u64) -> (soroban_sdk::Symbol, u64) {
@@ -728,26 +795,109 @@ impl Storage {
 
     // ========== Internal Helper Functions ==========
 
-    /// Adds a clue ID to the list of clues for a hunt.
-    /// This maintains an index for efficient listing.
-    fn add_clue_to_list(env: &Env, hunt_id: u64, clue_id: u32) {
-        let count_key = Self::clue_list_count_key(hunt_id);
-        let count: u32 = env.storage().instance().get(&count_key).unwrap_or(0);
+    /// Extends a canonical per-hunt index key using the same persistent TTL
+    /// policy as the hunt and player records it describes.
+    fn touch_persistent_index<K: IntoVal<Env, Val>>(env: &Env, key: &K) {
+        env.storage().persistent().extend_ttl(
+            key,
+            PERSISTENT_TTL_THRESHOLD,
+            PERSISTENT_TTL_EXTEND_TO,
+        );
+    }
 
-        // O(1) existence check
-        let exist_key = Self::clue_exists_key(hunt_id, clue_id);
-        if env.storage().instance().has(&exist_key) {
+    /// Copies the pre-migration instance clue index into persistent storage.
+    /// The operation is idempotent and intentionally bounded by the contract's
+    /// maximum clue count, so it is safe to run lazily on every index read.
+    fn migrate_clue_index_from_instance(env: &Env, hunt_id: u64) {
+        let legacy_count: u32 = env
+            .storage()
+            .instance()
+            .get(&Self::clue_list_count_key(hunt_id))
+            .unwrap_or(0)
+            .min(MAX_MIGRATED_CLUE_INDEX_ENTRIES);
+        if legacy_count == 0 {
             return;
         }
 
+        let count_key = Self::clue_list_count_key(hunt_id);
+        let mut count: u32 = env.storage().persistent().get(&count_key).unwrap_or(0);
+
+        for index in 0..legacy_count {
+            let legacy_entry_key = Self::clue_entry_key(hunt_id, index);
+            let clue_id: Option<u32> = env.storage().instance().get(&legacy_entry_key);
+            if let Some(clue_id) = clue_id {
+                let exists_key = Self::clue_exists_key(hunt_id, clue_id);
+                let mut already_indexed = false;
+                for canonical_index in 0..count {
+                    let canonical_key = Self::clue_entry_key(hunt_id, canonical_index);
+                    if env.storage().persistent().get::<_, u32>(&canonical_key) == Some(clue_id) {
+                        already_indexed = true;
+                        break;
+                    }
+                }
+                if !already_indexed {
+                    let entry_key = Self::clue_entry_key(hunt_id, count);
+                    env.storage().persistent().set(&entry_key, &clue_id);
+                    Self::touch_persistent_index(env, &entry_key);
+                    count = count.saturating_add(1);
+                }
+                // Promote the marker even when the entry was already present.
+                env.storage().persistent().set(&exists_key, &());
+                Self::touch_persistent_index(env, &exists_key);
+                env.storage().instance().remove(&exists_key);
+            }
+            env.storage().instance().remove(&legacy_entry_key);
+        }
+
+        if count > 0 {
+            env.storage().persistent().set(&count_key, &count);
+            Self::touch_persistent_index(env, &count_key);
+        }
+        env.storage().instance().remove(&count_key);
+    }
+
+    /// Adds a clue ID to the persistent clue index for a hunt.
+    fn add_clue_to_list(env: &Env, hunt_id: u64, clue_id: u32) {
+        Self::migrate_clue_index_from_instance(env, hunt_id);
+
+        let count_key = Self::clue_list_count_key(hunt_id);
+        let count: u32 = env.storage().persistent().get(&count_key).unwrap_or(0);
+        let exists_key = Self::clue_exists_key(hunt_id, clue_id);
+
+        // The canonical marker is persistent. Verify the corresponding entry
+        // as well: a partially expired/migrated index must self-heal instead
+        // of permanently hiding a clue behind a stale marker.
+        if env.storage().persistent().has(&exists_key) {
+            let mut indexed = false;
+            for index in 0..count {
+                let indexed_key = Self::clue_entry_key(hunt_id, index);
+                if env.storage().persistent().get::<_, u32>(&indexed_key) == Some(clue_id) {
+                    indexed = true;
+                    break;
+                }
+            }
+            if indexed {
+                Self::touch_persistent_index(env, &exists_key);
+                return;
+            }
+            env.storage().persistent().remove(&exists_key);
+        }
+        if env.storage().instance().has(&exists_key) {
+            env.storage().persistent().set(&exists_key, &());
+            Self::touch_persistent_index(env, &exists_key);
+            env.storage().instance().remove(&exists_key);
+            return;
+        }
+
+        let entry_key = Self::clue_entry_key(hunt_id, count);
+        env.storage().persistent().set(&entry_key, &clue_id);
+        Self::touch_persistent_index(env, &entry_key);
         env.storage()
-            .instance()
-            .set(&Self::clue_entry_key(hunt_id, count), &clue_id);
-        env.storage().instance().set(&count_key, &(count + 1));
-        env.storage().instance().set(&exist_key, &());
-        env.storage()
-            .instance()
-            .extend_ttl(INSTANCE_TTL_THRESHOLD, INSTANCE_TTL_EXTEND_TO);
+            .persistent()
+            .set(&count_key, &count.saturating_add(1));
+        Self::touch_persistent_index(env, &count_key);
+        env.storage().persistent().set(&exists_key, &());
+        Self::touch_persistent_index(env, &exists_key);
     }
 
     fn add_required_clue(env: &Env, hunt_id: u64, clue_id: u32) {
@@ -780,8 +930,13 @@ impl Storage {
     }
 
     fn get_clue_ids_for_hunt(env: &Env, hunt_id: u64, offset: u32, limit: u32) -> Vec<u32> {
+        Self::migrate_clue_index_from_instance(env, hunt_id);
+
         let count_key = Self::clue_list_count_key(hunt_id);
-        let count: u32 = env.storage().instance().get(&count_key).unwrap_or(0);
+        let count: u32 = env.storage().persistent().get(&count_key).unwrap_or(0);
+        if env.storage().persistent().has(&count_key) {
+            Self::touch_persistent_index(env, &count_key);
+        }
         let mut ids = Vec::new(env);
         let start = offset;
         let end = core::cmp::min(offset.saturating_add(limit), count);
@@ -790,7 +945,8 @@ impl Storage {
         }
         for i in start..end {
             let entry_key = Self::clue_entry_key(hunt_id, i);
-            if let Some(id) = env.storage().instance().get(&entry_key) {
+            if let Some(id) = env.storage().persistent().get(&entry_key) {
+                Self::touch_persistent_index(env, &entry_key);
                 ids.push_back(id);
             }
         }
@@ -968,9 +1124,10 @@ impl Storage {
     /// The next available hunt ID (starting from 1)
     pub fn next_hunt_id(env: &Env) -> u64 {
         let key = Self::HUNT_COUNTER_KEY;
-        let current: u64 = env.storage().persistent().get(&key).unwrap_or(0);
-        let next = current + 1;
+        let current = Self::get_hunt_counter(env);
+        let next = current.saturating_add(1);
         env.storage().persistent().set(&key, &next);
+        env.storage().instance().remove(&key);
         extend_ttl(env, &key, TtlPolicy::Critical);
         next
     }
@@ -984,11 +1141,21 @@ impl Storage {
     /// The current hunt counter value (0 if no hunts have been created)
     pub fn get_hunt_counter(env: &Env) -> u64 {
         let key = Self::HUNT_COUNTER_KEY;
-        let result: Option<u64> = env.storage().persistent().get(&key);
-        if result.is_some() {
+        if let Some(value) = env.storage().persistent().get::<_, u64>(&key) {
             extend_ttl(env, &key, TtlPolicy::Critical);
+            env.storage().instance().remove(&key);
+            return value;
         }
-        result.unwrap_or(0)
+
+        // Legacy deployments kept the global counter in instance storage.
+        // Promote it before allocating a new ID so upgrades cannot reuse IDs.
+        if let Some(value) = env.storage().instance().get::<_, u64>(&key) {
+            env.storage().persistent().set(&key, &value);
+            env.storage().instance().remove(&key);
+            extend_ttl(env, &key, TtlPolicy::Critical);
+            return value;
+        }
+        0
     }
 
     // ========== Clue Counter (per hunt) Functions ==========
@@ -1004,9 +1171,10 @@ impl Storage {
     /// The next available clue ID for the hunt
     pub fn next_clue_id(env: &Env, hunt_id: u64) -> u32 {
         let key = Self::clue_counter_key(hunt_id);
-        let current: u32 = env.storage().persistent().get(&key).unwrap_or(0);
-        let next = current + 1;
+        let current = Self::get_clue_counter(env, hunt_id);
+        let next = current.saturating_add(1);
         env.storage().persistent().set(&key, &next);
+        env.storage().instance().remove(&key);
         extend_ttl(env, &key, TtlPolicy::Active);
         next
     }
@@ -1021,11 +1189,21 @@ impl Storage {
     /// The number of clues added so far for the hunt (0 if none)
     pub fn get_clue_counter(env: &Env, hunt_id: u64) -> u32 {
         let key = Self::clue_counter_key(hunt_id);
-        let result: Option<u32> = env.storage().persistent().get(&key);
-        if result.is_some() {
+        if let Some(value) = env.storage().persistent().get::<_, u32>(&key) {
             extend_ttl(env, &key, TtlPolicy::Active);
+            env.storage().instance().remove(&key);
+            return value;
         }
-        result.unwrap_or(0)
+
+        // Preserve clue IDs when upgrading a contract that stored the counter
+        // in instance storage.
+        if let Some(value) = env.storage().instance().get::<_, u32>(&key) {
+            env.storage().persistent().set(&key, &value);
+            env.storage().instance().remove(&key);
+            extend_ttl(env, &key, TtlPolicy::Active);
+            return value;
+        }
+        0
     }
 
     // ========== Reward Manager Storage Functions ==========
@@ -1490,7 +1668,6 @@ impl Storage {
         result
     }
 
-
     // ========== Ban Storage Functions ==========
 
     fn ban_key(hunt_id: u64, player: &Address) -> (soroban_sdk::Symbol, u64, Address) {
@@ -1673,11 +1850,17 @@ impl Storage {
             .persistent()
             .get(&Self::player_count_key(hunt_id))
             .unwrap_or(0);
-        let clue_count: u32 = env
+        let persistent_clue_count: u32 = env
+            .storage()
+            .persistent()
+            .get(&Self::clue_list_count_key(hunt_id))
+            .unwrap_or(0);
+        let legacy_clue_count: u32 = env
             .storage()
             .instance()
             .get(&Self::clue_list_count_key(hunt_id))
             .unwrap_or(0);
+        let clue_count = core::cmp::max(persistent_clue_count, legacy_clue_count);
         let team_count: u32 = env
             .storage()
             .persistent()
@@ -1726,17 +1909,29 @@ impl Storage {
         // ── Per-clue entries ──────────────────────────────────────────────
         for index in 0..clue_count {
             let entry_key = Self::clue_entry_key(hunt_id, index);
-            let clue_id: Option<u32> = env.storage().instance().get(&entry_key);
+            let persistent_clue_id: Option<u32> = env.storage().persistent().get(&entry_key);
+            let legacy_clue_id: Option<u32> = env.storage().instance().get(&entry_key);
 
-            if let Some(clue_id) = clue_id {
+            // A partially migrated hunt can have the same clue ID in both
+            // tiers. Process each distinct ID once, but remove both entries.
+            if persistent_clue_id.or(legacy_clue_id).is_some() {
+                let clue_id = persistent_clue_id.or(legacy_clue_id).unwrap();
                 let clue = Self::clue_key(hunt_id, clue_id);
                 let clue_exists = Self::clue_exists_key(hunt_id, clue_id);
 
                 if remove {
                     Self::gc_remove_persistent(env, &clue, &mut persistent_removed);
+                    Self::gc_remove_instance(env, &clue, &mut instance_removed);
+                    Self::gc_remove_persistent(env, &clue_exists, &mut persistent_removed);
                     Self::gc_remove_instance(env, &clue_exists, &mut instance_removed);
                 } else {
                     if env.storage().persistent().has(&clue) {
+                        persistent_removed = persistent_removed.saturating_add(1);
+                    }
+                    if env.storage().instance().has(&clue) {
+                        instance_removed = instance_removed.saturating_add(1);
+                    }
+                    if env.storage().persistent().has(&clue_exists) {
                         persistent_removed = persistent_removed.saturating_add(1);
                     }
                     if env.storage().instance().has(&clue_exists) {
@@ -1746,9 +1941,15 @@ impl Storage {
             }
 
             if remove {
+                Self::gc_remove_persistent(env, &entry_key, &mut persistent_removed);
                 Self::gc_remove_instance(env, &entry_key, &mut instance_removed);
-            } else if env.storage().instance().has(&entry_key) {
-                instance_removed = instance_removed.saturating_add(1);
+            } else {
+                if env.storage().persistent().has(&entry_key) {
+                    persistent_removed = persistent_removed.saturating_add(1);
+                }
+                if env.storage().instance().has(&entry_key) {
+                    instance_removed = instance_removed.saturating_add(1);
+                }
             }
         }
 
@@ -1807,6 +2008,7 @@ impl Storage {
             Self::gc_remove_persistent(env, &leaderboard, &mut persistent_removed);
             Self::gc_remove_persistent(env, &required_clues, &mut persistent_removed);
             Self::gc_remove_persistent(env, &clue_counter, &mut persistent_removed);
+            Self::gc_remove_persistent(env, &clue_list_count, &mut persistent_removed);
             Self::gc_remove_persistent(env, &player_count_key, &mut persistent_removed);
             Self::gc_remove_persistent(env, &team_count_key, &mut persistent_removed);
 
@@ -1826,6 +2028,12 @@ impl Storage {
             }
             if env.storage().persistent().has(&clue_counter) {
                 persistent_removed = persistent_removed.saturating_add(1);
+            }
+            if env.storage().persistent().has(&clue_list_count) {
+                persistent_removed = persistent_removed.saturating_add(1);
+            }
+            if env.storage().instance().has(&clue_counter) {
+                instance_removed = instance_removed.saturating_add(1);
             }
             if env.storage().persistent().has(&player_count_key) {
                 persistent_removed = persistent_removed.saturating_add(1);
@@ -1856,5 +2064,121 @@ impl Storage {
             clues_swept: clue_count,
             teams_swept: team_count,
         }
+    }
+}
+
+#[cfg(test)]
+mod storage_tier_tests {
+    use super::*;
+    use crate::HuntyCore;
+    use soroban_sdk::{testutils::Address as _, Address, Env, String};
+
+    fn create_hunt_with_clue(env: &Env) -> (Address, u64) {
+        let contract_id = env.register(HuntyCore, ());
+        let creator = Address::generate(env);
+        let hunt_id = env.as_contract(&contract_id, || {
+            let id = HuntyCore::create_hunt(
+                env.clone(),
+                creator.clone(),
+                String::from_str(env, "Legacy migration hunt"),
+                String::from_str(env, "Storage tier regression"),
+                None,
+                None,
+                0,
+                None,
+                None,
+            )
+            .unwrap();
+            HuntyCore::add_clue(
+                env.clone(),
+                id,
+                String::from_str(env, "Question"),
+                String::from_str(env, "answer"),
+                10,
+                true,
+                None,
+                None,
+            )
+            .unwrap();
+            id
+        });
+        (contract_id, hunt_id)
+    }
+
+    #[test]
+    fn hunt_and_clue_records_use_persistent_storage() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let (_contract_id, hunt_id) = create_hunt_with_clue(&env);
+
+        env.as_contract(&_contract_id, || {
+            let hunt_key = Storage::hunt_key(hunt_id);
+            let clue_key = Storage::clue_key(hunt_id, 1);
+            let list_entry = Storage::clue_entry_key(hunt_id, 0);
+            let list_count = Storage::clue_list_count_key(hunt_id);
+            let marker = Storage::clue_exists_key(hunt_id, 1);
+
+            assert!(env.storage().persistent().has(&hunt_key));
+            assert!(env.storage().persistent().has(&clue_key));
+            assert!(env.storage().persistent().has(&list_entry));
+            assert!(env.storage().persistent().has(&list_count));
+            assert!(env.storage().persistent().has(&marker));
+            assert!(!env.storage().instance().has(&hunt_key));
+            assert!(!env.storage().instance().has(&clue_key));
+            assert!(!env.storage().instance().has(&list_entry));
+            assert!(!env.storage().instance().has(&list_count));
+            assert!(!env.storage().instance().has(&marker));
+        });
+    }
+
+    #[test]
+    fn legacy_instance_hunt_and_clue_index_are_promoted_lazily() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let (contract_id, hunt_id) = create_hunt_with_clue(&env);
+
+        env.as_contract(&contract_id, || {
+            // Recreate the pre-fix layout for the known key surface.
+            let hunt_key = Storage::hunt_key(hunt_id);
+            let hunt: Hunt = env.storage().persistent().get(&hunt_key).unwrap();
+            env.storage().persistent().remove(&hunt_key);
+            env.storage().instance().set(&hunt_key, &hunt);
+
+            let clue_key = Storage::clue_key(hunt_id, 1);
+            let clue: Clue = env.storage().persistent().get(&clue_key).unwrap();
+            env.storage().persistent().remove(&clue_key);
+            env.storage().instance().set(&clue_key, &clue);
+
+            let entry_key = Storage::clue_entry_key(hunt_id, 0);
+            let entry: u32 = env.storage().persistent().get(&entry_key).unwrap();
+            env.storage().persistent().remove(&entry_key);
+            env.storage().instance().set(&entry_key, &entry);
+
+            let count_key = Storage::clue_list_count_key(hunt_id);
+            let count: u32 = env.storage().persistent().get(&count_key).unwrap();
+            env.storage().persistent().remove(&count_key);
+            env.storage().instance().set(&count_key, &count);
+
+            let marker_key = Storage::clue_exists_key(hunt_id, 1);
+            env.storage().persistent().remove(&marker_key);
+            env.storage().instance().set(&marker_key, &());
+
+            let recovered_hunt = Storage::get_hunt(&env, hunt_id).expect("legacy hunt");
+            assert_eq!(recovered_hunt.hunt_id, hunt_id);
+            let recovered_clues = Storage::list_clues_for_hunt(&env, hunt_id, 0, 10);
+            assert_eq!(recovered_clues.len(), 1);
+            assert_eq!(recovered_clues.get(0).unwrap().clue_id, 1);
+
+            assert!(env.storage().persistent().has(&hunt_key));
+            assert!(env.storage().persistent().has(&clue_key));
+            assert!(env.storage().persistent().has(&entry_key));
+            assert!(env.storage().persistent().has(&count_key));
+            assert!(env.storage().persistent().has(&marker_key));
+            assert!(!env.storage().instance().has(&hunt_key));
+            assert!(!env.storage().instance().has(&clue_key));
+            assert!(!env.storage().instance().has(&entry_key));
+            assert!(!env.storage().instance().has(&count_key));
+            assert!(!env.storage().instance().has(&marker_key));
+        });
     }
 }
