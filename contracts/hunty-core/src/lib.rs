@@ -44,6 +44,10 @@ mod tests {
         assert_eq!(UNLIMITED_SUBMISSIONS_PER_MINUTE, 0);
     }
 }
+
+#[cfg(test)]
+#[path = "paused_status_test.rs"]
+mod paused_status_test;
 const MAX_QUESTION_LENGTH: u32 = 2000;
 const MAX_ANSWER_LENGTH: u32 = 256;
 const MAX_CATEGORY_BYTES: u32 = 64;
@@ -1404,8 +1408,14 @@ impl HuntyCore {
             return Err(HuntErrorCode::HuntEndTimeInPast);
         }
 
+        // `activated_at` identifies the beginning of the active play window.
+        // It is set once for a Draft hunt and preserved across Paused -> Active
+        // transitions; overwriting it on every reactivation changes time-based
+        // scoring and breaks the timestamp recorded in existing player progress.
+        if old_status == HuntStatus::Draft {
+            hunt.activated_at = current_time;
+        }
         hunt.status = HuntStatus::Active;
-        hunt.activated_at = current_time;
 
         Storage::save_hunt(&env, &hunt);
 
@@ -1443,8 +1453,14 @@ impl HuntyCore {
             return Err(HuntErrorCode::InvalidHuntStatus);
         }
 
-        // Validation passed — load full hunt from persistent for mutation
+        // Validation passed — load full hunt from persistent for mutation.
+        // Re-check the authoritative status because the cache is an
+        // optimization and can be stale during a rolling upgrade.
         let mut hunt = Storage::get_hunt(&env, hunt_id).ok_or(HuntErrorCode::HuntNotFound)?;
+        if hunt.status != HuntStatus::Active {
+            return Err(HuntErrorCode::InvalidHuntStatus);
+        }
+        let old_status = hunt.status.clone();
         hunt.status = HuntStatus::Paused;
 
         Storage::save_hunt(&env, &hunt);
@@ -1457,7 +1473,7 @@ impl HuntyCore {
         Self::emit_hunt_status_changed(
             &env,
             hunt_id,
-            HuntStatus::Active,
+            old_status,
             HuntStatus::Paused,
             env.ledger().timestamp(),
         );
@@ -2093,6 +2109,9 @@ impl HuntyCore {
 
         let hunt = Storage::get_hunt(&env, hunt_id).ok_or(HuntErrorCode::HuntNotFound)?;
 
+        // Paused is intentionally not registration-eligible. A paused hunt
+        // must be explicitly reactivated before new players can enter, while
+        // existing progress remains stored for the resumed session.
         if hunt.status != HuntStatus::Active {
             return Err(HuntErrorCode::InvalidHuntStatus);
         }
@@ -2327,6 +2346,8 @@ impl HuntyCore {
 
         let hunt = Storage::get_hunt(&env, hunt_id).ok_or(HuntErrorCode::HuntNotFound)?;
 
+        // Invitation registration follows the same explicit Paused gate as
+        // public registration; a valid invite must not bypass a pause.
         if hunt.status != HuntStatus::Active {
             return Err(HuntErrorCode::InvalidHuntStatus);
         }
