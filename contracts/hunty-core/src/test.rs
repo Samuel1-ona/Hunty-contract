@@ -66,6 +66,32 @@ mod test {
         None
     }
 
+    fn find_hunt_status_event_for_hunt(
+        env: &Env,
+        hunt_id: u64,
+        new_status: HuntStatus,
+    ) -> Option<HuntStatusChangedEvent> {
+        let expected_topic: Val = Symbol::new(env, "HuntStatusChanged").into_val(env);
+        let events = env.events().all();
+        let mut idx = 0;
+        while idx < events.len() {
+            let event = events.get(idx).unwrap();
+            let topics = &event.1;
+            if topics.len() > 0 {
+                let topic = topics.get(0).unwrap();
+                if topic.get_payload() == expected_topic.get_payload() {
+                    if let Ok(status_event) = HuntStatusChangedEvent::try_from_val(env, &event.2) {
+                        if status_event.hunt_id == hunt_id && status_event.new_status == new_status {
+                            return Some(status_event);
+                        }
+                    }
+                }
+            }
+            idx += 1;
+        }
+        None
+    }
+
     fn find_event<T: TryFromVal<Env, Val>>(env: &Env, topic_name: &str) -> Option<(Vec<Val>, T)> {
         let expected_topic: Val = Symbol::new(env, topic_name).into_val(env);
         let events = env.events().all();
@@ -4397,6 +4423,55 @@ mod test {
         }
 
         // â”€â”€ Issue #91: Paused-state tests â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+
+        #[test]
+        fn test_deactivate_status_event_matches_stored_hunt_status() {
+            let env = Env::default();
+            env.ledger().set_timestamp(1_700_000_000);
+            env.mock_all_auths();
+
+            let creator = Address::generate(&env);
+            let question = String::from_str(&env, "Q");
+            let answer = String::from_str(&env, "a");
+
+            with_core_contract(&env, |env, _cid| {
+                let hunt_id = HuntyCore::create_hunt(
+                    env.clone(),
+                    creator.clone(),
+                    String::from_str(env, "Hunt"),
+                    String::from_str(env, "Desc"),
+                    None,
+                    None,
+                    0,
+                    None,
+                    None,
+                )
+                .unwrap();
+                HuntyCore::add_clue(
+                    env.clone(),
+                    hunt_id,
+                    question,
+                    answer,
+                    1,
+                    true,
+                    Some(1),
+                    None,
+                )
+                .unwrap();
+                HuntyCore::activate_hunt(env.clone(), hunt_id, creator.clone()).unwrap();
+                HuntyCore::deactivate_hunt(env.clone(), hunt_id, creator.clone()).unwrap();
+
+                let stored_status = HuntyCore::get_hunt_info(env.clone(), hunt_id)
+                    .unwrap()
+                    .status;
+                let status_event = find_hunt_status_event_for_hunt(env, hunt_id, HuntStatus::Paused)
+                    .expect("expected the deactivation status event");
+
+                assert_eq!(status_event.hunt_id, hunt_id);
+                assert_eq!(status_event.new_status, stored_status);
+                assert_eq!(status_event.new_status, HuntStatus::Paused);
+            });
+        }
 
         #[test]
         fn test_deactivate_sets_paused_not_draft() {
