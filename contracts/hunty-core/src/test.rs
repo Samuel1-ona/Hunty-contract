@@ -11672,4 +11672,43 @@ mod test {
             assert!(!hunt_at_end.is_active(end_time));
         });
     }
+
+    /// Regression test: complete_hunt must not modify the schema version.
+    ///
+    /// The migration block that reads `current`, `target_version`, and `dry_run`
+    /// (parameters of `run_migration`, not `complete_hunt`) was accidentally merged
+    /// into the reward-claim path.  If that block were ever reintroduced, calling
+    /// `migrate_v1_to_v2` inside `complete_hunt` would mutate schema state on every
+    /// reward claim.  This test catches that regression by asserting that the stored
+    /// schema version is identical before and after a successful `complete_hunt` call.
+    #[test]
+    fn test_complete_hunt_does_not_change_schema_version() {
+        let env = Env::default();
+        env.ledger().set_timestamp(1_700_000_000);
+        let creator = Address::generate(&env);
+        let player = Address::generate(&env);
+
+        let (hunt_id, contract_id) =
+            setup_completed_hunt_with_rewards(&env, &creator, &player, 5, 1000);
+
+        // Capture schema version before the reward claim.
+        let version_before = as_core_contract(&env, &contract_id, |env| {
+            HuntyCore::get_schema_version(env.clone())
+        });
+
+        // Claim the reward.
+        env.mock_all_auths();
+        as_core_contract(&env, &contract_id, |env| {
+            HuntyCore::complete_hunt(env.clone(), hunt_id, player.clone()).unwrap();
+        });
+
+        // Schema version must be unchanged: complete_hunt owns no migration logic.
+        let version_after = as_core_contract(&env, &contract_id, |env| {
+            HuntyCore::get_schema_version(env.clone())
+        });
+        assert_eq!(
+            version_before, version_after,
+            "complete_hunt must not alter the schema version (migration block leaked into reward path)"
+        );
+    }
 }
