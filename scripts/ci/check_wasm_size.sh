@@ -10,9 +10,9 @@ fail=0
 warn=0
 
 shopt -s nullglob
-wasm_files=(target/wasm32-unknown-unknown/release/*.wasm)
+wasm_files=(target/wasm32v1-none/release/*.wasm)
 if [ ${#wasm_files[@]} -eq 0 ]; then
-  echo "No wasm files found under target/wasm32-unknown-unknown/release/. Did the build succeed?"
+  echo "No wasm files found under target/wasm32v1-none/release/. Did the build succeed?"
   exit 2
 fi
 

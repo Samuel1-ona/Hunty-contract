@@ -30,7 +30,7 @@ jobs:
         uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
         with:
           components: clippy
-          targets: wasm32-unknown-unknown
+          targets: wasm32v1-none
 
       - name: Cache cargo registry and build
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
@@ -169,14 +169,14 @@ jobs:
           {
             echo "Building workspace members individually for WASM analysis..."
             for pkg in hunty-core nft-reward reward-manager; do
-              echo "=== cargo build -p ${pkg} --target wasm32-unknown-unknown --release ==="
-              cargo build -p "$pkg" --target wasm32-unknown-unknown --release
+              echo "=== cargo build -p ${pkg} --target wasm32v1-none --release ==="
+              cargo build -p "$pkg" --target wasm32v1-none --release
             done
           } 2>&1 | tee security-reports/wasm-build.txt
           set -e
 
           shopt -s nullglob
-          wasm_files=(target/wasm32-unknown-unknown/release/*.wasm)
+          wasm_files=(target/wasm32v1-none/release/*.wasm)
           echo "Built ${#wasm_files[@]} wasm artifact(s)" | tee -a security-reports/wasm-build.txt
           # Succeed the step if at least one contract WASM was produced.
           if [ ${#wasm_files[@]} -gt 0 ]; then

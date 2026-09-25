@@ -4,7 +4,7 @@
 # Writes a markdown report to SECURITY_WASM_REPORT (default: security-wasm-report.md)
 set -euo pipefail
 
-WASM_GLOB="${1:-target/wasm32-unknown-unknown/release/*.wasm}"
+WASM_GLOB="${1:-target/wasm32v1-none/release/*.wasm}"
 REPORT_FILE="${SECURITY_WASM_REPORT:-security-wasm-report.md}"
 # Soroban contracts typically only import from the host "v" / "x" env modules.
 ALLOWED_IMPORT_MODULES_REGEX="${ALLOWED_IMPORT_MODULES_REGEX:-^(v|x|l|m|d|i|b|a)$}"

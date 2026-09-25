@@ -2,6 +2,7 @@ use crate::audit::{AuditEvent, TOPIC_AUDIT};
 use soroban_sdk::{Address, Env, String, Symbol, Vec};
 
 /// Emits a standardized audit event to the contract environment
+#[allow(deprecated)]
 pub fn emit_audit_event(
     env: &Env,
     admin_address: &Address,

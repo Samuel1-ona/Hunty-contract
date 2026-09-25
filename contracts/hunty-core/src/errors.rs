@@ -7,7 +7,7 @@ use soroban_sdk::contracterror;
 // InvalidInviteCode below for the established pattern) rather than removing
 // or renumbering an existing variant.
 #[contracterror]
-#derive(Clone, Copy, Debug, Eq, PartialEq, PartialOrd, Ord)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, PartialOrd, Ord)]
 #[repr(u32)]
 pub enum HuntErrorCode {
     HuntNotFound = 1,
@@ -62,7 +62,7 @@ pub enum HuntErrorCode {
     HuntFull = 50,
 }
 
-#derive(Debug)
+#[derive(Debug)]
 pub enum HuntError {
     HuntNotFound,
     ClueNotFound,

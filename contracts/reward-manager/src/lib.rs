@@ -1,4 +1,7 @@
 #![cfg_attr(not(test), no_std)]
+#![allow(clippy::too_many_arguments)]
+// Legacy event payloads still use the pre-contractevent publish API.
+#![allow(deprecated)]
 use soroban_sdk::xdr::ToXdr;
 use soroban_sdk::{
     contract, contractimpl, contracttype, symbol_short, Address, BytesN, Env, IntoVal, Symbol, Val,
@@ -14,8 +17,7 @@ pub use crate::types::{
     tiers_are_strictly_ascending, BatchDistributionEntry, DistributionAnalytics, DistributionMode,
     DistributionProof, DistributionRecord, DistributionStatus, PendingNftMint, PoolAuditEntry,
     PoolDistribution, PoolOperation, RankBasedRewardTier, RankRewardTier, ResolutionStatus,
-    RewardConfig,
-    RewardPoolConfig, RewardPoolStatistics, RewardPoolStatus, SemVer, TierError,
+    RewardConfig, RewardPoolConfig, RewardPoolStatistics, RewardPoolStatus, SemVer, TierError,
     TimeBasedRewardTier, ValidationResult, VestingRecord, VestingStatus,
 };
 use crate::xlm_handler::XlmHandler;
@@ -424,14 +426,16 @@ impl RewardManager {
     ) -> Result<(), RewardErrorCode> {
         Self::require_admin(&env, &admin)?;
         Storage::set_hunty_core(&env, &hunty_core);
+        // The configured core is the trusted contract boundary for reward
+        // distribution; keep the distributor allowlist in sync automatically.
+        Storage::add_authorized_contract(&env, &hunty_core);
         Ok(())
     }
 
-    fn require_authorized_distributor(env: &Env) -> Result<(), RewardErrorCode> {
-        let caller = env.invoker();
+    fn require_authorized_distributor(env: &Env, caller: &Address) -> Result<(), RewardErrorCode> {
         caller.require_auth();
 
-        if !Storage::has_authorized_contracts(env) || !Storage::is_authorized_contract(env, &caller)
+        if !Storage::has_authorized_contracts(env) || !Storage::is_authorized_contract(env, caller)
         {
             return Err(RewardErrorCode::Unauthorized);
         }
@@ -518,9 +522,8 @@ impl RewardManager {
 
         // Validate hunt_id exists in HuntyCore. hunty_core must be set during initialization.
         // Fail closed: pool creation is rejected if hunty_core is not configured.
-        let hunty_core = Storage::get_hunty_core(&env)
-            .ok_or(RewardErrorCode::NotInitialized)?;
-        
+        let hunty_core = Storage::get_hunty_core(&env).ok_or(RewardErrorCode::NotInitialized)?;
+
         let mut args: Vec<Val> = Vec::new(&env);
         args.push_back(hunt_id.into_val(&env));
         // get_hunt_info returns Result<Hunt, HuntErrorCode>.
@@ -819,10 +822,8 @@ impl RewardManager {
         config.rank_based_tiers = rank_based_tiers;
         Storage::set_pool_config(&env, hunt_id, &config);
 
-        env.events().publish(
-            (symbol_short!("PL_RTIERS"), hunt_id),
-            (creator, tier_count),
-        );
+        env.events()
+            .publish((symbol_short!("PL_RTIERS"), hunt_id), (creator, tier_count));
 
         Ok(())
     }
@@ -1613,7 +1614,7 @@ impl RewardManager {
     }
 
     /// Sets the daily distribution cap for a specific pool.
-    /// 
+    ///
     /// This limit controls the maximum amount of rewards that can be distributed from
     /// a pool in a single day (24-hour rolling window). This is a live operational control
     /// and should be validated to prevent silent misconfiguration.
@@ -1679,14 +1680,37 @@ impl RewardManager {
         }
     }
 
+    /// Legacy entrypoint retained for existing integrations. New contract
+    /// integrations should use `distribute_rewards_authorized`, which carries
+    /// and authenticates the calling contract explicitly.
     pub fn distribute_rewards(
         env: Env,
         hunt_id: u64,
         player_address: Address,
         reward_config: RewardConfig,
     ) -> Result<(), RewardErrorCode> {
+        Self::distribute_rewards_impl(env, hunt_id, player_address, reward_config)
+    }
+
+    /// Distribution entrypoint for an explicitly authenticated caller contract.
+    pub fn distribute_rewards_authorized(
+        env: Env,
+        caller: Address,
+        hunt_id: u64,
+        player_address: Address,
+        reward_config: RewardConfig,
+    ) -> Result<(), RewardErrorCode> {
+        Self::require_authorized_distributor(&env, &caller)?;
+        Self::distribute_rewards_impl(env, hunt_id, player_address, reward_config)
+    }
+
+    fn distribute_rewards_impl(
+        env: Env,
+        hunt_id: u64,
+        player_address: Address,
+        reward_config: RewardConfig,
+    ) -> Result<(), RewardErrorCode> {
         let mut reward_config = reward_config;
-        Self::require_authorized_distributor(&env)?;
 
         // Issue #628: distribution is blocked by its own pause flag or the global stop.
         Self::ensure_distribution_allowed(&env)?;
@@ -1763,10 +1787,8 @@ impl RewardManager {
         }
 
         // Validate NFT tier if present
-        if reward_config.has_nft() {
-            if reward_config.nft_rarity > 5 {
-                return Err(RewardErrorCode::InvalidConfig);
-            }
+        if reward_config.has_nft() && reward_config.nft_rarity > 5 {
+            return Err(RewardErrorCode::InvalidConfig);
         }
 
         // Write distribution record BEFORE any transfers to prevent replay in all failure modes
@@ -1950,7 +1972,9 @@ impl RewardManager {
 
         // Update the distribution record with the actual nft_id if minting succeeded
         if let Some(nft_id_val) = nft_id {
-            if let Some(mut record) = Storage::get_distribution_record(&env, hunt_id, &player_address) {
+            if let Some(mut record) =
+                Storage::get_distribution_record(&env, hunt_id, &player_address)
+            {
                 record.nft_id = Some(nft_id_val);
                 Storage::set_distribution_record(&env, hunt_id, &player_address, &record);
             }
@@ -2031,12 +2055,29 @@ impl RewardManager {
     /// * `PoolNotFound` - No pool exists for an entry's hunt_id.
     /// * `NotInitialized` - XLM token address not set.
     /// * `Unauthorized` - Caller is not an authorized contract.
+    /// Legacy batch entrypoint retained for existing integrations. New
+    /// contract integrations should use `distribute_batch_authorized`.
     pub fn distribute_batch(
         env: Env,
         distributions: Vec<BatchDistributionEntry>,
     ) -> Result<(), RewardErrorCode> {
-        Self::require_authorized_distributor(&env)?;
+        Self::distribute_batch_impl(env, distributions)
+    }
 
+    /// Batch distribution entrypoint for an explicitly authenticated caller.
+    pub fn distribute_batch_authorized(
+        env: Env,
+        caller: Address,
+        distributions: Vec<BatchDistributionEntry>,
+    ) -> Result<(), RewardErrorCode> {
+        Self::require_authorized_distributor(&env, &caller)?;
+        Self::distribute_batch_impl(env, distributions)
+    }
+
+    fn distribute_batch_impl(
+        env: Env,
+        distributions: Vec<BatchDistributionEntry>,
+    ) -> Result<(), RewardErrorCode> {
         // Issue #628: one check for the whole batch — a paused contract must not
         // distribute any entry, not merely stop partway through.
         Self::ensure_distribution_allowed(&env)?;
@@ -2059,8 +2100,8 @@ impl RewardManager {
         let mut normalized_distributions: Vec<BatchDistributionEntry> = Vec::new(&env);
         for i in 0..batch_len {
             let entry = distributions.get(i).unwrap();
-            let pool_config =
-                Storage::get_pool_config(&env, entry.hunt_id).ok_or(RewardErrorCode::PoolNotFound)?;
+            let pool_config = Storage::get_pool_config(&env, entry.hunt_id)
+                .ok_or(RewardErrorCode::PoolNotFound)?;
             let mut reward_config = entry.reward_config.clone();
             Self::apply_rank_tier(&pool_config, &mut reward_config);
             normalized_distributions.push_back(BatchDistributionEntry {
@@ -2085,7 +2126,9 @@ impl RewardManager {
             }
 
             // 1b. Replay protection (check if distribution record already exists)
-            if Storage::get_distribution_record(&env, entry.hunt_id, &entry.player_address).is_some() {
+            if Storage::get_distribution_record(&env, entry.hunt_id, &entry.player_address)
+                .is_some()
+            {
                 return Err(RewardErrorCode::AlreadyDistributed);
             }
 
@@ -2246,7 +2289,7 @@ impl RewardManager {
                     .cloned()
                     .or_else(|| Storage::get_nft_contract(&env))
                     .ok_or(RewardErrorCode::InvalidConfig)?;
-                
+
                 let pool_config = Storage::get_pool_config(&env, entry.hunt_id)
                     .ok_or(RewardErrorCode::PoolNotFound)?;
 
@@ -2279,11 +2322,20 @@ impl RewardManager {
                     Ok(id) => {
                         nft_id = Some(id);
                         // Update the record with the NFT ID
-                        if let Some(mut record) = Storage::get_distribution_record(&env, entry.hunt_id, &entry.player_address) {
+                        if let Some(mut record) = Storage::get_distribution_record(
+                            &env,
+                            entry.hunt_id,
+                            &entry.player_address,
+                        ) {
                             record.nft_id = Some(id);
-                            Storage::set_distribution_record(&env, entry.hunt_id, &entry.player_address, &record);
+                            Storage::set_distribution_record(
+                                &env,
+                                entry.hunt_id,
+                                &entry.player_address,
+                                &record,
+                            );
                         }
-                    },
+                    }
                     Err(_) => {
                         env.events().publish(
                             (symbol_short!("NFT_FAIL"), entry.hunt_id),
@@ -2371,9 +2423,9 @@ impl RewardManager {
 
         let pending = Storage::get_pending_nft_mint(&env, hunt_id, &player)
             .ok_or(RewardErrorCode::NftMintPendingNotFound)?;
-        
-        let pool_config = Storage::get_pool_config(&env, hunt_id)
-            .ok_or(RewardErrorCode::PoolNotFound)?;
+
+        let pool_config =
+            Storage::get_pool_config(&env, hunt_id).ok_or(RewardErrorCode::PoolNotFound)?;
 
         let nft_id = NftHandler::distribute_nft(
             &env,
@@ -3043,14 +3095,14 @@ impl RewardManager {
         if let Some(hunty_core) = Storage::get_hunty_core(&env) {
             let mut args: Vec<Val> = Vec::new(&env);
             args.push_back(hunt_id.into_val(&env));
-            
+
             // Try to get hunt info from HuntyCore
             let hunt_result = env.try_invoke_contract::<Val, Val>(
                 &hunty_core,
                 &Symbol::new(&env, "get_hunt_info"),
                 args,
             );
-            
+
             // If we can retrieve hunt info, verify it's not active
             if let Ok(Ok(_hunt_data)) = hunt_result {
                 // Hunt exists; check its status via another call or accept that we have validation
@@ -3058,10 +3110,9 @@ impl RewardManager {
                 // Since we can't easily deserialize the hunt struct in this context,
                 // we'll rely on the ledger timestamp vs end_time logic
                 // The hunt contract will handle detailed status validation
-                
+
                 // As a fallback, we check that hunt status is not Active
                 // by attempting to call a helper that validates hunt ended
-                let status_check_args: Vec<Val> = Vec::new(&env);
                 let _status_validation = env.try_invoke_contract::<Val, Val>(
                     &hunty_core,
                     &Symbol::new(&env, "is_hunt_active"),
@@ -3152,14 +3203,14 @@ impl RewardManager {
         if let Some(hunty_core) = Storage::get_hunty_core(&env) {
             let mut args: Vec<Val> = Vec::new(&env);
             args.push_back(hunt_id.into_val(&env));
-            
+
             // Try to get hunt info from HuntyCore
             let hunt_result = env.try_invoke_contract::<Val, Val>(
                 &hunty_core,
                 &Symbol::new(&env, "get_hunt_info"),
                 args,
             );
-            
+
             // If we can retrieve hunt info, verify it's not active
             if let Ok(Ok(_hunt_data)) = hunt_result {
                 // Hunt exists; we accept the withdrawal

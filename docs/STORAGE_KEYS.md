@@ -39,6 +39,7 @@ A CI/script check (`scripts/ci/check_storage_keys_doc.sh`) asserts that every
 | `PLAYER_COUNT_KEY` | `PLCT` | `(PLCT, hunt_id)` |
 | `CLUE_ENTRY_KEY` | `CLST` | `(CLST, hunt_id, index)` — persistent clue index entry |
 | `CLUE_LIST_COUNT_KEY` | `CLCT` | `(CLCT, hunt_id)` — persistent clue index count |
+| `PLAYER_EXISTS_KEY` | `PLEX` | `(PLEX, hunt_id, player)` — persistent player dedup marker |
 | `HUNT_COUNTER_KEY` | `CN` | hunt id counter |
 | `CLUE_COUNTER_KEY` | `CC` | clue id counter |
 | `REWARD_MGR_KEY` | `R` | reward-manager address |
@@ -74,7 +75,7 @@ A CI/script check (`scripts/ci/check_storage_keys_doc.sh`) asserts that every
 | Symbol | Usage |
 |---|---|
 | `CLUE_EXISTS_KEY` / `CLEX` | `(CLEX, hunt_id, clue_id)` — persistent clue dedup marker; legacy instance copies are promoted |
-| `PLEX` | player existence helper |
+| `PLAYER_EXISTS_KEY` / `PLEX` | `(PLEX, hunt_id, player)` — persistent player dedup marker; legacy instance copies are promoted |
 | `CVER` | contract version (inline) |
 | `HRLADM` / `HRLCT` / `HRLDEF` / `HRLOVR` | rate-limit helpers |
 
@@ -86,6 +87,7 @@ A CI/script check (`scripts/ci/check_storage_keys_doc.sh`) asserts that every
 | `FAILURES_KEY` | `FAILCT` |
 | `GAS_UNITS_KEY` | `GASUN` |
 | `ALERTS_KEY` | `ALERT` |
+| `ALERT_MAP_KEY` | `ALERTMAP` |
 
 ---
 

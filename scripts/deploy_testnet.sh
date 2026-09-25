@@ -66,7 +66,7 @@ stellar contract build
 if [ -d "target/wasm32v1-none/release" ]; then
   WASM_DIR="target/wasm32v1-none/release"
 else
-  WASM_DIR="target/wasm32-unknown-unknown/release"
+  WASM_DIR="target/wasm32v1-none/release"
 fi
 log "Using WASM directory: $WASM_DIR"
 
