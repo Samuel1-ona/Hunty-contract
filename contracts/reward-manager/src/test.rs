@@ -497,17 +497,18 @@ mod test {
             let tiers = Vec::from_array(
                 &env,
                 [
-                    RankRewardTier { rank: 1, xlm_amount: 1_000 },
-                    RankRewardTier { rank: 10, xlm_amount: 100 },
+                    RankRewardTier {
+                        rank: 1,
+                        xlm_amount: 1_000,
+                    },
+                    RankRewardTier {
+                        rank: 10,
+                        xlm_amount: 100,
+                    },
                 ],
             );
-            RewardManager::set_pool_rank_tiers(
-                env.clone(),
-                creator.clone(),
-                hunt_id,
-                tiers,
-            )
-            .unwrap();
+            RewardManager::set_pool_rank_tiers(env.clone(), creator.clone(), hunt_id, tiers)
+                .unwrap();
 
             let config = RewardManager::get_pool_config(env.clone(), hunt_id).unwrap();
             assert_eq!(config.rank_based_tiers.len(), 2);
@@ -516,13 +517,8 @@ mod test {
 
         env.mock_all_auths_allowing_non_root_auth();
         env.as_contract(&contract_id, || {
-            RewardManager::set_pool_rank_tiers(
-                env.clone(),
-                creator,
-                hunt_id,
-                Vec::new(&env),
-            )
-            .unwrap();
+            RewardManager::set_pool_rank_tiers(env.clone(), creator, hunt_id, Vec::new(&env))
+                .unwrap();
             let config = RewardManager::get_pool_config(env.clone(), hunt_id).unwrap();
             assert!(config.rank_based_tiers.is_empty());
         });
@@ -541,16 +537,17 @@ mod test {
             let invalid = Vec::from_array(
                 &env,
                 [
-                    RankRewardTier { rank: 2, xlm_amount: 100 },
-                    RankRewardTier { rank: 1, xlm_amount: 50 },
+                    RankRewardTier {
+                        rank: 2,
+                        xlm_amount: 100,
+                    },
+                    RankRewardTier {
+                        rank: 1,
+                        xlm_amount: 50,
+                    },
                 ],
             );
-            let result = RewardManager::set_pool_rank_tiers(
-                env.clone(),
-                creator,
-                hunt_id,
-                invalid,
-            );
+            let result = RewardManager::set_pool_rank_tiers(env.clone(), creator, hunt_id, invalid);
             assert_eq!(result, Err(RewardErrorCode::InvalidConfig));
             assert!(RewardManager::get_pool_config(env.clone(), hunt_id)
                 .unwrap()
@@ -574,7 +571,13 @@ mod test {
                 env.clone(),
                 attacker,
                 hunt_id,
-                Vec::from_array(&env, [RankRewardTier { rank: 1, xlm_amount: 100 }]),
+                Vec::from_array(
+                    &env,
+                    [RankRewardTier {
+                        rank: 1,
+                        xlm_amount: 100,
+                    }],
+                ),
             );
             assert_eq!(result, Err(RewardErrorCode::Unauthorized));
         });
@@ -592,7 +595,13 @@ mod test {
                 env.clone(),
                 creator,
                 999,
-                Vec::from_array(&env, [RankRewardTier { rank: 1, xlm_amount: 100 }]),
+                Vec::from_array(
+                    &env,
+                    [RankRewardTier {
+                        rank: 1,
+                        xlm_amount: 100,
+                    }],
+                ),
             );
             assert_eq!(result, Err(RewardErrorCode::PoolNotFound));
         });
@@ -610,7 +619,10 @@ mod test {
             reward_config.completion_rank = 1;
             pool_config.rank_based_tiers = Vec::from_array(
                 &env,
-                [RankRewardTier { rank: 1, xlm_amount: 1_000 }],
+                [RankRewardTier {
+                    rank: 1,
+                    xlm_amount: 1_000,
+                }],
             );
 
             RewardManager::apply_rank_tier(&pool_config, &mut reward_config);
@@ -636,8 +648,7 @@ mod test {
             let encoded = config.clone().into_val(&env);
             let decoded: reward_interface::RewardPoolConfig =
                 <reward_interface::RewardPoolConfig as TryFromVal<Env, Val>>::try_from_val(
-                    &env,
-                    &encoded,
+                    &env, &encoded,
                 )
                 .unwrap();
             assert_eq!(decoded.rank_based_tiers.len(), 1);
@@ -2980,13 +2991,14 @@ mod test {
         let config = xlm_only_config(&env, 2_000);
         env.as_contract(&unauthorized, || {
             let mut args: Vec<Val> = Vec::new(&env);
+            args.push_back(unauthorized.clone().into_val(&env));
             args.push_back((1u64).into_val(&env));
             args.push_back(player.clone().into_val(&env));
             args.push_back(config.clone().into_val(&env));
 
             let result = env.try_invoke_contract::<(), RewardErrorCode>(
                 &contract_id,
-                &Symbol::new(&env, "distribute_rewards"),
+                &Symbol::new(&env, "distribute_rewards_authorized"),
                 args,
             );
             assert_eq!(result, Err(Err(RewardErrorCode::Unauthorized)));
@@ -4465,16 +4477,12 @@ mod test {
             // The record should still be written, preventing retry attacks
             let mut config = xlm_only_config(&env, 30_000_000);
             config.nft_contract = Some(Address::generate(&env)); // Invalid/non-existent contract
-            
-            let result = RewardManager::distribute_rewards(
-                env.clone(),
-                1,
-                player.clone(),
-                config.clone(),
-            );
+
+            let result =
+                RewardManager::distribute_rewards(env.clone(), 1, player.clone(), config.clone());
             // Distribution with XLM should succeed, NFT should fail gracefully
             // OR if validation rejects the bad config, either way the check below works
-            
+
             // Regardless of first attempt outcome, second attempt should be rejected
             let result2 = RewardManager::distribute_rewards(
                 env.clone(),
@@ -4525,8 +4533,12 @@ mod test {
             assert_eq!(total_refunded_before, 0);
 
             // Verify accounting identity BEFORE refund
-            let identity_before = total_deposited_1 == balance_before + total_distributed_1 + total_refunded_before;
-            assert!(identity_before, "Accounting identity should hold before refund");
+            let identity_before =
+                total_deposited_1 == balance_before + total_distributed_1 + total_refunded_before;
+            assert!(
+                identity_before,
+                "Accounting identity should hold before refund"
+            );
 
             // Refund the pool
             RewardManager::refund_pool(env.clone(), creator.clone(), 1).unwrap();
@@ -4540,9 +4552,13 @@ mod test {
             assert_eq!(total_refunded_after, 70_000_000);
 
             // Verify accounting identity AFTER refund
-            let identity_after = total_deposited_1 == balance_after + total_distributed_after + total_refunded_after;
-            assert!(identity_after, "Accounting identity: {} == {} + {} + {}",
-                total_deposited_1, balance_after, total_distributed_after, total_refunded_after);
+            let identity_after =
+                total_deposited_1 == balance_after + total_distributed_after + total_refunded_after;
+            assert!(
+                identity_after,
+                "Accounting identity: {} == {} + {} + {}",
+                total_deposited_1, balance_after, total_distributed_after, total_refunded_after
+            );
         });
 
         // Creator should have received the 70_000_000 refund
@@ -4668,7 +4684,10 @@ mod test {
                     }
                 }
             }
-            assert!(found_withdraw, "Audit log should contain Withdraw operation");
+            assert!(
+                found_withdraw,
+                "Audit log should contain Withdraw operation"
+            );
         });
 
         // Now test refund_pool separately and verify it's labeled Refund, not Withdraw
@@ -4692,7 +4711,10 @@ mod test {
                 }
             }
             assert!(found_refund, "refund_pool should record a Refund operation");
-            assert!(!found_withdraw, "refund_pool should NOT record a Withdraw operation");
+            assert!(
+                !found_withdraw,
+                "refund_pool should NOT record a Withdraw operation"
+            );
         });
     }
 
@@ -4742,8 +4764,11 @@ mod test {
                 v
             };
             let result_retry = RewardManager::distribute_batch(env.clone(), entries_retry);
-            assert_eq!(result_retry, Err(RewardErrorCode::AlreadyDistributed),
-                "Retry batch for same player should fail");
+            assert_eq!(
+                result_retry,
+                Err(RewardErrorCode::AlreadyDistributed),
+                "Retry batch for same player should fail"
+            );
         });
 
         // Players should have received only 50_000_000 each, not 80_000_000

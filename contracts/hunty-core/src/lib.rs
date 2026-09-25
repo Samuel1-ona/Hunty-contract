@@ -1,5 +1,8 @@
 #![no_std]
 #![allow(clippy::too_many_arguments)]
+#![allow(clippy::empty_line_after_doc_comments)]
+// Legacy event payloads still use the pre-contractevent publish API.
+#![allow(deprecated)]
 
 mod errors;
 mod migration;
@@ -12,18 +15,19 @@ pub mod types;
 use crate::errors::{HuntError, HuntErrorCode};
 use crate::storage::Storage;
 use crate::types::{
-    AnswerIncorrectEvent, AnswerPreviewedEvent, BatchClueInput, Clue, ClueAddedEvent, ClueAliasesAddedEvent,
-    ClueCompletedEvent, ClueInfo, CreatorBlacklistedEvent, CreatorRemovedFromBlacklistEvent, GcReport, Hunt,
-    HuntActivatedEvent, HuntArchivedEvent, HuntCache, HuntCancelledEvent, HuntClonedEvent,
-    HuntClosedEvent, HuntCompletedEvent, HuntCreatedEvent, HuntDeactivatedEvent,
-    HuntDescriptionUpdatedEvent, HuntGarbageCollectedEvent, HuntReactivatedEvent, HuntStatistics, HuntStatus,
-    HuntStatusChangedEvent, InviteCodeGeneratedEvent, InviteCodeRevokedEvent, LeaderboardEntry,
-    LeaderboardIndexEntry, LeaderboardResult, PlayerProgress, PlayerRegisteredEvent,
-    PlayerRegisteredWithInviteEvent, RewardClaimedEvent, RewardConfig, RewardManagerSetEvent,
-    TimeBonusConfig,
+    AnswerIncorrectEvent, AnswerPreviewedEvent, BatchClueInput, Clue, ClueAddedEvent,
+    ClueAliasesAddedEvent, ClueCompletedEvent, ClueInfo, CreatorBlacklistedEvent,
+    CreatorRemovedFromBlacklistEvent, GcReport, Hunt, HuntActivatedEvent, HuntArchivedEvent,
+    HuntCache, HuntCancelledEvent, HuntClonedEvent, HuntClosedEvent, HuntCompletedEvent,
+    HuntCreatedEvent, HuntDeactivatedEvent, HuntDescriptionUpdatedEvent, HuntGarbageCollectedEvent,
+    HuntReactivatedEvent, HuntStatistics, HuntStatus, HuntStatusChangedEvent,
+    InviteCodeGeneratedEvent, InviteCodeRevokedEvent, LeaderboardEntry, LeaderboardIndexEntry,
+    LeaderboardResult, PlayerProgress, PlayerRegisteredEvent, PlayerRegisteredWithInviteEvent,
+    RewardClaimedEvent, RewardConfig, RewardManagerSetEvent, TimeBonusConfig,
 };
 use reward_interface::RewardErrorCode;
 use soroban_sdk::{
+    auth::{ContractContext, InvokerContractAuthEntry, SubContractInvocation},
     contract, contractimpl, Address, Bytes, BytesN, Env, IntoVal, String, Symbol, Val, Vec,
 };
 
@@ -33,6 +37,7 @@ const MAX_TITLE_BYTES: u32 = 200;
 // return SanitizeError::LimitTooLarge for every call using that limit.
 const MAX_DESCRIPTION_BYTES: u32 = 2000;
 /// Sentinel value for `max_submissions_per_minute` indicating no rate limit.
+#[allow(dead_code)]
 const UNLIMITED_SUBMISSIONS_PER_MINUTE: u32 = 0;
 
 #[cfg(test)]
@@ -102,7 +107,7 @@ impl HuntyCore {
         if Storage::get_admin(&env).is_some() {
             return Err(HuntErrorCode::Unauthorized);
         }
-            Ok(())
+        Ok(())
     }
 
     #[allow(dead_code)]
@@ -191,12 +196,13 @@ impl HuntyCore {
 
         // Validate and sanitize title/description at byte level
         let title =
-            crate::sanitization::StringSanitizer::sanitize::<MAX_TITLE_BYTES>(&env, &title, false)
+            crate::sanitization::StringSanitizer::sanitize(&env, &title, MAX_TITLE_BYTES, false)
                 .map_err(|_| HuntErrorCode::InvalidTitle)?;
 
-        let description = crate::sanitization::StringSanitizer::sanitize::<MAX_DESCRIPTION_BYTES>(
+        let description = crate::sanitization::StringSanitizer::sanitize(
             &env,
             &description,
+            MAX_DESCRIPTION_BYTES,
             true,
         )
         .map_err(|_| HuntErrorCode::InvalidDescription)?;
@@ -214,9 +220,7 @@ impl HuntyCore {
         }
 
         let start_multiplier_bps = start_multiplier_bps.unwrap_or(20_000);
-        if !(MIN_START_MULTIPLIER_BPS..=MAX_START_MULTIPLIER_BPS)
-            .contains(&start_multiplier_bps)
-        {
+        if !(MIN_START_MULTIPLIER_BPS..=MAX_START_MULTIPLIER_BPS).contains(&start_multiplier_bps) {
             return Err(HuntErrorCode::InvalidTimeBonusConfig);
         }
 
@@ -456,9 +460,10 @@ impl HuntyCore {
         }
 
         // Validate and sanitize description
-        let description = crate::sanitization::StringSanitizer::sanitize::<MAX_DESCRIPTION_BYTES>(
+        let description = crate::sanitization::StringSanitizer::sanitize(
             &env,
             &description,
+            MAX_DESCRIPTION_BYTES,
             true,
         )
         .map_err(|_| HuntErrorCode::InvalidDescription)?;
@@ -638,7 +643,7 @@ impl HuntyCore {
         weight: Option<u32>,
     ) -> Result<u32, HuntErrorCode> {
         let difficulty_val = difficulty.unwrap_or(MIN_CLUE_DIFFICULTY);
-        if difficulty_val < MIN_CLUE_DIFFICULTY || difficulty_val > MAX_CLUE_DIFFICULTY {
+        if !(MIN_CLUE_DIFFICULTY..=MAX_CLUE_DIFFICULTY).contains(&difficulty_val) {
             return Err(HuntErrorCode::InvalidDifficulty);
         }
 
@@ -650,13 +655,14 @@ impl HuntyCore {
         // Clue points must stay within [MIN_CLUE_POINTS, MAX_CLUE_POINTS].
         // 0 is treated as unset (invalid), and a value above the cap multiplies
         // into a score that saturates u32, tying the leaderboard.
-        if points < MIN_CLUE_POINTS || points > MAX_CLUE_POINTS {
+        if !(MIN_CLUE_POINTS..=MAX_CLUE_POINTS).contains(&points) {
             return Err(HuntErrorCode::InvalidPoints);
         }
         let final_points = points;
-        let question = crate::sanitization::StringSanitizer::sanitize::<MAX_QUESTION_LENGTH>(
+        let question = crate::sanitization::StringSanitizer::sanitize(
             env,
             &question,
+            MAX_QUESTION_LENGTH,
             false,
         )
         .map_err(|_| HuntErrorCode::InvalidQuestion)?;
@@ -884,9 +890,10 @@ impl HuntyCore {
         limit: u32,
         scan_limit: u32,
     ) -> Vec<Hunt> {
-        let Ok(category) = crate::sanitization::StringSanitizer::sanitize::<MAX_CATEGORY_BYTES>(
+        let Ok(category) = crate::sanitization::StringSanitizer::sanitize(
             &env,
             &category,
+            MAX_CATEGORY_BYTES,
             false,
         ) else {
             return Vec::new(&env);
@@ -958,9 +965,10 @@ impl HuntyCore {
             Storage::get_clue_or_error(&env, hunt_id, clue_id).map_err(HuntErrorCode::from)?;
         clue.hint = match hint {
             Some(value) => Some(
-                crate::sanitization::StringSanitizer::sanitize::<MAX_QUESTION_LENGTH>(
+                crate::sanitization::StringSanitizer::sanitize(
                     &env,
                     &value,
+                    MAX_QUESTION_LENGTH,
                     false,
                 )
                 .map_err(|_| HuntErrorCode::InvalidQuestion)?,
@@ -1006,7 +1014,11 @@ impl HuntyCore {
         page: u32,
         page_size: u32,
     ) -> Vec<ClueInfo> {
-        let page_size = if page_size == 0 { DEFAULT_PAGE_SIZE } else { page_size };
+        let page_size = if page_size == 0 {
+            DEFAULT_PAGE_SIZE
+        } else {
+            page_size
+        };
         let effective_page_size = core::cmp::min(page_size, MAX_BATCH_SIZE);
         let offset = page.saturating_mul(effective_page_size);
         let raw = Storage::list_clues_for_hunt(&env, hunt_id, offset, effective_page_size);
@@ -1038,7 +1050,7 @@ impl HuntyCore {
         answer: &String,
     ) -> Result<BytesN<32>, HuntError> {
         let answer =
-            crate::sanitization::StringSanitizer::sanitize::<MAX_ANSWER_LENGTH>(env, answer, false)
+            crate::sanitization::StringSanitizer::sanitize(env, answer, MAX_ANSWER_LENGTH, false)
                 .map_err(|_| HuntError::InvalidAnswer)?;
         let n = answer.len();
         if n == 0 {
@@ -1087,9 +1099,10 @@ impl HuntyCore {
         for i in 0..categories.len() {
             // SAFETY: i is within the vector bounds established by the enclosing loop
             let category = categories.get(i).unwrap();
-            let category = crate::sanitization::StringSanitizer::sanitize::<MAX_CATEGORY_BYTES>(
+            let category = crate::sanitization::StringSanitizer::sanitize(
                 env,
                 &category,
+                MAX_CATEGORY_BYTES,
                 false,
             )
             .map_err(|_| HuntErrorCode::InvalidCategory)?;
@@ -1099,7 +1112,7 @@ impl HuntyCore {
     }
 
     fn validate_difficulty(value: u32) -> Result<(), HuntErrorCode> {
-        if value < MIN_CLUE_DIFFICULTY || value > MAX_CLUE_DIFFICULTY {
+        if !(MIN_CLUE_DIFFICULTY..=MAX_CLUE_DIFFICULTY).contains(&value) {
             return Err(HuntErrorCode::InvalidDifficulty);
         }
         Ok(())
@@ -1240,12 +1253,10 @@ impl HuntyCore {
         uri.copy_into_slice(&mut buf[..len as usize]);
         let text = unsafe { core::str::from_utf8_unchecked(&buf[..len as usize]) };
 
-        if text.starts_with("https://") {
-            let authority = &text[8..];
+        if let Some(authority) = text.strip_prefix("https://") {
             return !authority.is_empty() && !authority.bytes().all(|b| b == b' ');
         }
-        if text.starts_with("ipfs://") {
-            let cid = &text[7..];
+        if let Some(cid) = text.strip_prefix("ipfs://") {
             return cid.len() >= 46;
         }
         false
@@ -2030,14 +2041,32 @@ impl HuntyCore {
 
             // Only call RewardManager when there is at least one reward type
             if rm_reward_config.is_valid() {
+                let caller = env.current_contract_address();
                 let mut args: Vec<Val> = Vec::new(env);
+                args.push_back(caller.clone().into_val(env));
                 args.push_back(hunt.hunt_id.into_val(env));
                 args.push_back(progress.player.clone().into_val(env));
                 args.push_back(rm_reward_config.into_val(env));
 
+                // RewardManager requires the invoking HuntyCore contract to be
+                // explicitly authenticated. Forward that authorization with the
+                // exact sub-invocation arguments.
+                let auth_args = args.clone();
+                env.authorize_as_current_contract(soroban_sdk::vec![
+                    &env,
+                    InvokerContractAuthEntry::Contract(SubContractInvocation {
+                        context: ContractContext {
+                            contract: reward_manager_addr.clone(),
+                            fn_name: Symbol::new(env, "distribute_rewards_authorized"),
+                            args: auth_args,
+                        },
+                        sub_invocations: soroban_sdk::vec![&env],
+                    }),
+                ]);
+
                 let result = env.try_invoke_contract::<(), RewardErrorCode>(
                     &reward_manager_addr,
-                    &Symbol::new(env, "distribute_rewards"),
+                    &Symbol::new(env, "distribute_rewards_authorized"),
                     args,
                 );
                 if !matches!(result, Ok(Ok(()))) {
@@ -3098,11 +3127,22 @@ impl HuntyCore {
     /// entries, since `add_clue` / `add_clues_batch` bound a hunt's clue set by
     /// that same constant. Prefer `get_completed_clues_paginated` for new callers.
     pub fn get_completed_clues(env: Env, hunt_id: u64, player: Address) -> Vec<u32> {
-        let mut all = Self::get_completed_clues_paginated(env.clone(), hunt_id, player.clone(), 0, MAX_BATCH_SIZE);
+        let mut all = Self::get_completed_clues_paginated(
+            env.clone(),
+            hunt_id,
+            player.clone(),
+            0,
+            MAX_BATCH_SIZE,
+        );
         let mut offset = MAX_BATCH_SIZE;
         while all.len() < MAX_CLUES_PER_HUNT {
-            let page =
-                Self::get_completed_clues_paginated(env.clone(), hunt_id, player.clone(), offset, MAX_BATCH_SIZE);
+            let page = Self::get_completed_clues_paginated(
+                env.clone(),
+                hunt_id,
+                player.clone(),
+                offset,
+                MAX_BATCH_SIZE,
+            );
             if page.is_empty() {
                 break;
             }
@@ -3206,35 +3246,12 @@ impl HuntyCore {
         hunt_id: u64,
         start_index: u32,
         window_size: u32,
-        caller: Option<Address>,
+        _caller: Option<Address>,
     ) -> Result<crate::types::LeaderboardWindow, HuntErrorCode> {
-        let hunt = Storage::get_hunt(&env, hunt_id).ok_or(HuntErrorCode::HuntNotFound)?;
+        Storage::get_hunt(&env, hunt_id).ok_or(HuntErrorCode::HuntNotFound)?;
 
-        // Enforce visibility
-        match &hunt.leaderboard_visibility {
-            LeaderboardVisibility::Public => {
-                // No restrictions — anyone may query.
-            }
-            LeaderboardVisibility::RegisteredOnly => {
-                let addr = caller
-                    .as_ref()
-                    .ok_or(HuntErrorCode::LeaderboardVisibilityUnauthorized)?;
-                addr.require_auth();
-                if Storage::get_player_progress(&env, hunt_id, addr).is_none() {
-                    return Err(HuntErrorCode::LeaderboardVisibilityUnauthorized);
-                }
-            }
-            LeaderboardVisibility::CreatorOnly => {
-                let addr = caller
-                    .as_ref()
-                    .ok_or(HuntErrorCode::LeaderboardVisibilityUnauthorized)?;
-                addr.require_auth();
-                if *addr != hunt.creator {
-                    return Err(HuntErrorCode::LeaderboardVisibilityUnauthorized);
-                }
-            }
-        }
-
+        // The visibility field is not part of the persisted Hunt wire format yet;
+        // keep this read path public until it is introduced with a migration.
         let queried_at = env.ledger().timestamp();
         let players = Storage::get_hunt_players(&env, hunt_id);
         let total_players = players.len();

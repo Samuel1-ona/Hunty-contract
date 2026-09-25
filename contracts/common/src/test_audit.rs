@@ -2,7 +2,11 @@
 mod tests {
     use crate::audit::*;
     use crate::audit_emitter::emit_audit_event;
-    use soroban_sdk::{testutils::Address as _, Address, Env, String, Symbol, Vec, symbol_short};
+    use soroban_sdk::{
+        symbol_short,
+        testutils::{Address as _, Events as _},
+        Address, Env, String, Symbol, Vec,
+    };
 
     #[test]
     fn test_pause_event_emission() {
@@ -12,14 +16,8 @@ mod tests {
         env.mock_all_auths();
 
         let mut details = Vec::new(&env);
-        details.push_back((
-            symbol_short!("prev"),
-            String::from_str(&env, "unpaused"),
-        ));
-        details.push_back((
-            symbol_short!("new"),
-            String::from_str(&env, "paused"),
-        ));
+        details.push_back((symbol_short!("prev"), String::from_str(&env, "unpaused")));
+        details.push_back((symbol_short!("new"), String::from_str(&env, "paused")));
 
         let contract = symbol_short!("HUNTY");
         emit_audit_event(&env, &admin, ACTION_PAUSE, contract, details);
@@ -48,23 +46,11 @@ mod tests {
         env.mock_all_auths();
 
         let mut details = Vec::new(&env);
-        details.push_back((
-            symbol_short!("target"),
-            target.to_string(),
-        ));
-        details.push_back((
-            symbol_short!("operation"),
-            String::from_str(&env, "add"),
-        ));
+        details.push_back((symbol_short!("target"), target.to_string()));
+        details.push_back((symbol_short!("operation"), String::from_str(&env, "add")));
 
         let contract = symbol_short!("HUNTY");
-        emit_audit_event(
-            &env,
-            &admin,
-            ACTION_BLACKLIST_ADD,
-            contract,
-            details,
-        );
+        emit_audit_event(&env, &admin, ACTION_BLACKLIST_ADD, contract, details);
 
         let events = env.events().all();
         let (_, data): (_, AuditEvent) = events.get(0).unwrap();

@@ -1,11 +1,9 @@
 #![cfg_attr(not(test), no_std)]
 #![allow(clippy::too_many_arguments)]
+#![allow(deprecated)]
 use soroban_sdk::{
-    contract, contractimpl, contracttype, panic_with_error, Address, Env, Map, String, Symbol, Val,
-    Vec,
-};
-use hunty_common::audit::{
-    emit_audit_event, detail, ACTION_ADMIN_ADDED, ACTION_ADMIN_REMOVED, TOPIC_AUDIT,
+    contract, contractimpl, contracttype, panic_with_error, symbol_short, Address, Env, Map,
+    String, Symbol, Val, Vec,
 };
 
 const MAX_NFT_TITLE_BYTES: u32 = 128;
@@ -83,14 +81,12 @@ fn image_uri_is_valid(uri: &String) -> bool {
     // copy_into_slice, so the bytes are guaranteed to be valid UTF-8.
     let text = unsafe { core::str::from_utf8_unchecked(&buf[..len as usize]) };
 
-    if text.starts_with("https://") {
+    if let Some(authority) = text.strip_prefix("https://") {
         // Require at least one non-whitespace character after the scheme.
-        let authority = &text[8..];
         return !authority.is_empty() && !authority.bytes().all(|b| b == b' ');
     }
-    if text.starts_with("ipfs://") {
+    if let Some(cid) = text.strip_prefix("ipfs://") {
         // Require CID of at least 46 chars (IPFS v0 base58) after "ipfs://".
-        let cid = &text[7..];
         return cid.len() >= 46;
     }
     false
@@ -135,11 +131,11 @@ pub struct NftCore {
 /// NOTE: Do NOT add new fields here without a migration step — the Soroban
 /// host rejects stored structs whose field count differs from the stored
 /// ScVal map. Use per-NFT auxiliary keys for new metadata instead.
-#[contracttype]
-#[derive(Clone, Debug, PartialEq, Eq)]
-
 /// Expected number of fields in NftData — do not change without migration
 pub const NFT_DATA_FIELD_COUNT: usize = 8;
+
+#[contracttype]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct NftData {
     pub nft_id: u64,
     pub hunt_id: u64,
@@ -339,7 +335,7 @@ impl NftReward {
         admin.require_auth();
         let stored_admin =
             Storage::get_admin(env).ok_or(crate::errors::NftErrorCode::NotInitialized)?;
-            if stored_admin != *admin {
+        if stored_admin != *admin {
             return Err(crate::errors::NftErrorCode::Unauthorized);
         }
         Ok(())
@@ -462,11 +458,6 @@ impl NftReward {
             .and_then(|v| u32::try_from_val(&env, &v).ok())
             .unwrap_or(0u32);
 
-        let creator = metadata
-            .get(Symbol::new(&env, "creator"))
-            .and_then(|v| Address::try_from_val(&env, &v).ok())
-            .or_else(|| Some(player_address.clone()));
-
         let creator = match metadata.get(Symbol::new(&env, "creator")) {
             None => Some(player_address.clone()),
             Some(v) => Some(
@@ -497,10 +488,17 @@ impl NftReward {
             royalty_bps,
             extensions,
         };
-        Ok(Self::mint_reward_nft_impl(env, hunt_id, player_address, meta, transferable, completion_rank))
+        Ok(Self::mint_reward_nft_impl(
+            env,
+            hunt_id,
+            player_address,
+            meta,
+            transferable,
+            completion_rank,
+        ))
     }
 
-    fn validate_image_uri(env: &Env, value: &String) -> Result<(), NftErrorCode> {
+    fn validate_image_uri(_env: &Env, value: &String) -> Result<(), NftErrorCode> {
         if !image_uri_is_valid(value) {
             return Err(NftErrorCode::InvalidMetadata);
         }
@@ -538,10 +536,7 @@ impl NftReward {
         Ok(())
     }
 
-    fn validate_royalty_bps(
-        _env: &Env,
-        royalty_bps: Option<u32>,
-    ) -> Result<(), NftErrorCode> {
+    fn validate_royalty_bps(_env: &Env, royalty_bps: Option<u32>) -> Result<(), NftErrorCode> {
         if let Some(bps) = royalty_bps {
             if bps > MAX_ROYALTY_BPS {
                 return Err(NftErrorCode::InvalidRoyalty);
@@ -632,11 +627,11 @@ impl NftReward {
             // Use the authoritative rank threaded from hunty-core (frozen at
             // completion time), not a live re-count of minted NFTs.
             completion_rank,
-            collection_stats: format!(
-                "total_supply={},total_hunts={},total_owners={}",
-                total_supply,
-                0u64, // total_hunts would need tracking
-                0u64  // total_owners would need tracking
+            // Keep the legacy event payload deterministic in `no_std`; the
+            // collection counters are exposed through the dedicated queries.
+            collection_stats: String::from_str(
+                &env,
+                "total_supply=tracked,total_hunts=tracked,total_owners=tracked",
             ),
         };
         env.events()
@@ -1379,14 +1374,7 @@ impl NftReward {
     /// Returns paginated NFT IDs owned by an address.
     /// The limit is bounded to MAX_SCAN_LIMIT (1000) to prevent excessive gas consumption.
     pub fn get_player_nfts(env: Env, owner: Address, offset: u32, limit: u32) -> Vec<u64> {
-        let nfts = Storage::get_owner_nfts(&env, &owner);
-        let len = nfts.len();
-        if offset >= len {
-            return Vec::new(&env);
-        }
-        let bounded_limit = limit.min(MAX_SCAN_LIMIT);
-        let end = offset.saturating_add(bounded_limit).min(len);
-        nfts.slice(offset..end)
+        Storage::get_owner_nfts(&env, &owner, offset, limit.min(MAX_SCAN_LIMIT))
     }
 
     /// Returns paginated NFT IDs minted for a hunt.
@@ -1541,12 +1529,8 @@ impl NftReward {
         dry_run: bool,
     ) -> Result<migration::MigrationReport, hunty_migration::UpgradeAuthError> {
         let from_version = migration::NftRewardMigration::get_schema_version(&env);
-        let report = migration::NftRewardMigration::run_migration(
-            &env,
-            &admin,
-            target_version,
-            dry_run,
-        )?;
+        let report =
+            migration::NftRewardMigration::run_migration(&env, &admin, target_version, dry_run)?;
         if !dry_run && report.succeeded && report.from_version < report.to_version {
             env.events().publish(
                 migration::NftRewardMigration::upgrade_executed_topic(&env),

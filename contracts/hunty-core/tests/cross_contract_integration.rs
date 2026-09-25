@@ -979,10 +979,12 @@ fn test_issue_833_cross_contract_nft_image_uri_verification() {
     let creator = Address::generate(&env);
     let player = Address::generate(&env);
 
-    let (core_id, reward_manager_id, nft_reward_id, token_address, admin) =
-        setup_environment(&env);
+    let (core_id, reward_manager_id, nft_reward_id, token_address, admin) = setup_environment(&env);
 
-    let expected_uri = String::from_str(&env, "ipfs://bafybeigdyrzt5sfp7udm7hu76uh7y26nf3efuylqabf3oclgtqy55fbzdi");
+    let expected_uri = String::from_str(
+        &env,
+        "ipfs://bafybeigdyrzt5sfp7udm7hu76uh7y26nf3efuylqabf3oclgtqy55fbzdi",
+    );
 
     let hunt_id = as_core_contract(&env, &core_id, |env| {
         let hunt_id = HuntyCore::create_hunt(
@@ -1058,7 +1060,10 @@ fn test_issue_833_cross_contract_nft_image_uri_verification() {
         HuntyCore::complete_hunt(env.clone(), hunt_id, player.clone())
     });
 
-    assert!(result.is_ok(), "Hunt completion with valid NFT URI must succeed");
+    assert!(
+        result.is_ok(),
+        "Hunt completion with valid NFT URI must succeed"
+    );
 
     // Confirm resulting NFT has non-empty valid image URI matching configured URI
     env.as_contract(&nft_reward_id, || {
@@ -1066,7 +1071,9 @@ fn test_issue_833_cross_contract_nft_image_uri_verification() {
         assert_eq!(nft_count, 1, "One NFT should be minted");
 
         let nft_metadata = NftReward::get_nft_metadata(env.clone(), 0).unwrap();
-        assert_eq!(nft_metadata.image_uri, expected_uri, "NFT image URI must match configured non-empty URI");
+        assert_eq!(
+            nft_metadata.image_uri, expected_uri,
+            "NFT image URI must match configured non-empty URI"
+        );
     });
 }
-

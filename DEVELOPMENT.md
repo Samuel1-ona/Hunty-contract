@@ -361,7 +361,7 @@ done
 **Check build output:**
 
 ```bash
-ls -lh target/wasm32-unknown-unknown/release/*.wasm
+ls -lh target/wasm32v1-none/release/*.wasm
 ```
 
 ## Code Organization
@@ -539,8 +539,8 @@ stellar keys fund deployer --network testnet
 3. All contracts built (`.wasm` files present):
 
 ```bash
-cargo build --target wasm32-unknown-unknown --release
-ls target/wasm32-unknown-unknown/release/*.wasm
+cargo build --target wasm32v1-none --release
+ls target/wasm32v1-none/release/*.wasm
 ```
 
 ### Step 1 — Deploy NftReward
@@ -549,7 +549,7 @@ NftReward has no initializer, so it can be deployed and used immediately.
 
 ```bash
 NFT_CONTRACT=$(stellar contract deploy \
-  --wasm target/wasm32-unknown-unknown/release/nft_reward.wasm \
+  --wasm target/wasm32v1-none/release/nft_reward.wasm \
   --source deployer \
   --network testnet)
 
@@ -560,7 +560,7 @@ echo "NftReward: $NFT_CONTRACT"
 
 ```bash
 REWARD_MANAGER=$(stellar contract deploy \
-  --wasm target/wasm32-unknown-unknown/release/reward_manager.wasm \
+  --wasm target/wasm32v1-none/release/reward_manager.wasm \
   --source deployer \
   --network testnet)
 
@@ -615,7 +615,7 @@ stellar contract invoke \
 
 ```bash
 HUNTY_CORE=$(stellar contract deploy \
-  --wasm target/wasm32-unknown-unknown/release/hunty_core.wasm \
+  --wasm target/wasm32v1-none/release/hunty_core.wasm \
   --source deployer \
   --network testnet)
 

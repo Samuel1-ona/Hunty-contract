@@ -1,3 +1,5 @@
+#![allow(deprecated)]
+
 use soroban_sdk::{contracttype, symbol_short, Env, Map, String, Vec};
 
 const INVOCATIONS_KEY: soroban_sdk::Symbol = symbol_short!("INVCT");
@@ -45,6 +47,7 @@ impl Monitoring {
     }
 
     /// On-chain counter variant. Prefer `record_invocation_event` on hot paths.
+    #[allow(dead_code)]
     pub fn record_invocation(env: &Env, gas_units: u64, succeeded: bool) {
         let total: u64 = env.storage().instance().get(&INVOCATIONS_KEY).unwrap_or(0);
         env.storage().instance().set(&INVOCATIONS_KEY, &(total + 1));
