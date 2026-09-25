@@ -60,6 +60,7 @@ pub enum HuntErrorCode {
     AdminAlreadyProposed = 48,
     InvalidPoints = 49,
     HuntFull = 50,
+    LeaderboardVisibilityUnauthorized = 51,
 }
 
 #derive(Debug)

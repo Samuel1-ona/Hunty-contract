@@ -1,11 +1,10 @@
 #![cfg_attr(not(test), no_std)]
 #![allow(clippy::too_many_arguments)]
+use hunty_common::audit::{ACTION_ADMIN_ADDED, ACTION_ADMIN_REMOVED, TOPIC_AUDIT};
+use hunty_common::audit_emitter::{detail, emit_audit_event};
 use soroban_sdk::{
-    contract, contractimpl, contracttype, panic_with_error, Address, Env, Map, String, Symbol, Val,
-    Vec,
-};
-use hunty_common::audit::{
-    emit_audit_event, detail, ACTION_ADMIN_ADDED, ACTION_ADMIN_REMOVED, TOPIC_AUDIT,
+    contract, contractimpl, contracttype, panic_with_error, symbol_short, Address, Bytes, Env, Map,
+    String, Symbol, Val, Vec,
 };
 
 const MAX_NFT_TITLE_BYTES: u32 = 128;
@@ -131,15 +130,15 @@ pub struct NftCore {
     pub locked: bool,
 }
 
+/// Expected number of fields in NftData — do not change without migration
+pub const NFT_DATA_FIELD_COUNT: usize = 8;
+
 /// NFT data structure stored on-chain.
 /// NOTE: Do NOT add new fields here without a migration step — the Soroban
 /// host rejects stored structs whose field count differs from the stored
 /// ScVal map. Use per-NFT auxiliary keys for new metadata instead.
 #[contracttype]
 #[derive(Clone, Debug, PartialEq, Eq)]
-
-/// Expected number of fields in NftData — do not change without migration
-pub const NFT_DATA_FIELD_COUNT: usize = 8;
 pub struct NftData {
     pub nft_id: u64,
     pub hunt_id: u64,
@@ -339,7 +338,7 @@ impl NftReward {
         admin.require_auth();
         let stored_admin =
             Storage::get_admin(env).ok_or(crate::errors::NftErrorCode::NotInitialized)?;
-            if stored_admin != *admin {
+        if stored_admin != *admin {
             return Err(crate::errors::NftErrorCode::Unauthorized);
         }
         Ok(())
@@ -497,7 +496,14 @@ impl NftReward {
             royalty_bps,
             extensions,
         };
-        Ok(Self::mint_reward_nft_impl(env, hunt_id, player_address, meta, transferable, completion_rank))
+        Ok(Self::mint_reward_nft_impl(
+            env,
+            hunt_id,
+            player_address,
+            meta,
+            transferable,
+            completion_rank,
+        ))
     }
 
     fn validate_image_uri(env: &Env, value: &String) -> Result<(), NftErrorCode> {
@@ -632,12 +638,7 @@ impl NftReward {
             // Use the authoritative rank threaded from hunty-core (frozen at
             // completion time), not a live re-count of minted NFTs.
             completion_rank,
-            collection_stats: format!(
-                "total_supply={},total_hunts={},total_owners={}",
-                total_supply,
-                0u64, // total_hunts would need tracking
-                0u64  // total_owners would need tracking
-            ),
+            collection_stats: Self::collection_stats_string(&env, total_supply),
         };
         env.events()
             .publish((Symbol::new(&env, "NftMinted"), nft_id), event);
@@ -1379,14 +1380,7 @@ impl NftReward {
     /// Returns paginated NFT IDs owned by an address.
     /// The limit is bounded to MAX_SCAN_LIMIT (1000) to prevent excessive gas consumption.
     pub fn get_player_nfts(env: Env, owner: Address, offset: u32, limit: u32) -> Vec<u64> {
-        let nfts = Storage::get_owner_nfts(&env, &owner);
-        let len = nfts.len();
-        if offset >= len {
-            return Vec::new(&env);
-        }
-        let bounded_limit = limit.min(MAX_SCAN_LIMIT);
-        let end = offset.saturating_add(bounded_limit).min(len);
-        nfts.slice(offset..end)
+        Storage::get_owner_nfts(&env, &owner, offset, limit.min(MAX_SCAN_LIMIT))
     }
 
     /// Returns paginated NFT IDs minted for a hunt.
@@ -1541,12 +1535,8 @@ impl NftReward {
         dry_run: bool,
     ) -> Result<migration::MigrationReport, hunty_migration::UpgradeAuthError> {
         let from_version = migration::NftRewardMigration::get_schema_version(&env);
-        let report = migration::NftRewardMigration::run_migration(
-            &env,
-            &admin,
-            target_version,
-            dry_run,
-        )?;
+        let report =
+            migration::NftRewardMigration::run_migration(&env, &admin, target_version, dry_run)?;
         if !dry_run && report.succeeded && report.from_version < report.to_version {
             env.events().publish(
                 migration::NftRewardMigration::upgrade_executed_topic(&env),

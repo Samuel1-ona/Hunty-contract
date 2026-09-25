@@ -82,6 +82,8 @@ pub struct Hunt {
     pub invite_code_hash: Option<BytesN<32>>,
     /// Dynamically recalculated on every `get_hunt` read; not meaningful when read from a raw struct literal.
     pub remaining_slots: u32,
+    /// Controls who can view the hunt's leaderboard. Defaults to Public.
+    pub leaderboard_visibility: LeaderboardVisibility,
 }
 
 #[contracttype]
@@ -351,7 +353,7 @@ impl PlayerProgress {
             total_score: self.total_score,
             started_at_delta,
             completed_at_delta,
-            flags,
+            flags: flags.into(),
             recent_submissions: self.recent_submissions.clone(),
             clue_last_attempts: self.clue_last_attempts.clone(),
             required_completed_count: self.required_completed_count,
