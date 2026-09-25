@@ -152,6 +152,55 @@ mod test {
         assert!(env.storage().persistent().has(&(prefix, creator)));
     }
 
+    #[test]
+    fn test_daily_rate_limit_rolling_window_blocks_across_midnight() {
+        let env = Env::default();
+        let creator = Address::generate(&env);
+        let contract_id = env.register(HuntyCore, ());
+        // Choose a timestamp at 23:59:59 UTC on a known day.
+        let just_before_midnight = 1_700_000_000u64 / 86_400 * 86_400 + 86_399;
+        env.ledger().set_timestamp(just_before_midnight);
+        env.mock_all_auths();
+
+        // Create 10 hunts, filling the rolling window.
+        for _ in 0..10 {
+            as_core_contract(&env, &contract_id, |env| {
+                HuntyCore::create_hunt(
+                    env.clone(),
+                    creator.clone(),
+                    String::from_str(env, "Boundary Hunt"),
+                    String::from_str(env, "Boundary test"),
+                    None,
+                    None,
+                    0,
+                    None,
+                    None,
+                )
+                .unwrap();
+            });
+        }
+
+        // Advance 2 seconds across the UTC boundary.
+        env.ledger().set_timestamp(just_before_midnight + 2);
+
+        // The 10 hunts from the previous second are still inside the rolling 24h window.
+        let result = as_core_contract(&env, &contract_id, |env| {
+            HuntyCore::create_hunt(
+                env.clone(),
+                creator.clone(),
+                String::from_str(env, "Extra hunt"),
+                String::from_str(env, "Should be rate limited"),
+                None,
+                None,
+                0,
+                None,
+                None,
+            )
+        });
+
+        assert_eq!(result, Err(HuntErrorCode::RateLimitExceeded));
+    }
+
     /// Submits an answer at the current ledger timestamp using the given replay-protection nonce.
     fn submit_answer(
         env: &Env,
