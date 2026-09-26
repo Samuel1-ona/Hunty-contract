@@ -8,10 +8,8 @@ use crate::nft_handler::NftHandler;
 use crate::storage::Storage;
 pub use crate::types::{
     resolve_tier_amount, tiers_are_strictly_ascending, DistributionRecord, DistributionStatus,
-    RewardConfig, RewardPoolConfig, RewardPoolStatus, SemVer, TierError, TimeBasedRewardTier,
-    ValidationResult,
-    DistributionRecord, DistributionStatus, ResolutionStatus, RewardConfig, RewardPoolConfig,
-    RewardPoolStatus, SemVer, ValidationResult,
+    ResolutionStatus, RewardConfig, RewardPoolConfig, RewardPoolStatus, SemVer, TierError,
+    TimeBasedRewardTier, ValidationResult,
 };
 use crate::xlm_handler::XlmHandler;
 
