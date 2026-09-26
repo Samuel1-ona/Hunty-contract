@@ -34,10 +34,17 @@ pub struct DistributionProof {
 }
 
 /// Resolution outcome for a manually resolved failed distribution.
+/// 
+/// This enum tracks the final status of distributions that failed during
+/// their initial execution and were later resolved by an administrator.
+/// 
+/// Related to issue #364: stuck-distribution resolution flow.
 #[contracttype]
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ResolutionStatus {
+    /// The distribution was successfully completed after manual intervention.
     Completed,
+    /// The distribution was refunded to the pool after failing.
     Refunded,
 }
 
