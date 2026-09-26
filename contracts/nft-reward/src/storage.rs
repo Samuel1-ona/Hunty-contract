@@ -23,9 +23,9 @@ impl Storage {
     const TOTAL_HUNTS_KEY: soroban_sdk::Symbol = symbol_short!("TH");
     const TOTAL_OWNERS_KEY: soroban_sdk::Symbol = symbol_short!("TO");
     const ALL_NFTS_KEY: soroban_sdk::Symbol = symbol_short!("ALLNFT");
+    const CONTRACT_VERSION_KEY: soroban_sdk::Symbol = symbol_short!("CTRV");
     /// Per-NFT metadata schema version — distinct from `CONTRACT_VERSION_KEY` (`CTRV`).
     const NFT_VERSION_KEY: soroban_sdk::Symbol = symbol_short!("NFTV");
-    const CONTRACT_VERSION_KEY: soroban_sdk::Symbol = symbol_short!("CTRV");
     const OPERATOR_KEY: soroban_sdk::Symbol = symbol_short!("OPKEY");
 
     fn nft_key(nft_id: u64) -> (soroban_sdk::Symbol, u64) {
