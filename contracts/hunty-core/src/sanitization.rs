@@ -58,7 +58,7 @@ impl StringSanitizer {
         let mut buf = [0u8; SANITIZE_STACK_CAP];
         input.copy_into_slice(&mut buf[..len]);
 
-        if !is_valid_utf8(&buf[..len]) {
+        if core::str::from_utf8(&buf[..len]).is_err() {
             return Err(SanitizeError::InvalidUtf8);
         }
 
@@ -94,50 +94,9 @@ impl StringSanitizer {
 fn is_ascii_whitespace(b: u8) -> bool {
     matches!(b, b' ' | b'\t' | b'\n' | b'\r')
 }
+
 fn is_disallowed_control(b: u8) -> bool {
     b < 0x20 && b != b'\t' && b != b'\n' && b != b'\r'
-}
-
-fn is_valid_utf8(bytes: &[u8]) -> bool {
-    let mut i = 0;
-    while i < bytes.len() {
-        let b = bytes[i];
-        if b <= 0x7F {
-            i += 1;
-            continue;
-        }
-        let remaining = bytes.len() - i;
-        if (b & 0xE0) == 0xC0 {
-            if remaining < 2 || !is_utf8_continuation(bytes[i + 1]) {
-                return false;
-            }
-            i += 2;
-        } else if (b & 0xF0) == 0xE0 {
-            if remaining < 3
-                || !is_utf8_continuation(bytes[i + 1])
-                || !is_utf8_continuation(bytes[i + 2])
-            {
-                return false;
-            }
-            i += 3;
-        } else if (b & 0xF8) == 0xF0 {
-            if remaining < 4
-                || !is_utf8_continuation(bytes[i + 1])
-                || !is_utf8_continuation(bytes[i + 2])
-                || !is_utf8_continuation(bytes[i + 3])
-            {
-                return false;
-            }
-            i += 4;
-        } else {
-            return false;
-        }
-    }
-    true
-}
-
-fn is_utf8_continuation(b: u8) -> bool {
-    (b & 0xC0) == 0x80
 }
 
 #[cfg(test)]
@@ -205,5 +164,35 @@ mod test {
         let input = String::from_str(&env, &"a".repeat(50));
         let result = StringSanitizer::sanitize(&env, &input, 40, false);
         assert_eq!(result, Err(SanitizeError::ExceedsMaxBytes));
+    }
+
+    #[test]
+    fn test_sanitize_rejects_overlong_utf8() {
+        let env = Env::default();
+        let input = String::from_bytes(&env, &[0xC0, 0x80]);
+
+        let result = StringSanitizer::sanitize(&env, &input, 100, false);
+
+        assert_eq!(result, Err(SanitizeError::InvalidUtf8));
+    }
+
+    #[test]
+    fn test_sanitize_rejects_utf16_surrogate() {
+        let env = Env::default();
+        let input = String::from_bytes(&env, &[0xED, 0xA0, 0x80]);
+
+        let result = StringSanitizer::sanitize(&env, &input, 100, false);
+
+        assert_eq!(result, Err(SanitizeError::InvalidUtf8));
+    }
+
+    #[test]
+    fn test_sanitize_rejects_out_of_range_code_point() {
+        let env = Env::default();
+        let input = String::from_bytes(&env, &[0xF4, 0x90, 0x80, 0x80]);
+
+        let result = StringSanitizer::sanitize(&env, &input, 100, false);
+
+        assert_eq!(result, Err(SanitizeError::InvalidUtf8));
     }
 }
