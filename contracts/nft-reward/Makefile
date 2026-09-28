@@ -7,7 +7,7 @@ test: build
 
 build:
 	stellar contract build
-	@ls -l ../../target/wasm32-unknown-unknown/release/nft_reward.wasm
+	@ls -l ../../target/wasm32v1-none/release/nft_reward.wasm
 
 fmt:
 	cargo fmt --all

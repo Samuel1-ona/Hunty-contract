@@ -727,7 +727,11 @@ fn test_rate_limit_single_storage_entry_across_days() {
         assert_eq!(count, 1);
 
         let known_entry_count = old_day_keys.iter().filter(|exists| **exists).count()
-            + if env.storage().instance().has(&creator) { 1 } else { 0 };
+            + if env.storage().instance().has(&creator) {
+                1
+            } else {
+                0
+            };
         assert_eq!(known_entry_count, 1);
     });
 }

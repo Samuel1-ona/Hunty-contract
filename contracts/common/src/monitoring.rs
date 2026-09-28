@@ -1,3 +1,5 @@
+#![allow(deprecated)]
+
 use soroban_sdk::{contracttype, symbol_short, Env, Map, String, Vec};
 
 const INVOCATIONS_KEY: soroban_sdk::Symbol = symbol_short!("INVCT");
@@ -6,6 +8,11 @@ const GAS_UNITS_KEY: soroban_sdk::Symbol = symbol_short!("GASUN");
 const ALERTS_KEY: soroban_sdk::Symbol = symbol_short!("ALERT");
 /// Per-kind alert counters: `Map<alert_type, HealthAlert>`.
 const ALERT_MAP_KEY: soroban_sdk::Symbol = symbol_short!("ALERTMAP");
+
+/// Large withdrawal alert threshold: 100 XLM (1_000_000_000 stroops)
+/// Triggers monitoring alert for withdrawals exceeding this amount.
+/// 1 XLM = 10_000_000 stroops (Stellar's base unit)
+const LARGE_WITHDRAWAL_THRESHOLD: i128 = 1_000_000_000;
 
 #[contracttype]
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -45,6 +52,7 @@ impl Monitoring {
     }
 
     /// On-chain counter variant. Prefer `record_invocation_event` on hot paths.
+    #[allow(dead_code)]
     pub fn record_invocation(env: &Env, gas_units: u64, succeeded: bool) {
         let total: u64 = env.storage().instance().get(&INVOCATIONS_KEY).unwrap_or(0);
         env.storage().instance().set(&INVOCATIONS_KEY, &(total + 1));
@@ -58,6 +66,12 @@ impl Monitoring {
             let failures: u64 = env.storage().instance().get(&FAILURES_KEY).unwrap_or(0);
             env.storage().instance().set(&FAILURES_KEY, &(failures + 1));
             Self::raise_alert(env, "invocation_failure");
+        }
+    }
+
+    pub fn record_large_withdrawal(env: &Env, amount: i128) {
+        if amount > LARGE_WITHDRAWAL_THRESHOLD {
+            Self::raise_alert(env, "large_withdrawal");
         }
     }
 

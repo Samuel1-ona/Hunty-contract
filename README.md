@@ -391,6 +391,10 @@ pnpm build:mainnet
 pnpm start:staging
 ```
 
+#### Deploying behind a proxy or load balancer
+
+The global `/mint` limiter (100 requests / 15 min) keys on `req.ip`. Behind a reverse proxy or load balancer that is the proxy's address unless Express is told to trust it, which makes all users share one limit. Set `TRUST_PROXY` to the number of trusted proxy hops in front of the app (for example `1` for a single load balancer), or to an Express trust-proxy expression such as `loopback, 10.0.0.0/8`. It is optional: when unset, proxies are not trusted (the previous behavior), which is correct only when the app is exposed directly. Only enable it when your proxy overwrites client-supplied `X-Forwarded-For`, otherwise clients can spoof their IP and dodge the limit.
+
 Contract addresses are tracked per environment in:
 
 - `config/contracts.testnet.json`
@@ -596,3 +600,8 @@ Built on [Stellar](https://www.stellar.org/) and [Soroban](https://soroban.stell
 ---
 
 **Note**: This project is in active development. The API may change as we iterate on the design.
+
+## Handsoff notes
+
+<!-- handsoff-issue-1109 -->
+- #1109: deploy_mainnet.sh calls initialize with arguments none of the contracts accept

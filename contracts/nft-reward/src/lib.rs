@@ -1,11 +1,9 @@
 #![cfg_attr(not(test), no_std)]
 #![allow(clippy::too_many_arguments)]
+#![allow(deprecated)]
 use soroban_sdk::{
-    contract, contractimpl, contracttype, panic_with_error, Address, Env, Map, String, Symbol, Val,
-    Vec,
-};
-use hunty_common::audit::{
-    emit_audit_event, detail, ACTION_ADMIN_ADDED, ACTION_ADMIN_REMOVED, TOPIC_AUDIT,
+    contract, contractimpl, contracttype, panic_with_error, symbol_short, Address, Env, Map,
+    String, Symbol, Val, Vec,
 };
 
 const MAX_NFT_TITLE_BYTES: u32 = 128;
@@ -83,14 +81,12 @@ fn image_uri_is_valid(uri: &String) -> bool {
     // copy_into_slice, so the bytes are guaranteed to be valid UTF-8.
     let text = unsafe { core::str::from_utf8_unchecked(&buf[..len as usize]) };
 
-    if text.starts_with("https://") {
+    if let Some(authority) = text.strip_prefix("https://") {
         // Require at least one non-whitespace character after the scheme.
-        let authority = &text[8..];
         return !authority.is_empty() && !authority.bytes().all(|b| b == b' ');
     }
-    if text.starts_with("ipfs://") {
+    if let Some(cid) = text.strip_prefix("ipfs://") {
         // Require CID of at least 46 chars (IPFS v0 base58) after "ipfs://".
-        let cid = &text[7..];
         return cid.len() >= 46;
     }
     false
@@ -131,15 +127,16 @@ pub struct NftCore {
     pub locked: bool,
 }
 
+/// Expected number of fields in NftData — do not change without migration
+pub const NFT_DATA_FIELD_COUNT: usize = 8;
+
 /// NFT data structure stored on-chain.
 /// NOTE: Do NOT add new fields here without a migration step — the Soroban
 /// host rejects stored structs whose field count differs from the stored
 /// ScVal map. Use per-NFT auxiliary keys for new metadata instead.
+
 #[contracttype]
 #[derive(Clone, Debug, PartialEq, Eq)]
-
-/// Expected number of fields in NftData — do not change without migration
-pub const NFT_DATA_FIELD_COUNT: usize = 8;
 pub struct NftData {
     pub nft_id: u64,
     pub hunt_id: u64,
@@ -339,7 +336,7 @@ impl NftReward {
         admin.require_auth();
         let stored_admin =
             Storage::get_admin(env).ok_or(crate::errors::NftErrorCode::NotInitialized)?;
-            if stored_admin != *admin {
+        if stored_admin != *admin {
             return Err(crate::errors::NftErrorCode::Unauthorized);
         }
         Ok(())
@@ -367,6 +364,12 @@ impl NftReward {
     /// contract has been initialized. Before initialization the check is skipped so
     /// that existing deployments remain functional.
     ///
+    /// Reward NFTs minted through this entrypoint are **soulbound** (non-transferable)
+    /// by default, matching `mint_reward_nft_from_map`'s default, so an authorized
+    /// minter gets the same behaviour from either path. Callers that want a
+    /// transferable reward or a completion rank should use `mint_reward_nft_from_map`
+    /// with the "transferable" / "completion_rank" keys set.
+    ///
     /// # Arguments
     /// * `minter` - Address performing the mint (must be whitelisted after init)
     /// * `hunt_id` - The hunt this NFT commemorates
@@ -383,10 +386,11 @@ impl NftReward {
         metadata: NftMetadata,
     ) -> u64 {
         Self::require_authorized_caller(&env, &minter);
-        // This direct entrypoint has no rank context; pass 0 so callers that
-        // care about rank should use `mint_reward_nft_from_map` with the
-        // "completion_rank" key set.
-        Self::mint_reward_nft_impl(env, hunt_id, player_address, metadata, true, 0)
+        // This direct entrypoint has no rank or transferability context; align with
+        // `mint_reward_nft_from_map` and default to soulbound (transferable = false).
+        // Callers that care about rank or transferability should use
+        // `mint_reward_nft_from_map` with the "transferable" / "completion_rank" keys.
+        Self::mint_reward_nft_impl(env, hunt_id, player_address, metadata, false, 0)
     }
 
     /// Mints a reward NFT from a generic metadata map. This is the entrypoint
@@ -447,25 +451,9 @@ impl NftReward {
         let description = extract_field!("description", String, String::from_str(&env, ""));
         let image_uri = extract_field!("image_uri", String, String::from_str(&env, ""));
 
-        let hunt_title = metadata
-            .get(Symbol::new(&env, "hunt_title"))
-            .and_then(|v| String::try_from_val(&env, &v).ok())
-            .unwrap_or_else(|| title.clone());
-
-        let rarity = metadata
-            .get(Symbol::new(&env, "rarity"))
-            .and_then(|v| u32::try_from_val(&env, &v).ok())
-            .unwrap_or(0u32);
-
-        let tier = metadata
-            .get(Symbol::new(&env, "tier"))
-            .and_then(|v| u32::try_from_val(&env, &v).ok())
-            .unwrap_or(0u32);
-
-        let creator = metadata
-            .get(Symbol::new(&env, "creator"))
-            .and_then(|v| Address::try_from_val(&env, &v).ok())
-            .or_else(|| Some(player_address.clone()));
+        let hunt_title = extract_field!("hunt_title", String, title.clone());
+        let rarity = extract_field!("rarity", u32, 0u32);
+        let tier = extract_field!("tier", u32, 0u32);
 
         let creator = match metadata.get(Symbol::new(&env, "creator")) {
             None => Some(player_address.clone()),
@@ -497,12 +485,19 @@ impl NftReward {
             royalty_bps,
             extensions,
         };
-        Ok(Self::mint_reward_nft_impl(env, hunt_id, player_address, meta, transferable, completion_rank))
+        Ok(Self::mint_reward_nft_impl(
+            env,
+            hunt_id,
+            player_address,
+            meta,
+            transferable,
+            completion_rank,
+        ))
     }
 
-    fn validate_image_uri(env: &Env, value: &String) -> Result<(), NftErrorCode> {
+    fn validate_image_uri(_env: &Env, value: &String) -> Result<(), NftErrorCode> {
         if !image_uri_is_valid(value) {
-            return Err(NftErrorCode::InvalidMetadata);
+            return Err(NftErrorCode::InvalidImageUri);
         }
         Ok(())
     }
@@ -538,10 +533,7 @@ impl NftReward {
         Ok(())
     }
 
-    fn validate_royalty_bps(
-        _env: &Env,
-        royalty_bps: Option<u32>,
-    ) -> Result<(), NftErrorCode> {
+    fn validate_royalty_bps(_env: &Env, royalty_bps: Option<u32>) -> Result<(), NftErrorCode> {
         if let Some(bps) = royalty_bps {
             if bps > MAX_ROYALTY_BPS {
                 return Err(NftErrorCode::InvalidRoyalty);
@@ -611,14 +603,20 @@ impl NftReward {
         };
 
         Storage::save_nft(&env, &nft_data);
+        Storage::increment_live_supply(&env);
         Storage::set_nft_version(&env, nft_id, METADATA_SCHEMA_VERSION);
         Storage::add_nft_to_owner(&env, &player_address, nft_id);
         Storage::increment_owner_hunt_count(&env, &player_address, hunt_id);
         Storage::add_nft_to_hunt(&env, hunt_id, nft_id);
+        Storage::add_nft_to_all(&env, nft_id);
         Storage::mark_hunt_minted(&env, hunt_id);
-        // Read the counter once and reuse it for both the supply update and the event.
+        // Read the counter once and reuse it for the supply update.
         let total_supply = Storage::get_nft_counter(&env);
         Storage::update_collection_metadata_total_supply(&env, total_supply);
+        // `total_minted_for_hunt` is scoped to this hunt (#1093); it must not
+        // report the collection-wide counter. `add_nft_to_hunt` above already
+        // recorded this mint, so the read reflects the new per-hunt total.
+        let total_minted_for_hunt = Storage::get_hunt_nft_count(&env, hunt_id);
 
         let event = NftMintedEvent {
             nft_id,
@@ -628,15 +626,15 @@ impl NftReward {
             tier: nft_data.metadata.tier,
             minted_at,
             hunt_title: nft_data.metadata.hunt_title.clone(),
-            total_minted_for_hunt: total_supply as u32,
+            total_minted_for_hunt,
             // Use the authoritative rank threaded from hunty-core (frozen at
             // completion time), not a live re-count of minted NFTs.
             completion_rank,
-            collection_stats: format!(
-                "total_supply={},total_hunts={},total_owners={}",
-                total_supply,
-                0u64, // total_hunts would need tracking
-                0u64  // total_owners would need tracking
+            // Keep the legacy event payload deterministic in `no_std`; the
+            // collection counters are exposed through the dedicated queries.
+            collection_stats: String::from_str(
+                &env,
+                "total_supply=tracked,total_hunts=tracked,total_owners=tracked",
             ),
         };
         env.events()
@@ -1067,15 +1065,23 @@ impl NftReward {
         Ok(())
     }
 
-    /// Returns the total number of NFTs minted so far.
+    /// Returns the number of NFTs that currently exist — i.e. minted so far
+    /// minus burned. This decreases when an NFT is burned.
+    ///
+    /// This is distinct from the `max_supply` cap (see `get_max_supply`),
+    /// which limits the *lifetime* mint count and is unaffected by burns:
+    /// a burned NFT's ID is never reused and never reopens room under the
+    /// cap for an additional mint.
     pub fn total_supply(env: Env) -> u64 {
-        Storage::get_nft_counter(&env)
+        Storage::get_live_supply(&env)
     }
 
     /// Returns the configured maximum total supply of NFTs.
     ///
     /// - `None`  → no cap was set (unlimited minting)
-    /// - `Some(n)` → at most `n` NFTs may ever be minted
+    /// - `Some(n)` → at most `n` NFTs may ever be minted, lifetime. This caps
+    ///   the ever-minted count (see `total_supply` for the currently-live
+    ///   count), so burning an NFT does not free up room under the cap.
     pub fn get_max_supply(env: Env) -> Option<u64> {
         Storage::get_max_supply(&env)
     }
@@ -1377,20 +1383,13 @@ impl NftReward {
     }
 
     /// Returns paginated NFT IDs owned by an address.
-    /// The limit is bounded to MAX_SCAN_LIMIT (1000) to prevent excessive gas consumption.
+    /// The limit is bounded to `MAX_SCAN_LIMIT` to prevent excessive gas consumption.
     pub fn get_player_nfts(env: Env, owner: Address, offset: u32, limit: u32) -> Vec<u64> {
-        let nfts = Storage::get_owner_nfts(&env, &owner);
-        let len = nfts.len();
-        if offset >= len {
-            return Vec::new(&env);
-        }
-        let bounded_limit = limit.min(MAX_SCAN_LIMIT);
-        let end = offset.saturating_add(bounded_limit).min(len);
-        nfts.slice(offset..end)
+        Storage::get_owner_nfts(&env, &owner, offset, limit.min(MAX_SCAN_LIMIT))
     }
 
     /// Returns paginated NFT IDs minted for a hunt.
-    /// The limit is bounded to MAX_SCAN_LIMIT (1000) to prevent excessive gas consumption.
+    /// The limit is bounded to `MAX_SCAN_LIMIT` to prevent excessive gas consumption.
     pub fn get_nfts_by_hunt(env: Env, hunt_id: u64, offset: u32, limit: u32) -> Vec<u64> {
         Storage::get_hunt_nfts(&env, hunt_id, offset, limit.min(MAX_SCAN_LIMIT))
     }
@@ -1444,6 +1443,19 @@ impl NftReward {
     /// # Authorization
     /// The `owner` must authorize this call and be the current owner of the NFT.
     ///
+    /// # Locked vs. soulbound — deliberate, distinct policies
+    /// - **Locked** (`nft.locked`) blocks burning outright: this flag exists for
+    ///   states like escrow, staking, or a dispute hold, where the NFT must
+    ///   not be destroyed out from under whatever holds the lock.
+    /// - **Soulbound / non-transferable** (`!nft.transferable`) does *not*
+    ///   block burning. `transferable` only gates `transfer_nft` — moving an
+    ///   NFT to a different owner. Burning is destruction by its own owner,
+    ///   not a transfer, so a soulbound NFT can still be burned by the owner
+    ///   it's bound to. (If a given deployment wants soulbound NFTs to be
+    ///   permanent even against their own owner, that is a separate policy
+    ///   decision this function deliberately does not make — nothing here
+    ///   currently checks `transferable`.)
+    ///
     /// # Errors
     /// Returns `NftNotFound` if the NFT does not exist.
     /// Returns `NotOwner` if the caller is not the current owner.
@@ -1467,6 +1479,7 @@ impl NftReward {
 
         let hunt_id = nft.hunt_id;
         Storage::remove_nft(&env, nft_id);
+        Storage::decrement_live_supply(&env);
         Storage::remove_nft_from_hunt(&env, hunt_id, nft_id);
         Storage::remove_nft_from_owner(&env, &owner, nft_id);
         Storage::decrement_owner_hunt_count(&env, &owner, hunt_id);
@@ -1541,12 +1554,8 @@ impl NftReward {
         dry_run: bool,
     ) -> Result<migration::MigrationReport, hunty_migration::UpgradeAuthError> {
         let from_version = migration::NftRewardMigration::get_schema_version(&env);
-        let report = migration::NftRewardMigration::run_migration(
-            &env,
-            &admin,
-            target_version,
-            dry_run,
-        )?;
+        let report =
+            migration::NftRewardMigration::run_migration(&env, &admin, target_version, dry_run)?;
         if !dry_run && report.succeeded && report.from_version < report.to_version {
             env.events().publish(
                 migration::NftRewardMigration::upgrade_executed_topic(&env),
