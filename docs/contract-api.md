@@ -5077,6 +5077,12 @@ Mints a unique NFT as a reward for hunt completion.
 contract has been initialized. Before initialization the check is skipped so
 that existing deployments remain functional.
 
+Reward NFTs minted through this entrypoint are **soulbound** (non-transferable)
+by default, matching `mint_reward_nft_from_map`'s default, so an authorized
+minter gets the same behaviour from either path. Callers that want a
+transferable reward or a completion rank should use `mint_reward_nft_from_map`
+with the "transferable" / "completion_rank" keys set.
+
 # Arguments
 * `minter` - Address performing the mint (must be whitelisted after init)
 * `hunt_id` - The hunt this NFT commemorates
@@ -5987,7 +5993,7 @@ pub fn has_hunt_nft(env: Env, address: Address, hunt_id: u64) -> bool
 #### `get_player_nfts`
 
 Returns paginated NFT IDs owned by an address.
-The limit is bounded to MAX_SCAN_LIMIT (1000) to prevent excessive gas consumption.
+The limit is bounded to MAX_SCAN_LIMIT (200) to prevent excessive gas consumption.
 
 **Signature:**
 
@@ -6009,7 +6015,7 @@ pub fn get_player_nfts(env: Env, owner: Address, offset: u32, limit: u32) -> Vec
 #### `get_nfts_by_hunt`
 
 Returns paginated NFT IDs minted for a hunt.
-The limit is bounded to MAX_SCAN_LIMIT (1000) to prevent excessive gas consumption.
+The limit is bounded to MAX_SCAN_LIMIT (200) to prevent excessive gas consumption.
 
 **Signature:**
 
@@ -7838,7 +7844,9 @@ Validates whether a pool can cover a given distribution amount.
 
 Checks that:
 - The pool exists (was created via create_reward_pool)
-- The required_amount is positive
+- The required_amount is positive, except that `required_amount == 0` is
+  valid for pools with an NFT contract (NFT-only pools), which hold no
+  token balance by design (#1088)
 - The pool balance >= required_amount
 - The required_amount meets the pool's minimum distribution threshold (if set)
 

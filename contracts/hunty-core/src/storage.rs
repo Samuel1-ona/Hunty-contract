@@ -160,6 +160,8 @@ impl Storage {
 
     const SUBMISSION_KEY: soroban_sdk::Symbol = symbol_short!("S");
 
+    const ATTEMPT_KEY: soroban_sdk::Symbol = symbol_short!("ATT");
+
     const ADMIN_KEY: soroban_sdk::Symbol = symbol_short!("AD");
 
     const VIEW_ONLY_KEY: soroban_sdk::Symbol = symbol_short!("V");
@@ -441,6 +443,7 @@ impl Storage {
                     invite_code_hash: None,
 
                     remaining_slots: 0,
+                    leaderboard_visibility: crate::types::LeaderboardVisibility::Public,
                 })
         };
 
@@ -1153,6 +1156,14 @@ impl Storage {
             submission_nonce,
             submitted_at,
         )
+    }
+
+    fn clue_attempt_key(
+        hunt_id: u64,
+        clue_id: u32,
+        player: &Address,
+    ) -> (soroban_sdk::Symbol, u64, u32, Address) {
+        (Self::ATTEMPT_KEY, hunt_id, clue_id, player.clone())
     }
 
     // ========== Internal Helper Functions ==========
@@ -1873,6 +1884,22 @@ impl Storage {
         );
 
         env.storage().persistent().set(&key, &expires_at);
+    }
+
+    pub fn get_clue_attempt_count(env: &Env, hunt_id: u64, clue_id: u32, player: &Address) -> u32 {
+        let key = Self::clue_attempt_key(hunt_id, clue_id, player);
+        let count = env.storage().persistent().get(&key).unwrap_or(0);
+        if count > 0 {
+            extend_ttl(env, &key, TtlPolicy::Active);
+        }
+        count
+    }
+
+    pub fn increment_clue_attempt_count(env: &Env, hunt_id: u64, clue_id: u32, player: &Address) {
+        let key = Self::clue_attempt_key(hunt_id, clue_id, player);
+        let count = env.storage().persistent().get(&key).unwrap_or(0u32);
+        env.storage().persistent().set(&key, &count.saturating_add(1));
+        extend_ttl(env, &key, TtlPolicy::Active);
     }
 
     pub fn get_processed_submission_expiry(

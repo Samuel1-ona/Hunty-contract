@@ -67,6 +67,22 @@ version_check() {
   fi
 }
 
+# assert_link <label> <contract-id> <read-method> <expected-address>
+# Fails when the read reverts or returns an address that does not match the
+# expected linked contract. This catches unlinked / mis-linked deployments.
+assert_link() {
+  local label="$1" id="$2" method="$3" expected="$4"
+  local got
+  got=$(invoke "$id" "$method" 2>/dev/null || echo "")
+  if [[ -n "$got" && "$got" == *"$expected"* ]]; then
+    echo "  [PASS] $label -> $expected"
+    ((PASS++)) || true
+  else
+    echo "  [FAIL] $label: expected '$expected', got '$got'"
+    ((FAIL++)) || true
+  fi
+}
+
 # ── Run checks ────────────────────────────────────────────────────────────────
 echo "=== Hunty Post-Deploy Verification ($NETWORK) ==="
 echo "HuntyCore      : $CORE_ID"
@@ -88,10 +104,14 @@ echo ""
 echo "--- Cross-Contract Wiring ---"
 # RewardManager must reference NftReward; HuntyCore must reference RewardManager.
 # We invoke a lightweight read that would revert if the linked address is wrong.
-check "HuntyCore→RewardManager link" \
-  stellar contract invoke --id "$CORE_ID" --rpc-url "$RPC_URL" --network-passphrase "$PASSPHRASE" -- get_reward_manager_address
-check "RewardManager→NftReward link" \
-  stellar contract invoke --id "$RM_ID" --rpc-url "$RPC_URL" --network-passphrase "$PASSPHRASE" -- get_nft_reward_address
+assert_link "HuntyCore->RewardManager link" "$CORE_ID" get_reward_manager_address "$RM_ID"
+assert_link "RewardManager->NftReward link" "$RM_ID"   get_nft_reward_address     "$NFT_ID"
+
+# RewardManager must be registered as a minter on NftReward, and HuntyCore must
+# be registered as a distributor on RewardManager. Without these the contracts
+# are deployed but NFT rewards fail on first use.
+assert_link "NftReward->RewardManager minter" "$NFT_ID" get_minter "$RM_ID"
+assert_link "RewardManager->HuntyCore distributor" "$RM_ID" get_distributor "$CORE_ID"
 
 echo ""
 echo "--- Schema Versions ---"

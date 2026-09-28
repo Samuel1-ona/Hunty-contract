@@ -1784,7 +1784,34 @@ mod test {
     }
 
     #[test]
-    fn test_validate_pool_zero_required_fails() {
+    fn test_validate_pool_nft_only_pool_accepts_zero_required() {
+        let env = Env::default();
+        env.mock_all_auths_allowing_non_root_auth();
+        let (contract_id, token_address, _) = setup(&env);
+        let creator = Address::generate(&env);
+
+        env.as_contract(&contract_id, || {
+            // NFT-only pool: zero minimum with an NFT contract and no token
+            // balance (the supported configuration from #1088).
+            let mut config = seed_pool_config(&env, 1, creator.clone(), token_address.clone());
+            config.nft_contract = Some(nft_contract_placeholder(&env));
+            Storage::set_pool_config(&env, 1, &config);
+
+            // required = 0 is valid: NFT-only pools hold no token balance by
+            // design and distribute NFTs only.
+            let result = RewardManager::validate_pool(env.clone(), 1, 0);
+            assert!(result.is_valid);
+            assert_eq!(result.balance, 0);
+            assert_eq!(result.required, 0);
+
+            // A positive required amount still has to be covered by the balance.
+            let result = RewardManager::validate_pool(env.clone(), 1, 1);
+            assert!(!result.is_valid);
+        });
+    }
+
+    #[test]
+    fn test_validate_pool_zero_required_fails_without_nft_contract() {
         let env = Env::default();
         env.mock_all_auths_allowing_non_root_auth();
         let (contract_id, token_address, token_admin) = setup(&env);
@@ -1793,12 +1820,32 @@ mod test {
         mint_tokens(&env, &token_address, &token_admin, &creator, 100_000_000);
 
         env.as_contract(&contract_id, || {
-            initialize_contract(&env, &token_address);
-            create_pool_with_token(&env, creator.clone(), 1, token_address.clone(), 0).unwrap();
-            RewardManager::fund_reward_pool(env.clone(), creator.clone(), 1, 50_000_000).unwrap();
+            // Token pool: positive minimum and no NFT contract.
+            let mut config = seed_pool_config(&env, 1, creator.clone(), token_address.clone());
+            config.min_distribution_amount = 5_000_000;
+            Storage::set_pool_config(&env, 1, &config);
+            Storage::set_pool_balance(&env, 1, 50_000_000);
 
-            // required = 0 is not a valid distribution
+            // required = 0 is not a valid token distribution
             let result = RewardManager::validate_pool(env.clone(), 1, 0);
+            assert!(!result.is_valid);
+        });
+    }
+
+    #[test]
+    fn test_validate_pool_negative_required_fails() {
+        let env = Env::default();
+        env.mock_all_auths_allowing_non_root_auth();
+        let (contract_id, token_address, _) = setup(&env);
+        let creator = Address::generate(&env);
+
+        env.as_contract(&contract_id, || {
+            // Even for NFT-only pools, negative amounts are never valid.
+            let mut config = seed_pool_config(&env, 1, creator.clone(), token_address.clone());
+            config.nft_contract = Some(nft_contract_placeholder(&env));
+            Storage::set_pool_config(&env, 1, &config);
+
+            let result = RewardManager::validate_pool(env.clone(), 1, -1);
             assert!(!result.is_valid);
         });
     }

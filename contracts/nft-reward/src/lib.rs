@@ -127,12 +127,13 @@ pub struct NftCore {
     pub locked: bool,
 }
 
+/// Expected number of fields in NftData — do not change without migration
+pub const NFT_DATA_FIELD_COUNT: usize = 8;
+
 /// NFT data structure stored on-chain.
 /// NOTE: Do NOT add new fields here without a migration step — the Soroban
 /// host rejects stored structs whose field count differs from the stored
 /// ScVal map. Use per-NFT auxiliary keys for new metadata instead.
-/// Expected number of fields in NftData — do not change without migration
-pub const NFT_DATA_FIELD_COUNT: usize = 8;
 
 #[contracttype]
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -363,6 +364,12 @@ impl NftReward {
     /// contract has been initialized. Before initialization the check is skipped so
     /// that existing deployments remain functional.
     ///
+    /// Reward NFTs minted through this entrypoint are **soulbound** (non-transferable)
+    /// by default, matching `mint_reward_nft_from_map`'s default, so an authorized
+    /// minter gets the same behaviour from either path. Callers that want a
+    /// transferable reward or a completion rank should use `mint_reward_nft_from_map`
+    /// with the "transferable" / "completion_rank" keys set.
+    ///
     /// # Arguments
     /// * `minter` - Address performing the mint (must be whitelisted after init)
     /// * `hunt_id` - The hunt this NFT commemorates
@@ -379,10 +386,11 @@ impl NftReward {
         metadata: NftMetadata,
     ) -> u64 {
         Self::require_authorized_caller(&env, &minter);
-        // This direct entrypoint has no rank context; pass 0 so callers that
-        // care about rank should use `mint_reward_nft_from_map` with the
-        // "completion_rank" key set.
-        Self::mint_reward_nft_impl(env, hunt_id, player_address, metadata, true, 0)
+        // This direct entrypoint has no rank or transferability context; align with
+        // `mint_reward_nft_from_map` and default to soulbound (transferable = false).
+        // Callers that care about rank or transferability should use
+        // `mint_reward_nft_from_map` with the "transferable" / "completion_rank" keys.
+        Self::mint_reward_nft_impl(env, hunt_id, player_address, metadata, false, 0)
     }
 
     /// Mints a reward NFT from a generic metadata map. This is the entrypoint
@@ -443,20 +451,9 @@ impl NftReward {
         let description = extract_field!("description", String, String::from_str(&env, ""));
         let image_uri = extract_field!("image_uri", String, String::from_str(&env, ""));
 
-        let hunt_title = metadata
-            .get(Symbol::new(&env, "hunt_title"))
-            .and_then(|v| String::try_from_val(&env, &v).ok())
-            .unwrap_or_else(|| title.clone());
-
-        let rarity = metadata
-            .get(Symbol::new(&env, "rarity"))
-            .and_then(|v| u32::try_from_val(&env, &v).ok())
-            .unwrap_or(0u32);
-
-        let tier = metadata
-            .get(Symbol::new(&env, "tier"))
-            .and_then(|v| u32::try_from_val(&env, &v).ok())
-            .unwrap_or(0u32);
+        let hunt_title = extract_field!("hunt_title", String, title.clone());
+        let rarity = extract_field!("rarity", u32, 0u32);
+        let tier = extract_field!("tier", u32, 0u32);
 
         let creator = match metadata.get(Symbol::new(&env, "creator")) {
             None => Some(player_address.clone()),
@@ -500,7 +497,7 @@ impl NftReward {
 
     fn validate_image_uri(_env: &Env, value: &String) -> Result<(), NftErrorCode> {
         if !image_uri_is_valid(value) {
-            return Err(NftErrorCode::InvalidMetadata);
+            return Err(NftErrorCode::InvalidImageUri);
         }
         Ok(())
     }
@@ -610,10 +607,15 @@ impl NftReward {
         Storage::add_nft_to_owner(&env, &player_address, nft_id);
         Storage::increment_owner_hunt_count(&env, &player_address, hunt_id);
         Storage::add_nft_to_hunt(&env, hunt_id, nft_id);
+        Storage::add_nft_to_all(&env, nft_id);
         Storage::mark_hunt_minted(&env, hunt_id);
-        // Read the counter once and reuse it for both the supply update and the event.
+        // Read the counter once and reuse it for the supply update.
         let total_supply = Storage::get_nft_counter(&env);
         Storage::update_collection_metadata_total_supply(&env, total_supply);
+        // `total_minted_for_hunt` is scoped to this hunt (#1093); it must not
+        // report the collection-wide counter. `add_nft_to_hunt` above already
+        // recorded this mint, so the read reflects the new per-hunt total.
+        let total_minted_for_hunt = Storage::get_hunt_nft_count(&env, hunt_id);
 
         let event = NftMintedEvent {
             nft_id,
@@ -623,7 +625,7 @@ impl NftReward {
             tier: nft_data.metadata.tier,
             minted_at,
             hunt_title: nft_data.metadata.hunt_title.clone(),
-            total_minted_for_hunt: total_supply as u32,
+            total_minted_for_hunt,
             // Use the authoritative rank threaded from hunty-core (frozen at
             // completion time), not a live re-count of minted NFTs.
             completion_rank,
@@ -1372,13 +1374,13 @@ impl NftReward {
     }
 
     /// Returns paginated NFT IDs owned by an address.
-    /// The limit is bounded to MAX_SCAN_LIMIT (1000) to prevent excessive gas consumption.
+    /// The limit is bounded to `MAX_SCAN_LIMIT` to prevent excessive gas consumption.
     pub fn get_player_nfts(env: Env, owner: Address, offset: u32, limit: u32) -> Vec<u64> {
         Storage::get_owner_nfts(&env, &owner, offset, limit.min(MAX_SCAN_LIMIT))
     }
 
     /// Returns paginated NFT IDs minted for a hunt.
-    /// The limit is bounded to MAX_SCAN_LIMIT (1000) to prevent excessive gas consumption.
+    /// The limit is bounded to `MAX_SCAN_LIMIT` to prevent excessive gas consumption.
     pub fn get_nfts_by_hunt(env: Env, hunt_id: u64, offset: u32, limit: u32) -> Vec<u64> {
         Storage::get_hunt_nfts(&env, hunt_id, offset, limit.min(MAX_SCAN_LIMIT))
     }

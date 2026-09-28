@@ -51,4 +51,17 @@ describe('loadConfig', () => {
     const env = { ...validEnv, APP_ENV: 'production' };
     expect(() => loadConfig(env)).toThrow('APP_ENV must be one of: testnet, staging, mainnet');
   });
+
+  it('leaves trustProxy undefined when TRUST_PROXY is unset', () => {
+    expect(loadConfig(validEnv).trustProxy).toBeUndefined();
+  });
+
+  it('parses TRUST_PROXY as boolean, hop count, or expression', () => {
+    expect(loadConfig({ ...validEnv, TRUST_PROXY: 'true' }).trustProxy).toBe(true);
+    expect(loadConfig({ ...validEnv, TRUST_PROXY: 'false' }).trustProxy).toBe(false);
+    expect(loadConfig({ ...validEnv, TRUST_PROXY: '1' }).trustProxy).toBe(1);
+    expect(loadConfig({ ...validEnv, TRUST_PROXY: 'loopback, 10.0.0.0/8' }).trustProxy).toBe(
+      'loopback, 10.0.0.0/8',
+    );
+  });
 });

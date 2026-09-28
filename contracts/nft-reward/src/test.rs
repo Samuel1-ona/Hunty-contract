@@ -158,14 +158,18 @@ fn create_metadata_full(
     }
 }
 
+/// Mints a transferable NFT via `mint_reward_nft_from_map` with the
+/// "transferable" key set explicitly. The typed `mint_reward_nft` entrypoint
+/// mints soulbound (non-transferable) NFTs by default (#1095), so tests that
+/// exercise transfer flows must opt in through the map path.
 fn mint_transferable(
     env: &Env,
     client: &NftRewardClient<'_>,
+    minter: &Address,
     hunt_id: u64,
     owner: &Address,
     metadata: &NftMetadata,
 ) -> u64 {
-    let minter = Address::generate(env);
     let mut map: Map<Symbol, Val> = Map::new(env);
     map.set(
         Symbol::new(env, "title"),
@@ -184,7 +188,71 @@ fn mint_transferable(
         metadata.hunt_title.clone().into_val(env),
     );
     map.set(Symbol::new(env, "transferable"), true.into_val(env));
-    client.mint_reward_nft_from_map(&minter, &hunt_id, owner, &map)
+    client
+        .mint_reward_nft_from_map(minter, &hunt_id, owner, &map)
+        .unwrap()
+}
+
+fn base_metadata_map(env: &Env) -> Map<Symbol, Val> {
+    let mut map = Map::new(env);
+    map.set(
+        Symbol::new(env, "title"),
+        String::from_str(env, "Reward").into_val(env),
+    );
+    map.set(
+        Symbol::new(env, "description"),
+        String::from_str(env, "Description").into_val(env),
+    );
+    map.set(
+        Symbol::new(env, "image_uri"),
+        String::from_str(env, "ipfs://reward").into_val(env),
+    );
+    map
+}
+
+#[test]
+fn test_mint_reward_nft_from_map_rejects_wrong_hunt_title_type() {
+    let env = setup_env();
+    let (client, minter) = setup_nft_reward(&env, None);
+    let owner = Address::generate(&env);
+    let mut map = base_metadata_map(&env);
+    map.set(Symbol::new(&env, "hunt_title"), 42u32.into_val(&env));
+
+    assert_eq!(
+        client.try_mint_reward_nft_from_map(&minter, &1, &owner, &map),
+        Err(Ok(NftErrorCode::InvalidMetadata))
+    );
+}
+
+#[test]
+fn test_mint_reward_nft_from_map_rejects_wrong_rarity_type() {
+    let env = setup_env();
+    let (client, minter) = setup_nft_reward(&env, None);
+    let owner = Address::generate(&env);
+    let mut map = base_metadata_map(&env);
+    map.set(
+        Symbol::new(&env, "rarity"),
+        String::from_str(&env, "rare").into_val(&env),
+    );
+
+    assert_eq!(
+        client.try_mint_reward_nft_from_map(&minter, &1, &owner, &map),
+        Err(Ok(NftErrorCode::InvalidMetadata))
+    );
+}
+
+#[test]
+fn test_mint_reward_nft_from_map_rejects_wrong_tier_type() {
+    let env = setup_env();
+    let (client, minter) = setup_nft_reward(&env, None);
+    let owner = Address::generate(&env);
+    let mut map = base_metadata_map(&env);
+    map.set(Symbol::new(&env, "tier"), true.into_val(&env));
+
+    assert_eq!(
+        client.try_mint_reward_nft_from_map(&minter, &1, &owner, &map),
+        Err(Ok(NftErrorCode::InvalidMetadata))
+    );
 }
 
 // =========================================================================
@@ -265,7 +333,7 @@ fn test_mint_reward_nft_rejects_empty_image_uri_consistently() {
     let direct_err = client
         .try_mint_reward_nft(&minter, &1, &player, &empty_metadata)
         .unwrap_err();
-    assert_eq!(direct_err, Err(NftErrorCode::InvalidMetadata.into()));
+    assert_eq!(direct_err, Ok(NftErrorCode::InvalidImageUri));
 
     let mut map: Map<Symbol, Val> = Map::new(&env);
     map.set(
@@ -284,7 +352,29 @@ fn test_mint_reward_nft_rejects_empty_image_uri_consistently() {
     let map_err = client
         .try_mint_reward_nft_from_map(&minter, &1, &player, &map)
         .unwrap_err();
-    assert_eq!(map_err, Err(NftErrorCode::InvalidMetadata.into()));
+    assert_eq!(map_err, Ok(NftErrorCode::InvalidImageUri));
+}
+
+#[test]
+fn test_mint_reward_nft_returns_structured_invalid_rarity_error() {
+    let env = setup_env();
+    let (client, minter) = setup_nft_reward(&env, None);
+    let player = Address::generate(&env);
+    let metadata = create_metadata_full(
+        &env,
+        "Invalid Rarity",
+        "Rarity must be between zero and five",
+        "ipfs://invalid-rarity",
+        "Test Hunt",
+        6,
+        0,
+    );
+
+    let error = client
+        .try_mint_reward_nft(&minter, &1, &player, &metadata)
+        .unwrap_err();
+
+    assert_eq!(error, Ok(NftErrorCode::InvalidRarity));
 }
 
 #[test]
@@ -452,6 +542,34 @@ fn test_soulbound_nft_cannot_be_transferred() {
         .unwrap_err();
 
     assert_eq!(err, Err(NftErrorCode::NftNotTransferable.into()));
+    assert_eq!(client.owner_of(&nft_id).unwrap(), owner);
+}
+
+#[test]
+fn test_mint_reward_nft_defaults_to_soulbound() {
+    // Regression test for #1095: the typed `mint_reward_nft` entrypoint must
+    // default to the same soulbound behaviour as `mint_reward_nft_from_map`.
+    let env = setup_env();
+    let (client, minter) = setup_nft_reward(&env, None);
+
+    let owner = Address::generate(&env);
+    let recipient = Address::generate(&env);
+    let metadata = create_metadata(
+        &env,
+        "Soulbound Default",
+        "Typed mint is soulbound by default",
+        "ipfs://soulbound-default",
+    );
+
+    let nft_id = client.mint_reward_nft(&minter, &1, &owner, &metadata);
+
+    let nft = client.get_nft(&nft_id).unwrap();
+    assert!(!nft.transferable);
+
+    let err = client
+        .try_transfer_nft(&nft_id, &owner, &recipient, &owner)
+        .unwrap_err();
+    assert_eq!(err, Ok(NftErrorCode::NftNotTransferable));
     assert_eq!(client.owner_of(&nft_id).unwrap(), owner);
 }
 
@@ -700,7 +818,7 @@ fn test_transfer_nft_success() {
     let to = Address::generate(&env);
     let metadata = create_metadata(&env, "Transfer NFT", "Test transfer", "ipfs://transfer");
 
-    let nft_id = client.mint_reward_nft(&minter, &1, &from, &metadata);
+    let nft_id = mint_transferable(&env, &client, &minter, 1, &from, &metadata);
     assert_eq!(client.owner_of(&nft_id), Some(from.clone()));
 
     client.transfer_nft(&nft_id, &from, &to, &from);
@@ -721,8 +839,8 @@ fn test_transfer_nft_updates_player_nfts() {
     let metadata1 = create_metadata(&env, "NFT 1", "Desc 1", "ipfs://1");
     let metadata2 = create_metadata(&env, "NFT 2", "Desc 2", "ipfs://2");
 
-    let nft1 = client.mint_reward_nft(&minter, &1, &alice, &metadata1);
-    let nft2 = client.mint_reward_nft(&minter, &2, &alice, &metadata2);
+    let nft1 = mint_transferable(&env, &client, &minter, 1, &alice, &metadata1);
+    let nft2 = mint_transferable(&env, &client, &minter, 2, &alice, &metadata2);
 
     let alice_nfts = client.get_player_nfts(&alice, &0, &100);
     assert_eq!(alice_nfts.len(), 2);
@@ -780,7 +898,7 @@ fn test_transfer_nft_not_owner() {
     let to = Address::generate(&env);
     let metadata = create_metadata(&env, "Owner Test", "Desc", "ipfs://owner");
 
-    let nft_id = client.mint_reward_nft(&minter, &1, &owner, &metadata);
+    let nft_id = mint_transferable(&env, &client, &minter, 1, &owner, &metadata);
 
     // Attacker tries to transfer - with mock_all_auths they "auth" but NotOwner check fails
     client.transfer_nft(&nft_id, &attacker, &to, &attacker);
@@ -795,7 +913,7 @@ fn test_transfer_nft_invalid_recipient_same_as_from() {
     let owner = Address::generate(&env);
     let metadata = create_metadata(&env, "Same Addr", "Desc", "ipfs://same");
 
-    let nft_id = client.mint_reward_nft(&minter, &1, &owner, &metadata);
+    let nft_id = mint_transferable(&env, &client, &minter, 1, &owner, &metadata);
 
     client.transfer_nft(&nft_id, &owner, &owner, &owner);
 }
@@ -809,7 +927,7 @@ fn test_transfer_nft_emits_event() {
     let to = Address::generate(&env);
     let metadata = create_metadata(&env, "Event NFT", "Desc", "ipfs://event");
 
-    let nft_id = client.mint_reward_nft(&minter, &1, &from, &metadata);
+    let nft_id = mint_transferable(&env, &client, &minter, 1, &from, &metadata);
     client.transfer_nft(&nft_id, &from, &to, &from);
 
     // Transfer succeeded; NftTransferred event is emitted by transfer_nft
@@ -2139,11 +2257,11 @@ fn test_completion_rank_is_distinct_per_player() {
         "ranks must be distinct"
     );
 
-    // total_minted_for_hunt reflects the collection counter, not the rank.
-    assert_ne!(
-        ev2.total_minted_for_hunt, ev2.completion_rank,
-        "total_minted_for_hunt and completion_rank are different concepts"
-    );
+    // total_minted_for_hunt is the per-hunt minted count for `hunt_id` (#1093):
+    // the first mint for the hunt reports 1 and the second reports 2.
+    assert_eq!(ev1.total_minted_for_hunt, 1);
+    assert_eq!(ev2.total_minted_for_hunt, 2);
+    assert_eq!(client.get_hunt_nft_count(&hunt_id), 2);
 }
 
 // =========================================================================

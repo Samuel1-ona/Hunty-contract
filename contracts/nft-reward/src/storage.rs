@@ -22,10 +22,11 @@ impl Storage {
     const HUNT_NFT_COUNT_KEY: soroban_sdk::Symbol = symbol_short!("HNFC");
     const TOTAL_HUNTS_KEY: soroban_sdk::Symbol = symbol_short!("TH");
     const TOTAL_OWNERS_KEY: soroban_sdk::Symbol = symbol_short!("TO");
-    const ALL_NFTS_KEY: soroban_sdk::Symbol = symbol_short!("ALLNFT");
+    /// Number of entries in the global all-NFT index.
+    const ALL_NFT_COUNT_KEY: soroban_sdk::Symbol = symbol_short!("ANFTC");
+    const CONTRACT_VERSION_KEY: soroban_sdk::Symbol = symbol_short!("CTRV");
     /// Per-NFT metadata schema version — distinct from `CONTRACT_VERSION_KEY` (`CTRV`).
     const NFT_VERSION_KEY: soroban_sdk::Symbol = symbol_short!("NFTV");
-    const CONTRACT_VERSION_KEY: soroban_sdk::Symbol = symbol_short!("CTRV");
     const OPERATOR_KEY: soroban_sdk::Symbol = symbol_short!("OPKEY");
 
     fn nft_key(nft_id: u64) -> (soroban_sdk::Symbol, u64) {
@@ -70,6 +71,14 @@ impl Storage {
 
     fn hunt_nft_entry_key(hunt_id: u64, index: u32) -> (soroban_sdk::Symbol, u64, u32) {
         (symbol_short!("HNFT"), hunt_id, index)
+    }
+
+    fn all_nft_entry_key(index: u32) -> (soroban_sdk::Symbol, u32) {
+        (symbol_short!("ANFTI"), index)
+    }
+
+    fn all_nft_exist_key(nft_id: u64) -> (soroban_sdk::Symbol, u64) {
+        (symbol_short!("ANFTX"), nft_id)
     }
 
     fn minter_key(minter: &Address) -> (soroban_sdk::Symbol, Address) {
@@ -190,20 +199,6 @@ impl Storage {
             env.storage().persistent().set(&meta_key, &nft.metadata);
         }
 
-        // Also add to all NFTs list for iteration (only if not already present)
-        let mut all_nfts = env
-            .storage()
-            .persistent()
-            .get(&Self::ALL_NFTS_KEY)
-            .unwrap_or_else(|| Vec::new(env));
-
-        // Check if NFT ID already exists to avoid duplicates
-        if all_nfts.first_index_of(nft.nft_id).is_none() {
-            all_nfts.push_back(nft.nft_id);
-            env.storage()
-                .persistent()
-                .set(&Self::ALL_NFTS_KEY, &all_nfts);
-        }
     }
 
     pub fn get_nft(env: &Env, nft_id: u64) -> Option<NftData> {
@@ -239,18 +234,7 @@ impl Storage {
         let version_key = Self::nft_version_key(nft_id);
         env.storage().persistent().remove(&version_key);
 
-        // Also remove from ALL_NFTS_KEY list
-        let mut all_nfts = env
-            .storage()
-            .persistent()
-            .get(&Self::ALL_NFTS_KEY)
-            .unwrap_or_else(|| Vec::new(env));
-        if let Some(idx) = all_nfts.first_index_of(nft_id) {
-            all_nfts.remove(idx);
-            env.storage()
-                .persistent()
-                .set(&Self::ALL_NFTS_KEY, &all_nfts);
-        }
+        Self::remove_nft_from_all(env, nft_id);
     }
 
     pub fn set_nft_version(env: &Env, nft_id: u64, version: u32) {
@@ -519,12 +503,83 @@ impl Storage {
         }
     }
 
-    /// Returns all minted NFT IDs from the persisted all-NFTs index.
-    pub fn get_all_nft_ids(env: &Env) -> Vec<u64> {
+    /// Appends an NFT to the global index.
+    ///
+    /// Called only from the mint path: updating an existing NFT (transfers,
+    /// extension edits, metadata refreshes) never grows the index. Storing the
+    /// index in per-position entries means an append reads a single counter
+    /// instead of loading and scanning the whole list, mirroring how the owner
+    /// and hunt indexes already work.
+    pub fn add_nft_to_all(env: &Env, nft_id: u64) {
+        let exist_key = Self::all_nft_exist_key(nft_id);
+        if env.storage().persistent().has(&exist_key) {
+            return;
+        }
+
+        let count: u32 = env
+            .storage()
+            .persistent()
+            .get(&Self::ALL_NFT_COUNT_KEY)
+            .unwrap_or(0);
         env.storage()
             .persistent()
-            .get(&Self::ALL_NFTS_KEY)
-            .unwrap_or_else(|| Vec::new(env))
+            .set(&Self::all_nft_entry_key(count), &nft_id);
+        env.storage()
+            .persistent()
+            .set(&Self::ALL_NFT_COUNT_KEY, &(count + 1));
+        env.storage().persistent().set(&exist_key, &());
+    }
+
+    /// Removes an NFT from the global index by swapping the last entry into the
+    /// freed position, so only the removed NFT's own entries are touched.
+    pub fn remove_nft_from_all(env: &Env, nft_id: u64) {
+        let count_key = Self::ALL_NFT_COUNT_KEY;
+        let count: u32 = env.storage().persistent().get(&count_key).unwrap_or(0);
+        let exist_key = Self::all_nft_exist_key(nft_id);
+        if !env.storage().persistent().has(&exist_key) {
+            return;
+        }
+
+        for i in 0..count {
+            let entry_key = Self::all_nft_entry_key(i);
+            if let Some(stored_id) = env.storage().persistent().get::<_, u64>(&entry_key) {
+                if stored_id == nft_id {
+                    let last_idx = count - 1;
+                    if i != last_idx {
+                        let last_key = Self::all_nft_entry_key(last_idx);
+                        if let Some(last_id) = env.storage().persistent().get::<_, u64>(&last_key) {
+                            env.storage().persistent().set(&entry_key, &last_id);
+                        }
+                        env.storage().persistent().remove(&last_key);
+                    } else {
+                        env.storage().persistent().remove(&entry_key);
+                    }
+                    env.storage().persistent().set(&count_key, &(count - 1));
+                    env.storage().persistent().remove(&exist_key);
+                    return;
+                }
+            }
+        }
+    }
+
+    /// Number of NFTs tracked by the global index.
+    pub fn get_all_nft_count(env: &Env) -> u32 {
+        env.storage()
+            .persistent()
+            .get(&Self::ALL_NFT_COUNT_KEY)
+            .unwrap_or(0)
+    }
+
+    /// Returns all minted NFT IDs from the persisted all-NFTs index, in mint order.
+    pub fn get_all_nft_ids(env: &Env) -> Vec<u64> {
+        let count = Self::get_all_nft_count(env);
+        let mut ids = Vec::new(env);
+        for i in 0..count {
+            if let Some(id) = env.storage().persistent().get(&Self::all_nft_entry_key(i)) {
+                ids.push_back(id);
+            }
+        }
+        ids
     }
 
     pub fn get_owner_nfts(env: &Env, owner: &Address, offset: u32, limit: u32) -> Vec<u64> {
