@@ -101,4 +101,18 @@ pub enum RewardErrorCode {
 
     /// The pool does not have vesting configured (vesting_period_secs == 0).
     VestingNotConfigured = 36,
+
+    /// Pool funding is paused (issue #628). Distribution may still be running.
+    FundingPaused = 37,
+
+    /// Reward distribution is paused (issue #628). Funding may still be open.
+    DistributionPaused = 38,
+
+    /// The pool already has the maximum number of distinct tracked funders;
+    /// a new sponsor cannot be added until the pool is refunded.
+    TooManyFunders = 39,
+
+    /// The hunt is not in a terminal state (cancelled or ended), so its pool
+    /// cannot be refunded yet.
+    InvalidHuntStatus = 40,
 }

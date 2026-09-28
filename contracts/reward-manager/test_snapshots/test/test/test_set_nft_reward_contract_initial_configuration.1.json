@@ -133,7 +133,7 @@
           "contract_data": {
             "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
             "key": {
-              "symbol": "ADMIN"
+              "symbol": "ADMI"
             },
             "durability": "persistent"
           }
@@ -146,7 +146,7 @@
                 "ext": "v0",
                 "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
                 "key": {
-                  "symbol": "ADMIN"
+                  "symbol": "ADMI"
                 },
                 "durability": "persistent",
                 "val": {
@@ -164,7 +164,7 @@
           "contract_data": {
             "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
             "key": {
-              "symbol": "NFTADR"
+              "symbol": "NFTA"
             },
             "durability": "persistent"
           }
@@ -177,7 +177,7 @@
                 "ext": "v0",
                 "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
                 "key": {
-                  "symbol": "NFTADR"
+                  "symbol": "NFTA"
                 },
                 "durability": "persistent",
                 "val": {
@@ -195,7 +195,7 @@
           "contract_data": {
             "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
             "key": {
-              "symbol": "XLMTKN"
+              "symbol": "X"
             },
             "durability": "persistent"
           }
@@ -208,7 +208,7 @@
                 "ext": "v0",
                 "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
                 "key": {
-                  "symbol": "XLMTKN"
+                  "symbol": "X"
                 },
                 "durability": "persistent",
                 "val": {
@@ -249,7 +249,7 @@
                           "symbol": "CVER"
                         },
                         "val": {
-                          "u32": 1
+                          "u32": 2
                         }
                       }
                     ]

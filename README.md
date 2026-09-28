@@ -91,6 +91,7 @@ sequenceDiagram
 - Answers are hashed using SHA256 before storage - this keeps them secret until someone solves them
 - Only the creator can add clues and activate the hunt
 - Once active, players can register and start playing
+- In `create_hunt`, `max_submissions_per_minute = 0` is the `UNLIMITED_SUBMISSIONS_PER_MINUTE` sentinel and means **unlimited submissions**; pass `1` or higher to enforce a per-minute rate limit.
 
 #### Playing a Hunt
 
@@ -390,6 +391,10 @@ pnpm build:mainnet
 pnpm start:staging
 ```
 
+#### Deploying behind a proxy or load balancer
+
+The global `/mint` limiter (100 requests / 15 min) keys on `req.ip`. Behind a reverse proxy or load balancer that is the proxy's address unless Express is told to trust it, which makes all users share one limit. Set `TRUST_PROXY` to the number of trusted proxy hops in front of the app (for example `1` for a single load balancer), or to an Express trust-proxy expression such as `loopback, 10.0.0.0/8`. It is optional: when unset, proxies are not trusted (the previous behavior), which is correct only when the app is exposed directly. Only enable it when your proxy overwrites client-supplied `X-Forwarded-For`, otherwise clients can spoof their IP and dodge the limit.
+
 Contract addresses are tracked per environment in:
 
 - `config/contracts.testnet.json`
@@ -524,6 +529,23 @@ We welcome contributions! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for guid
 - **Transparent Progress**: All progress is publicly verifiable on the blockchain
 - **Secure Rewards**: Reward pools are validated before distribution to prevent over-spending
 
+### Admin Governance
+
+Admin assignment is split across exactly two paths, both authorization-gated. There is no
+unguarded shortcut, so an uninitialized contract cannot be taken over by the first caller after
+deployment.
+
+- **`initialize_admin`** – Sets the admin for the very first time. The supplied address must
+  authenticate (`require_auth`), and the call is rejected if an admin is already set. There is no
+  other way to assign the initial admin.
+- **`propose_new_admin` + `accept_admin`** – Two-step rotation of an existing admin. The current
+  admin (authenticated) proposes a successor, then the proposed address must call `accept_admin`
+  and authenticate to complete the transfer. This prevents accidental lockout.
+
+The old single-step `set_admin` entrypoint was removed because it skipped authorization when the
+contract was uninitialized. The storage-level `set_admin` writer is an internal helper used only by
+the two authorized paths above and is never exposed as a public method.
+
 ## Roadmap
 
 ### Phase 1: Core Functionality ✅ (In Progress)
@@ -578,3 +600,8 @@ Built on [Stellar](https://www.stellar.org/) and [Soroban](https://soroban.stell
 ---
 
 **Note**: This project is in active development. The API may change as we iterate on the design.
+
+## Handsoff notes
+
+<!-- handsoff-issue-1109 -->
+- #1109: deploy_mainnet.sh calls initialize with arguments none of the contracts accept

@@ -151,7 +151,7 @@ fn test_partial_score_claim() {
     env.ledger().set_timestamp(START_TS);
     env.mock_all_auths();
 
-    let end_time = START_TS + 1_000;
+    let end_time = START_TS + 3_600;
     let (client, creator, hunt_id) = setup_hunt(&env, Some(end_time));
     client.set_allow_partial_scoring(&hunt_id, &creator, &true);
     client.activate_hunt(&hunt_id, &creator);
@@ -201,7 +201,7 @@ fn test_partial_score_requires_flag() {
     env.ledger().set_timestamp(START_TS);
     env.mock_all_auths();
 
-    let end_time = START_TS + 1_000;
+    let end_time = START_TS + 3_600;
     let (client, creator, hunt_id) = setup_hunt(&env, Some(end_time));
     client.activate_hunt(&hunt_id, &creator);
 

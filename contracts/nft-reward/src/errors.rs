@@ -22,4 +22,7 @@ pub enum NftErrorCode {
     InvalidExtensionKey = 16,
     InvalidExtensionValue = 17,
     ExtensionNotFound = 18,
+    InvalidMaxSupply = 19,
+    InvalidRoyalty = 20,
+    InvalidImageUri = 21,
 }

@@ -1,6 +1,6 @@
 use crate::storage::Storage;
 use hunty_migration::{
-    MigrationFramework, UpgradeAuthorization, UpgradeAuthError, UpgradeExecutedEvent,
+    MigrationFramework, UpgradeAuthError, UpgradeAuthorization, UpgradeExecutedEvent,
     UpgradeHistoryEntry, UpgradeProposal, UpgradeProposedEvent,
 };
 use soroban_sdk::{Address, Env, Symbol};
@@ -10,6 +10,9 @@ pub use hunty_migration::MigrationReport;
 /// Per-contract migration steps for HuntyCore storage layouts.
 pub struct HuntyCoreMigration;
 
+// Upgrade lifecycle helpers are exercised by the migration framework and
+// integration tests rather than this crate's entry points.
+#[allow(dead_code)]
 impl HuntyCoreMigration {
     pub fn get_schema_version(env: &Env) -> u32 {
         MigrationFramework::detect_version(env)
@@ -27,7 +30,11 @@ impl HuntyCoreMigration {
         admin: &Address,
         target_version: u32,
     ) -> Result<UpgradeProposal, UpgradeAuthError> {
-        UpgradeAuthorization::require_admin(env, admin, UpgradeAuthorization::get_upgrade_admin(env))?;
+        UpgradeAuthorization::require_admin(
+            env,
+            admin,
+            UpgradeAuthorization::get_upgrade_admin(env),
+        )?;
         let now = env.ledger().timestamp();
         let proposal = UpgradeAuthorization::propose_upgrade(env, admin, target_version, now);
         Ok(proposal)
@@ -38,7 +45,11 @@ impl HuntyCoreMigration {
         admin: &Address,
         delay_seconds: u64,
     ) -> Result<(), UpgradeAuthError> {
-        UpgradeAuthorization::require_admin(env, admin, UpgradeAuthorization::get_upgrade_admin(env))?;
+        UpgradeAuthorization::require_admin(
+            env,
+            admin,
+            UpgradeAuthorization::get_upgrade_admin(env),
+        )?;
         UpgradeAuthorization::set_timelock_seconds(env, delay_seconds);
         Ok(())
     }
@@ -51,7 +62,11 @@ impl HuntyCoreMigration {
         UpgradeAuthorization::get_timelock_seconds(env)
     }
 
-    pub fn get_upgrade_history(env: &Env, offset: u32, limit: u32) -> soroban_sdk::Vec<UpgradeHistoryEntry> {
+    pub fn get_upgrade_history(
+        env: &Env,
+        offset: u32,
+        limit: u32,
+    ) -> soroban_sdk::Vec<UpgradeHistoryEntry> {
         UpgradeAuthorization::get_history(env, offset, limit)
     }
 
@@ -147,9 +162,17 @@ impl HuntyCoreMigration {
     }
 
     /// Restores the schema version saved before the last migration.
-    pub fn rollback_migration(env: &Env, admin: &Address) -> Result<MigrationReport, UpgradeAuthError> {
-        UpgradeAuthorization::require_admin(env, admin, UpgradeAuthorization::get_upgrade_admin(env))?;
-        let previous = MigrationFramework::rollback_version(env).ok_or(UpgradeAuthError::NoProposal)?;
+    pub fn rollback_migration(
+        env: &Env,
+        admin: &Address,
+    ) -> Result<MigrationReport, UpgradeAuthError> {
+        UpgradeAuthorization::require_admin(
+            env,
+            admin,
+            UpgradeAuthorization::get_upgrade_admin(env),
+        )?;
+        let previous =
+            MigrationFramework::rollback_version(env).ok_or(UpgradeAuthError::NoProposal)?;
         let current = MigrationFramework::detect_version(env);
         MigrationFramework::set_version(env, previous);
         MigrationFramework::clear_rollback(env);
@@ -241,7 +264,7 @@ impl HuntyCoreMigration {
                 }
             }
             // Only save if there are required clues to avoid unnecessary storage writes
-            if required_ids.len() > 0 {
+            if !required_ids.is_empty() {
                 Storage::set_required_clues(env, hunt_id, &required_ids);
             }
         }

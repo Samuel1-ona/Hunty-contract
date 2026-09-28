@@ -1,9 +1,10 @@
-use soroban_sdk::{symbol_short, Address, Env, Vec};
+use soroban_sdk::{contracttype, symbol_short, Address, Env, IntoVal, TryFromVal, Val, Vec};
 
 use crate::types::{
-    DistributionProof, DistributionRecord, PoolAuditEntry, PoolDistribution, ResolutionStatus,
-    RewardPoolConfig, VestingRecord,
+    DistributionProof, DistributionRecord, PoolDistribution, ResolutionStatus, RewardPoolConfig,
+    VestingRecord,
 };
+pub use crate::types::{PoolAuditEntry, PoolOperation};
 
 pub struct Storage;
 
@@ -15,7 +16,9 @@ impl Storage {
     const XLM_TOKEN_KEY: soroban_sdk::Symbol = symbol_short!("X");
     const NFT_CONTRACT_KEY: soroban_sdk::Symbol = symbol_short!("NFTA");
     /// Ring-buffer capacity for the per-pool audit log.
-    const MAX_AUDIT_ENTRIES_PER_POOL: u64 = 50;
+    pub const MAX_AUDIT_ENTRIES_PER_POOL: u64 = 50;
+    const AUDIT_TTL_THRESHOLD: u32 = 172_800;
+    const AUDIT_TTL_EXTEND_TO: u32 = 518_400;
     // Daily spending caps
     const DAILY_POOL_CAP_KEY: soroban_sdk::Symbol = symbol_short!("DPC");
     const DAILY_GLOBAL_CAP_KEY: soroban_sdk::Symbol = symbol_short!("DGR");
@@ -32,6 +35,7 @@ impl Storage {
     const POOL_CFG_KEY: soroban_sdk::Symbol = symbol_short!("PCFG");
     const POOL_DEP_KEY: soroban_sdk::Symbol = symbol_short!("PDEP");
     const POOL_DST_KEY: soroban_sdk::Symbol = symbol_short!("PDST");
+    const POOL_RFD_KEY: soroban_sdk::Symbol = symbol_short!("PRFD");
     const POOL_DIST_COUNT_KEY: soroban_sdk::Symbol = symbol_short!("PDCNT");
     const POOL_LAST_DIST_TS_KEY: soroban_sdk::Symbol = symbol_short!("PLDTS");
     const POOL_DISTRIBUTIONS_KEY: soroban_sdk::Symbol = symbol_short!("PLDIST");
@@ -42,8 +46,17 @@ impl Storage {
     const AUDIT_COUNT_KEY: soroban_sdk::Symbol = symbol_short!("AUDC");
     const AUDIT_LOG_KEY: soroban_sdk::Symbol = symbol_short!("AUDL");
     const PAUSED_KEY: soroban_sdk::Symbol = symbol_short!("PAUSE");
+    // Granular pause flags (issue #628), mirroring the per-operation pauses
+    // hunty-core already exposes. The global PAUSED_KEY above still overrides
+    // both, so an emergency stop remains a single call.
+    const PAUSE_FUNDING_KEY: soroban_sdk::Symbol = symbol_short!("PAUSE_FD");
+    const PAUSE_DIST_KEY: soroban_sdk::Symbol = symbol_short!("PAUSE_DS");
     const EMERGENCY_LOG_KEY: soroban_sdk::Symbol = symbol_short!("EMLOG");
-    
+    /// List of distinct addresses that have funded a pool and not yet been refunded.
+    const POOL_FUNDERS_KEY: soroban_sdk::Symbol = symbol_short!("PFNDRS");
+    /// Per-(hunt_id, funder) cumulative amount contributed and not yet refunded.
+    const POOL_FUNDER_CONTRIB_KEY: soroban_sdk::Symbol = symbol_short!("PFCONT");
+
     pub const PENDING_NFT_KEY: soroban_sdk::Symbol = symbol_short!("PNFT");
 
     // ========== Vesting ==========
@@ -60,7 +73,9 @@ impl Storage {
     }
 
     pub fn set_pending_admin(env: &Env, address: &Address) {
-        env.storage().persistent().set(&Self::PENDING_ADMIN_KEY, address);
+        env.storage()
+            .persistent()
+            .set(&Self::PENDING_ADMIN_KEY, address);
     }
 
     pub fn get_pending_admin(env: &Env) -> Option<Address> {
@@ -199,7 +214,6 @@ impl Storage {
         result
     }
 
-
     fn distribution_record_key(
         hunt_id: u64,
         player: &Address,
@@ -329,6 +343,16 @@ impl Storage {
 
     pub fn get_pool_total_distributed(env: &Env, hunt_id: u64) -> i128 {
         let key = Self::pool_dst_key(hunt_id);
+        env.storage().persistent().get(&key).unwrap_or(0)
+    }
+
+    pub fn set_pool_total_refunded(env: &Env, hunt_id: u64, amount: i128) {
+        let key = Self::pool_rfd_key(hunt_id);
+        env.storage().persistent().set(&key, &amount);
+    }
+
+    pub fn get_pool_total_refunded(env: &Env, hunt_id: u64) -> i128 {
+        let key = Self::pool_rfd_key(hunt_id);
         env.storage().persistent().get(&key).unwrap_or(0)
     }
 
@@ -489,37 +513,156 @@ impl Storage {
         (Self::POOL_DST_KEY, hunt_id)
     }
 
+    fn pool_rfd_key(hunt_id: u64) -> (soroban_sdk::Symbol, u64) {
+        (Self::POOL_RFD_KEY, hunt_id)
+    }
+
     fn pool_distributions_key(hunt_id: u64) -> (soroban_sdk::Symbol, u64) {
         (Self::POOL_DISTRIBUTIONS_KEY, hunt_id)
     }
 
+    // ========== Pool Funders (sponsorship tracking) ==========
+
+    /// Returns the distinct addresses that have funded a pool and have not yet
+    /// been refunded, in the order they first contributed.
+    pub fn get_pool_funders(env: &Env, hunt_id: u64) -> Vec<Address> {
+        let key = Self::pool_funders_key(hunt_id);
+        env.storage()
+            .persistent()
+            .get(&key)
+            .unwrap_or_else(|| Vec::new(env))
+    }
+
+    pub fn set_pool_funders(env: &Env, hunt_id: u64, funders: &Vec<Address>) {
+        let key = Self::pool_funders_key(hunt_id);
+        env.storage().persistent().set(&key, funders);
+    }
+
+    pub fn remove_pool_funders(env: &Env, hunt_id: u64) {
+        let key = Self::pool_funders_key(hunt_id);
+        env.storage().persistent().remove(&key);
+    }
+
+    /// Cumulative amount `funder` has contributed to a pool that has not yet
+    /// been refunded. 0 if they have never funded it or were already refunded.
+    pub fn get_pool_funder_contribution(env: &Env, hunt_id: u64, funder: &Address) -> i128 {
+        let key = Self::pool_funder_contribution_key(hunt_id, funder);
+        env.storage().persistent().get(&key).unwrap_or(0)
+    }
+
+    pub fn set_pool_funder_contribution(env: &Env, hunt_id: u64, funder: &Address, amount: i128) {
+        let key = Self::pool_funder_contribution_key(hunt_id, funder);
+        env.storage().persistent().set(&key, &amount);
+    }
+
+    pub fn remove_pool_funder_contribution(env: &Env, hunt_id: u64, funder: &Address) {
+        let key = Self::pool_funder_contribution_key(hunt_id, funder);
+        env.storage().persistent().remove(&key);
+    }
+
+    fn pool_funders_key(hunt_id: u64) -> (soroban_sdk::Symbol, u64) {
+        (Self::POOL_FUNDERS_KEY, hunt_id)
+    }
+
+    fn pool_funder_contribution_key(
+        hunt_id: u64,
+        funder: &Address,
+    ) -> (soroban_sdk::Symbol, u64, Address) {
+        (Self::POOL_FUNDER_CONTRIB_KEY, hunt_id, funder.clone())
+    }
+
     // ========== Audit Log ==========
 
+    /// Append one entry to a fixed-size ring buffer. `count` is a monotonically
+    /// increasing sequence number; the actual storage footprint is capped at
+    /// `MAX_AUDIT_ENTRIES_PER_POOL` slots.
     pub fn append_audit_entry(env: &Env, hunt_id: u64, entry: PoolAuditEntry) {
         let count_key = (Self::AUDIT_COUNT_KEY, hunt_id);
-        let current_count: u64 = env.storage().persistent().get(&count_key).unwrap_or(0);
-
+        let current_count: u64 = Self::get_pool_audit_count(env, hunt_id);
         let index = current_count % Self::MAX_AUDIT_ENTRIES_PER_POOL;
         let log_key = (Self::AUDIT_LOG_KEY, hunt_id, index);
 
         env.storage().persistent().set(&log_key, &entry);
+        Self::touch_audit_key(env, &log_key);
         env.storage()
             .persistent()
-            .set(&count_key, &(current_count + 1));
+            .set(&count_key, &current_count.saturating_add(1));
+        Self::touch_audit_key(env, &count_key);
     }
 
+    /// Returns the cumulative number of entries ever appended for a pool.
     pub fn get_pool_audit_count(env: &Env, hunt_id: u64) -> u64 {
         let count_key = (Self::AUDIT_COUNT_KEY, hunt_id);
-        env.storage().persistent().get(&count_key).unwrap_or(0)
+        let count: u64 = env.storage().persistent().get(&count_key).unwrap_or(0);
+        if env.storage().persistent().has(&count_key) {
+            Self::touch_audit_key(env, &count_key);
+        }
+        count
     }
 
+    /// Reads an entry by its sequence number. Sequence numbers are reduced
+    /// modulo the ring capacity for storage, so callers can page across wraps.
     pub fn get_pool_audit_entry(env: &Env, hunt_id: u64, index: u64) -> Option<PoolAuditEntry> {
         let log_key = (
             Self::AUDIT_LOG_KEY,
             hunt_id,
             index % Self::MAX_AUDIT_ENTRIES_PER_POOL,
         );
-        env.storage().persistent().get(&log_key)
+        let raw: Option<Val> = env.storage().persistent().get(&log_key);
+        let entry = raw.and_then(|value| {
+            if let Ok(entry) = PoolAuditEntry::try_from_val(env, &value) {
+                return Some(entry);
+            }
+
+            // The first audit implementation used a compact legacy record
+            // with a non-optional amount and a different field order. Decode it
+            // on read so upgrading the contract does not hide old entries.
+            #[contracttype]
+            #[derive(Clone, Debug)]
+            enum LegacyPoolOperation {
+                Create,
+                Fund,
+                Distribute,
+                Refund,
+                Withdraw,
+            }
+
+            #[contracttype]
+            #[derive(Clone, Debug)]
+            struct LegacyPoolAuditEntry {
+                operation: LegacyPoolOperation,
+                actor: Address,
+                amount: i128,
+                timestamp: u64,
+            }
+
+            let legacy = LegacyPoolAuditEntry::try_from_val(env, &value).ok()?;
+            let operation = match legacy.operation {
+                LegacyPoolOperation::Create => PoolOperation::Create,
+                LegacyPoolOperation::Fund => PoolOperation::Fund,
+                LegacyPoolOperation::Distribute => PoolOperation::Distribute,
+                LegacyPoolOperation::Refund => PoolOperation::Refund,
+                LegacyPoolOperation::Withdraw => PoolOperation::Withdraw,
+            };
+            Some(PoolAuditEntry {
+                actor: legacy.actor,
+                operation,
+                timestamp: legacy.timestamp,
+                amount: Some(legacy.amount),
+            })
+        });
+        if entry.is_some() {
+            Self::touch_audit_key(env, &log_key);
+        }
+        entry
+    }
+
+    fn touch_audit_key<K: IntoVal<Env, Val>>(env: &Env, key: &K) {
+        env.storage().persistent().extend_ttl(
+            key,
+            Self::AUDIT_TTL_THRESHOLD,
+            Self::AUDIT_TTL_EXTEND_TO,
+        );
     }
 
     // ========== Pause / Emergency State ==========
@@ -533,6 +676,59 @@ impl Storage {
             .instance()
             .get(&Self::PAUSED_KEY)
             .unwrap_or(false)
+    }
+
+    // ---- Granular pause flags (issue #628) ----
+    //
+    // `hunty-core` can pause registrations, answers and rewards independently.
+    // reward-manager had a single flag, so stopping a suspect distribution also
+    // stopped creators topping their pools up. These split the two halves.
+
+    pub fn set_funding_paused(env: &Env, paused: bool) {
+        env.storage()
+            .instance()
+            .set(&Self::PAUSE_FUNDING_KEY, &paused);
+    }
+
+    /// True when funding is blocked, either by its own flag or by the global stop.
+    pub fn is_funding_paused(env: &Env) -> bool {
+        Self::is_paused(env)
+            || env
+                .storage()
+                .instance()
+                .get(&Self::PAUSE_FUNDING_KEY)
+                .unwrap_or(false)
+    }
+
+    pub fn set_distribution_paused(env: &Env, paused: bool) {
+        env.storage().instance().set(&Self::PAUSE_DIST_KEY, &paused);
+    }
+
+    /// True when distribution is blocked, either by its own flag or by the
+    /// global stop.
+    pub fn is_distribution_paused(env: &Env) -> bool {
+        Self::is_paused(env)
+            || env
+                .storage()
+                .instance()
+                .get(&Self::PAUSE_DIST_KEY)
+                .unwrap_or(false)
+    }
+
+    /// The two granular flags on their own, ignoring the global stop. Used by
+    /// `get_pause_state` so an operator can tell a granular pause apart from an
+    /// emergency stop.
+    pub fn raw_pause_flags(env: &Env) -> (bool, bool) {
+        (
+            env.storage()
+                .instance()
+                .get(&Self::PAUSE_FUNDING_KEY)
+                .unwrap_or(false),
+            env.storage()
+                .instance()
+                .get(&Self::PAUSE_DIST_KEY)
+                .unwrap_or(false),
+        )
     }
 
     pub fn log_emergency_withdrawal(env: &Env, log_entry: &crate::EmergencyWithdrawalLogEntry) {
@@ -592,12 +788,7 @@ impl Storage {
 
     /// Stores a vesting record for a (hunt_id, player) pair.
     /// Called at distribution time when vesting_period_secs > 0.
-    pub fn set_vesting_record(
-        env: &Env,
-        hunt_id: u64,
-        player: &Address,
-        record: &VestingRecord,
-    ) {
+    pub fn set_vesting_record(env: &Env, hunt_id: u64, player: &Address, record: &VestingRecord) {
         let key = Self::vesting_key(hunt_id, player);
         env.storage().persistent().set(&key, record);
     }

@@ -164,7 +164,16 @@ export const NftErrorCode = {
   7: {message:"AlreadyInitialized"},
   8: {message:"MaxSupplyReached"},
   9: {message:"NotInitialized"},
-  10: {message:"NotOperator"}
+  10: {message:"NotOperator"},
+  11: {message:"NftNotTransferable"},
+  12: {message:"NftLocked"},
+  13: {message:"InvalidMetadata"},
+  14: {message:"MetadataFrozen"},
+  15: {message:"TooManyExtensions"},
+  16: {message:"InvalidExtensionKey"},
+  17: {message:"InvalidExtensionValue"},
+  18: {message:"ExtensionNotFound"},
+  19: {message:"InvalidMaxSupply"}
 }
 
 
@@ -255,12 +264,6 @@ export interface Client {
    * or an operator approved by the owner via `set_operator`.
    */
   transfer_nft: ({nft_id, from_address, to_address, caller}: {nft_id: u64, from_address: string, to_address: string, caller: string}, options?: MethodOptions) => Promise<AssembledTransaction<Result<void>>>
-
-  /**
-   * Construct and simulate a get_nft_owner transaction. Returns an `AssembledTransaction` object which will have a `result` field containing the result of the simulation. If this transaction changes contract state, you will need to call `signAndSend()` on the returned object.
-   * Alias for owner_of. Returns the owner of an NFT.
-   */
-  get_nft_owner: ({nft_id}: {nft_id: u64}, options?: MethodOptions) => Promise<AssembledTransaction<Option<string>>>
 
   /**
    * Construct and simulate a run_migration transaction. Returns an `AssembledTransaction` object which will have a `result` field containing the result of the simulation. If this transaction changes contract state, you will need to call `signAndSend()` on the returned object.
@@ -483,7 +486,6 @@ export class Client extends ContractClient {
         set_operator: this.txFromJSON<null>,
         total_supply: this.txFromJSON<u64>,
         transfer_nft: this.txFromJSON<Result<void>>,
-        get_nft_owner: this.txFromJSON<Option<string>>,
         run_migration: this.txFromJSON<MigrationReport>,
         search_by_tier: this.txFromJSON<Array<u64>>,
         get_player_nfts: this.txFromJSON<Array<u64>>,

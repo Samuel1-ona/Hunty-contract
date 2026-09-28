@@ -7,7 +7,7 @@ test: build
 
 build:
 	stellar contract build
-	@ls -l ../../target/wasm32-unknown-unknown/release/reward_manager.wasm
+	@ls -l ../../target/wasm32v1-none/release/reward_manager.wasm
 
 fmt:
 	cargo fmt --all

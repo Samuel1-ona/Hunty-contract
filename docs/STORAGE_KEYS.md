@@ -20,19 +20,26 @@ A CI/script check (`scripts/ci/check_storage_keys_doc.sh`) asserts that every
 
 ## hunty-core (`contracts/hunty-core/src/storage.rs`)
 
+> **Garbage collection (issue #446).** Soroban cannot scan by key prefix, so
+> `Storage::sweep_hunt_storage` reconstructs a hunt's entries from the same key
+> builders that wrote them. Any **per-hunt** key added below must also be added
+> to that function, or it becomes a permanent leak: once the hunt record is gone
+> there is nothing left to enumerate it from.
+
 | Constant | Symbol | Shape / notes |
 |---|---|---|
 | `HUNT_KEY` | `HUNT` | `(HUNT, hunt_id)` — hunt record |
 | `HUNT_CACHE_KEY` | `HC` | `(HC, hunt_id)` — instance cache |
-| `CLUE_KEY` | `CLU` | `(CLU, clue_id)` |
+| `CLUE_KEY` | `CLU` | `(CLU, hunt_id, clue_id)` — persistent clue record |
 | `PROGRESS_KEY` | `PR` | `(PR, hunt_id, player)` |
 | `PLAYERS_LIST_KEY` | `PL` | players list for a hunt |
 | `LEADERBOARD_KEY` | `LBD` | leaderboard index |
 | `CLUES_LIST_KEY` | `CLS` | clues list |
 | `PLAYER_ENTRY_KEY` | `PLRS` | `(PLRS, hunt_id, index)` |
 | `PLAYER_COUNT_KEY` | `PLCT` | `(PLCT, hunt_id)` |
-| `CLUE_ENTRY_KEY` | `CLST` | clue list entry |
-| `CLUE_LIST_COUNT_KEY` | `CLCT` | clue list count |
+| `CLUE_ENTRY_KEY` | `CLST` | `(CLST, hunt_id, index)` — persistent clue index entry |
+| `CLUE_LIST_COUNT_KEY` | `CLCT` | `(CLCT, hunt_id)` — persistent clue index count |
+| `PLAYER_EXISTS_KEY` | `PLEX` | `(PLEX, hunt_id, player)` — persistent player dedup marker |
 | `HUNT_COUNTER_KEY` | `CN` | hunt id counter |
 | `CLUE_COUNTER_KEY` | `CC` | clue id counter |
 | `REWARD_MGR_KEY` | `R` | reward-manager address |
@@ -58,12 +65,17 @@ A CI/script check (`scripts/ci/check_storage_keys_doc.sh`) asserts that every
 | `PLAYER_TEAM_KEY` | `PLTM` | `(PLTM, hunt_id, player)` |
 | `TEAM_PROGRESS_KEY` | `TMPR` | `(TMPR, hunt_id, team_id)` |
 
+> Hunt records, clue records, and their indexes are authoritative persistent
+> entries. `HUNT_CACHE_KEY` is intentionally instance-only because it is a
+> rebuildable read cache; losing it cannot lose hunt state. The storage layer
+> lazily promotes legacy instance copies of hunt/clue keys on first access.
+
 ### Inline / helper symbols (hunty-core)
 
 | Symbol | Usage |
 |---|---|
-| `CLEX` | clue existence helper |
-| `PLEX` | player existence helper |
+| `CLUE_EXISTS_KEY` / `CLEX` | `(CLEX, hunt_id, clue_id)` — persistent clue dedup marker; legacy instance copies are promoted |
+| `PLAYER_EXISTS_KEY` / `PLEX` | `(PLEX, hunt_id, player)` — persistent player dedup marker; legacy instance copies are promoted |
 | `CVER` | contract version (inline) |
 | `HRLADM` / `HRLCT` / `HRLDEF` / `HRLOVR` | rate-limit helpers |
 
@@ -75,6 +87,7 @@ A CI/script check (`scripts/ci/check_storage_keys_doc.sh`) asserts that every
 | `FAILURES_KEY` | `FAILCT` |
 | `GAS_UNITS_KEY` | `GASUN` |
 | `ALERTS_KEY` | `ALERT` |
+| `ALERT_MAP_KEY` | `ALERTMAP` |
 
 ---
 
@@ -85,10 +98,10 @@ A CI/script check (`scripts/ci/check_storage_keys_doc.sh`) asserts that every
 | `NFT_KEY` | `NF` | `(NF, nft_id)` — full NFT blob |
 | `NFT_CORE_KEY` | `NC` | `(NC, nft_id)` — core fields |
 | `NFT_META_KEY` | `NM` | `(NM, nft_id)` — metadata |
-| `NFT_VERSION_KEY` | `NV` | `(NV, nft_id)` — per-NFT metadata version |
+| `NFT_VERSION_KEY` | `NFTV` | `(NFTV, nft_id)` — per-NFT metadata version (distinct from `CTRV`) |
 | `NFT_COUNTER_KEY` | `CN` | next NFT id |
 | `OWNER_NFT_COUNT_KEY` | `ONFC` | `(ONFC, owner)` |
-| `HUNT_NFT_COUNT_KEY` | `HN` | `(HN, hunt_id)` |
+| `HUNT_NFT_COUNT_KEY` | `HNFC` | `(HNFC, hunt_id)` — per-hunt mint count index |
 | `MAX_SUPPLY_KEY` | `MAXS` | collection max supply |
 | `INITIALIZED_KEY` | `INIT` | init flag |
 | `ADMIN_KEY` | `ADMIN` | admin (also historically `ADMN`) |
@@ -96,10 +109,11 @@ A CI/script check (`scripts/ci/check_storage_keys_doc.sh`) asserts that every
 | `REWARD_MGR_KEY` | `RWDMGR` | reward-manager address (also historically `RWMG`) |
 | `COLLECTION_METADATA_KEY` | `COLL` | collection metadata |
 | `HAS_AUTH_KEY` | `HAUTH` | auth-initialized flag |
-| `ALL_NFTS_KEY` | `AN` | vector of all minted NFT ids |
+| `ALL_NFTS_KEY` | `ALLNFT` | vector of all minted NFT ids |
 | `TOTAL_HUNTS_KEY` | `TH` | distinct hunts that minted |
 | `TOTAL_OWNERS_KEY` | `TO` | distinct owners counter |
-| `CONTRACT_VERSION_KEY` | `CV` | contract version |
+| `CONTRACT_VERSION_KEY` | `CTRV` | contract version (instance storage) |
+| `OPERATOR_KEY` | `OPKEY` | `(OPKEY, owner, operator)` — operator approval flag |
 
 ### Composite constructors (nft-reward)
 
@@ -139,19 +153,29 @@ A CI/script check (`scripts/ci/check_storage_keys_doc.sh`) asserts that every
 | `POOL_CFG_KEY` | `PCFG` | `(PCFG, hunt_id)` |
 | `POOL_DEP_KEY` | `PDEP` | `(PDEP, hunt_id)` deposited |
 | `POOL_DST_KEY` | `PDST` | `(PDST, hunt_id)` distributed |
+| `POOL_RFD_KEY` | `PRFD` | `(PRFD, hunt_id)` total refunded (issue #628) |
 | `POOL_DIST_COUNT_KEY` | `PDCNT` | `(PDCNT, hunt_id)` distribution count |
 | `POOL_LAST_DIST_TS_KEY` | `PLDTS` | `(PLDTS, hunt_id)` |
 | `POOL_DISTRIBUTIONS_KEY` | `PLDIST` | `(PLDIST, hunt_id)` distribution list |
 | `TOTAL_XLM_DST_KEY` | `TXDST` | total XLM distributed |
 | `IN_DISTRIBUTION_KEY` | `IN_DIST` | re-entrancy / in-flight flag |
 | `HAS_AUTH_KEY` | `HAUTH` | auth-initialized flag |
-| `AUDIT_COUNT_KEY` | `AUDC` | `(AUDC, hunt_id)` — also seen as `ACNT` / `ACT` in merges |
-| `AUDIT_LOG_KEY` | `AUDL` | `(AUDL, hunt_id, index)` — also seen as `ALOG` / `AL` |
+| `AUDIT_COUNT_KEY` | `AUDC` | `(AUDC, hunt_id)` — total audit entries appended |
+| `AUDIT_LOG_KEY` | `AUDL` | `(AUDL, hunt_id, index)` — ring-buffer slot (`index % MAX_AUDIT_ENTRIES_PER_POOL`) |
 | `PAUSED_KEY` | `PAUSE` | emergency pause — also seen as `PAUSED` / `PAUS` |
+| `PAUSE_FUNDING_KEY` | `PAUSE_FD` | granular funding pause (issue #628) |
+| `PAUSE_DIST_KEY` | `PAUSE_DS` | granular distribution pause (issue #628) |
 | `EMERGENCY_LOG_KEY` | `EMLOG` | emergency action log — also seen as `ELOG` |
 | `PENDING_NFT_KEY` | `PNFT` | `(PNFT, hunt_id, player)` pending mint |
-| `VESTING_KEY` | `VEST` | `(VEST, hunt_id, player)` — vesting record |
 | `VESTING_KEY` | `VEST` | `(VEST, hunt_id, player)` vesting record |
+| `POOL_FUNDERS_KEY` | `PFNDRS` | `(PFNDRS, hunt_id)` — list of distinct funders not yet refunded |
+| `POOL_FUNDER_CONTRIB_KEY` | `PFCONT` | `(PFCONT, hunt_id, funder)` — cumulative unrefunded contribution |
+
+### Audit log capacity (reward-manager)
+
+| Constant | Value | Notes |
+|---|---|---|
+| `MAX_AUDIT_ENTRIES_PER_POOL` | `50` | Ring-buffer cap per hunt; not a storage key — bounds `(AUDL, hunt_id, index)` slots. Count/slot keys receive an explicit persistent TTL refresh on append and read. |
 
 ### Inline / helper symbols (reward-manager)
 
@@ -208,7 +232,7 @@ Historical longer prefixes that were shortened (see ADR 002):
 - `NVER` → `NV`
 - `THUNTS` → `TH`
 - `TOWNRS` → `TO`
-- `ALLNFTS` → `AN`
+- `ALLNFTS` → `ALLNFT`
 - `CVER` → `CV`
 - operator / locker composites → `OPKEY` / `LOCKR`
 

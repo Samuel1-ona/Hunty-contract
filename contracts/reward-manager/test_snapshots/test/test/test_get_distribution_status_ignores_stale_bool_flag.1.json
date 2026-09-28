@@ -104,7 +104,7 @@
             "key": {
               "vec": [
                 {
-                  "symbol": "DREC"
+                  "symbol": "DR"
                 },
                 {
                   "u64": 1
@@ -127,7 +127,7 @@
                 "key": {
                   "vec": [
                     {
-                      "symbol": "DREC"
+                      "symbol": "DR"
                     },
                     {
                       "u64": 1

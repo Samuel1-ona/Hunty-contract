@@ -9,8 +9,10 @@ use soroban_sdk::{Address, Env, Symbol};
 pub use hunty_migration::MigrationReport;
 
 /// Per-contract migration steps for NftReward storage layouts.
+#[allow(dead_code)]
 pub struct NftRewardMigration;
 
+#[allow(dead_code)]
 impl NftRewardMigration {
     pub fn get_schema_version(env: &Env) -> u32 {
         MigrationFramework::detect_version(env)
@@ -65,7 +67,8 @@ impl NftRewardMigration {
         offset: u32,
         limit: u32,
     ) -> soroban_sdk::Vec<UpgradeHistoryEntry> {
-        UpgradeAuthorization::get_history(env, offset, limit)
+        let bounded_limit = limit.min(crate::MAX_SCAN_LIMIT);
+        UpgradeAuthorization::get_history(env, offset, bounded_limit)
     }
 
     /// Runs migrations up to `target_version`. When `dry_run` is true, no storage writes occur.
