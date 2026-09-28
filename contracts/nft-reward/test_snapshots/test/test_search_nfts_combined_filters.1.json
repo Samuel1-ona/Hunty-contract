@@ -826,7 +826,7 @@
                         "symbol": "transferable"
                       },
                       "val": {
-                        "bool": true
+                        "bool": false
                       }
                     }
                   ]
@@ -928,7 +928,7 @@
                         "symbol": "transferable"
                       },
                       "val": {
-                        "bool": true
+                        "bool": false
                       }
                     }
                   ]
@@ -1030,7 +1030,7 @@
                         "symbol": "transferable"
                       },
                       "val": {
-                        "bool": true
+                        "bool": false
                       }
                     }
                   ]

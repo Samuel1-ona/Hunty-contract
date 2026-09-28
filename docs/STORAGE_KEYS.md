@@ -30,15 +30,16 @@ A CI/script check (`scripts/ci/check_storage_keys_doc.sh`) asserts that every
 |---|---|---|
 | `HUNT_KEY` | `HUNT` | `(HUNT, hunt_id)` — hunt record |
 | `HUNT_CACHE_KEY` | `HC` | `(HC, hunt_id)` — instance cache |
-| `CLUE_KEY` | `CLU` | `(CLU, clue_id)` |
+| `CLUE_KEY` | `CLU` | `(CLU, hunt_id, clue_id)` — persistent clue record |
 | `PROGRESS_KEY` | `PR` | `(PR, hunt_id, player)` |
 | `PLAYERS_LIST_KEY` | `PL` | players list for a hunt |
 | `LEADERBOARD_KEY` | `LBD` | leaderboard index |
 | `CLUES_LIST_KEY` | `CLS` | clues list |
 | `PLAYER_ENTRY_KEY` | `PLRS` | `(PLRS, hunt_id, index)` |
 | `PLAYER_COUNT_KEY` | `PLCT` | `(PLCT, hunt_id)` |
-| `CLUE_ENTRY_KEY` | `CLST` | clue list entry |
-| `CLUE_LIST_COUNT_KEY` | `CLCT` | clue list count |
+| `CLUE_ENTRY_KEY` | `CLST` | `(CLST, hunt_id, index)` — persistent clue index entry |
+| `CLUE_LIST_COUNT_KEY` | `CLCT` | `(CLCT, hunt_id)` — persistent clue index count |
+| `PLAYER_EXISTS_KEY` | `PLEX` | `(PLEX, hunt_id, player)` — persistent player dedup marker |
 | `HUNT_COUNTER_KEY` | `CN` | hunt id counter |
 | `CLUE_COUNTER_KEY` | `CC` | clue id counter |
 | `REWARD_MGR_KEY` | `R` | reward-manager address |
@@ -64,12 +65,17 @@ A CI/script check (`scripts/ci/check_storage_keys_doc.sh`) asserts that every
 | `PLAYER_TEAM_KEY` | `PLTM` | `(PLTM, hunt_id, player)` |
 | `TEAM_PROGRESS_KEY` | `TMPR` | `(TMPR, hunt_id, team_id)` |
 
+> Hunt records, clue records, and their indexes are authoritative persistent
+> entries. `HUNT_CACHE_KEY` is intentionally instance-only because it is a
+> rebuildable read cache; losing it cannot lose hunt state. The storage layer
+> lazily promotes legacy instance copies of hunt/clue keys on first access.
+
 ### Inline / helper symbols (hunty-core)
 
 | Symbol | Usage |
 |---|---|
-| `CLEX` | clue existence helper |
-| `PLEX` | player existence helper |
+| `CLUE_EXISTS_KEY` / `CLEX` | `(CLEX, hunt_id, clue_id)` — persistent clue dedup marker; legacy instance copies are promoted |
+| `PLAYER_EXISTS_KEY` / `PLEX` | `(PLEX, hunt_id, player)` — persistent player dedup marker; legacy instance copies are promoted |
 | `CVER` | contract version (inline) |
 | `HRLADM` / `HRLCT` / `HRLDEF` / `HRLOVR` | rate-limit helpers |
 
@@ -81,6 +87,7 @@ A CI/script check (`scripts/ci/check_storage_keys_doc.sh`) asserts that every
 | `FAILURES_KEY` | `FAILCT` |
 | `GAS_UNITS_KEY` | `GASUN` |
 | `ALERTS_KEY` | `ALERT` |
+| `ALERT_MAP_KEY` | `ALERTMAP` |
 
 ---
 
@@ -168,7 +175,7 @@ A CI/script check (`scripts/ci/check_storage_keys_doc.sh`) asserts that every
 
 | Constant | Value | Notes |
 |---|---|---|
-| `MAX_AUDIT_ENTRIES_PER_POOL` | `50` | Ring-buffer cap per hunt; not a storage key — bounds `(AUDL, hunt_id, index)` slots |
+| `MAX_AUDIT_ENTRIES_PER_POOL` | `50` | Ring-buffer cap per hunt; not a storage key — bounds `(AUDL, hunt_id, index)` slots. Count/slot keys receive an explicit persistent TTL refresh on append and read. |
 
 ### Inline / helper symbols (reward-manager)
 

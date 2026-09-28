@@ -66,7 +66,7 @@ stellar contract build
 if [ -d "target/wasm32v1-none/release" ]; then
   WASM_DIR="target/wasm32v1-none/release"
 else
-  WASM_DIR="target/wasm32-unknown-unknown/release"
+  WASM_DIR="target/wasm32v1-none/release"
 fi
 log "Using WASM directory: $WASM_DIR"
 
@@ -119,17 +119,20 @@ done
 # ── Step 5: Initialize and link contracts ─────────────────────────────────────
 log "Initializing contracts..."
 
-# 1. Initialize nft-reward
+# 1. Initialize nft-reward with the full argument set
 stellar contract invoke \
   --id "${NEW_IDS[nft-reward]}" \
   --rpc-url "$RPC_URL" \
   --network-passphrase "$NETWORK_PASSPHRASE" \
   --source deployer \
   -- initialize \
-  --admin "$ADMIN_ADDRESS"
+  --admin "$ADMIN_ADDRESS" \
+  --name "Hunty NFT Reward" \
+  --symbol "HNFT" \
+  --reward_manager "${NEW_IDS[reward-manager]}"
 log "  nft-reward initialized."
 
-# 2. Initialize reward-manager
+# 2. Initialize reward-manager with the full argument set
 stellar contract invoke \
   --id "${NEW_IDS[reward-manager]}" \
   --rpc-url "$RPC_URL" \
@@ -137,7 +140,8 @@ stellar contract invoke \
   --source deployer \
   -- initialize \
   --admin "$ADMIN_ADDRESS" \
-  --xlm_token "$XLM_TOKEN_ADDRESS"
+  --xlm_token "$XLM_TOKEN_ADDRESS" \
+  --hunty_core "${NEW_IDS[hunty-core]}"
 log "  reward-manager initialized."
 
 # 3. Link nft-reward to reward-manager
@@ -151,7 +155,18 @@ stellar contract invoke \
   --nft_contract "${NEW_IDS[nft-reward]}"
 log "  nft-reward linked to reward-manager."
 
-# 4. Initialize hunty-core
+# 4. Register reward-manager as an authorized minter on nft-reward
+stellar contract invoke \
+  --id "${NEW_IDS[nft-reward]}" \
+  --rpc-url "$RPC_URL" \
+  --network-passphrase "$NETWORK_PASSPHRASE" \
+  --source deployer \
+  -- add_authorized_contract \
+  --admin "$ADMIN_ADDRESS" \
+  --contract "${NEW_IDS[reward-manager]}"
+log "  reward-manager registered as minter on nft-reward."
+
+# 5. Initialize hunty-core
 stellar contract invoke \
   --id "${NEW_IDS[hunty-core]}" \
   --rpc-url "$RPC_URL" \
@@ -161,7 +176,7 @@ stellar contract invoke \
   --admin "$ADMIN_ADDRESS"
 log "  hunty-core initialized."
 
-# 5. Link reward-manager to hunty-core
+# 6. Link reward-manager to hunty-core
 stellar contract invoke \
   --id "${NEW_IDS[hunty-core]}" \
   --rpc-url "$RPC_URL" \
@@ -171,6 +186,17 @@ stellar contract invoke \
   --admin "$ADMIN_ADDRESS" \
   --reward_manager "${NEW_IDS[reward-manager]}"
 log "  reward-manager linked to hunty-core."
+
+# 7. Register HuntyCore as a distributor on reward-manager
+stellar contract invoke \
+  --id "${NEW_IDS[reward-manager]}" \
+  --rpc-url "$RPC_URL" \
+  --network-passphrase "$NETWORK_PASSPHRASE" \
+  --source deployer \
+  -- add_authorized_contract \
+  --admin "$ADMIN_ADDRESS" \
+  --contract "${NEW_IDS[hunty-core]}"
+log "  hunty-core registered as distributor on reward-manager."
 
 # ── Step 6: Write deployed addresses ──────────────────────────────────────────
 TIMESTAMP=$(date -u '+%Y-%m-%dT%H:%M:%SZ')
@@ -190,5 +216,8 @@ EOF
 log ""
 log "=== Testnet Deployment Complete ==="
 log "Addresses saved to $ADDRESS_FILE"
-log "To verify deployment, run:"
-log "  ./scripts/verify_deployment.sh testnet"
+
+# ── Step 7: Verify deployment ─────────────────────────────────────────────────
+log "Running deployment verification..."
+bash scripts/verify_deployment.sh testnet
+log "Deployment verified."

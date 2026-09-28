@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-const { execSync } = require('child_process');
+const { execFileSync } = require('child_process');
 
 function showHelp() {
   console.log(`
@@ -43,25 +43,30 @@ function runInvoke(method, contractArgs, options) {
     console.error("Error: --contract is required.");
     process.exit(1);
   }
-  
-  let cmd = `soroban contract invoke --id ${options.contract} --network ${options.network || 'testnet'} `;
+
+  const args = [
+    'contract', 'invoke',
+    '--id', options.contract,
+    '--network', options.network || 'testnet'
+  ];
   if (options.source) {
-    cmd += `--source ${options.source} `;
+    args.push('--source', options.source);
   }
-  
-  cmd += `-- ${method}`;
-  
+
+  args.push('--', method);
+
   for (const [key, val] of Object.entries(contractArgs)) {
-    cmd += ` --${key} ${val}`;
+    args.push(`--${key}`, String(val));
   }
-  
-  console.log(`Executing: ${cmd}`);
+
+  console.log(`Executing: stellar ${args.join(' ')}`);
   try {
-    const output = execSync(cmd, { encoding: 'utf-8' });
+    const output = execFileSync('stellar', args, { encoding: 'utf-8' });
     console.log("Result:", output);
   } catch (error) {
     console.error("Error executing command:");
     console.error(error.stdout || error.message);
+    process.exit(1);
   }
 }
 

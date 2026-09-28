@@ -7,7 +7,7 @@ test: build
 
 build:
 	stellar contract build
-	@ls -l ../../target/wasm32-unknown-unknown/release/hunty_core.wasm
+	@ls -l ../../target/wasm32v1-none/release/hunty_core.wasm
 
 fmt:
 	cargo fmt --all

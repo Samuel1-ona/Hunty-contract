@@ -2,14 +2,24 @@ use soroban_sdk::{contracttype, Address, BytesN, Env, Map, String, Vec};
 
 #[contracttype]
 #[derive(Clone, Debug, PartialEq, Eq)]
+#[repr(u32)]
 pub enum HuntStatus {
-    Draft,
-    Active,
-    Completed,
-    Cancelled,
-    Paused,
-    EmergencyStopped,
-    Archived,
+    /// A hunt that has never been activated.
+    Draft = 0,
+    /// A hunt currently accepting registrations and answers.
+    Active = 1,
+    /// A normally completed hunt.
+    Completed = 2,
+    /// A hunt cancelled by its creator.
+    Cancelled = 3,
+    /// A temporarily paused hunt. This explicit value preserves the wire
+    /// layout already emitted by the Paused-state implementation on main.
+    Paused = 4,
+    /// A terminal emergency state retained for compatibility with older
+    /// deployments.
+    EmergencyStopped = 5,
+    /// A terminal hunt whose storage may be garbage-collected.
+    Archived = 6,
 }
 
 /// Controls who can view the leaderboard for a hunt.
@@ -82,6 +92,8 @@ pub struct Hunt {
     pub invite_code_hash: Option<BytesN<32>>,
     /// Dynamically recalculated on every `get_hunt` read; not meaningful when read from a raw struct literal.
     pub remaining_slots: u32,
+    /// Controls who can view the hunt's leaderboard. Defaults to Public.
+    pub leaderboard_visibility: LeaderboardVisibility,
 }
 
 #[contracttype]
@@ -351,7 +363,7 @@ impl PlayerProgress {
             total_score: self.total_score,
             started_at_delta,
             completed_at_delta,
-            flags,
+            flags: flags.into(),
             recent_submissions: self.recent_submissions.clone(),
             clue_last_attempts: self.clue_last_attempts.clone(),
             required_completed_count: self.required_completed_count,

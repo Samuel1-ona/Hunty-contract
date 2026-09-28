@@ -14,13 +14,18 @@ jobs:
       - name: Install Rust
         uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
         with:
-          targets: wasm32-unknown-unknown
+          targets: wasm32v1-none
+
+      - name: Install Stellar CLI build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libdbus-1-dev libudev-dev pkg-config
 
       - name: Install Stellar CLI
-        run: cargo install --locked stellar-cli
+        run: cargo +1.91.0 install --locked stellar-cli --version 25.2.0
 
       - name: Build contracts
-        run: cargo build --workspace --target wasm32-unknown-unknown --release
+        run: cargo build --workspace --target wasm32v1-none --release
 
       - name: Generate TypeScript bindings
         run: make bindings

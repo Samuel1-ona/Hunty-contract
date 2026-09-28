@@ -36,9 +36,13 @@ Two independent viewer lists are maintained:
 - `remove_view_only_access(hunt_id, creator, viewer)` — revokes access under the
   same guard.
 - `is_view_only(hunt_id, address) → bool` — read-only membership check.
-- `get_view_only_list(hunt_id) → Vec<Address>` — returns the full list for a hunt.
+- `get_view_only_list(hunt_id, offset, limit) → Vec<Address>` — returns a page
+  of the list for a hunt (`limit` capped at `MAX_BATCH_SIZE`).
 
-Storage key: `("V", hunt_id)` in instance storage (a `Vec<Address>`).
+Storage keys: `("V", hunt_id)` keeps the ordered enumeration list, while a
+per-address marker `("VOMEM", hunt_id, address)` makes `is_view_only` an O(1)
+lookup that never scans the list. Both lists are bounded by
+`MAX_VIEW_ONLY_ENTRIES`.
 
 **Global viewers** — managed by the contract admin.
 
@@ -46,9 +50,12 @@ Storage key: `("V", hunt_id)` in instance storage (a `Vec<Address>`).
   Requires admin auth and verifies the caller is the stored admin.
 - `remove_global_view_only(admin, viewer)` — revokes global access.
 - `is_global_view_only(address) → bool` — read-only check.
-- `get_global_view_only_list() → Vec<Address>` — returns the full global list.
+- `get_global_view_only_list(offset, limit) → Vec<Address>` — returns a page of
+  the global list (`limit` capped at `MAX_BATCH_SIZE`).
 
-Storage key: `"GV"` in instance storage (a `Vec<Address>`).
+Storage keys: `"GV"` keeps the ordered enumeration list, while a per-address
+marker `("GVOMEM", address)` makes `is_global_view_only` an O(1) lookup. The
+list is bounded by `MAX_VIEW_ONLY_ENTRIES`.
 
 **Enforcement in query functions** — callers of access-gated queries must pass
 their address. The function checks `is_view_only || is_global_view_only` and

@@ -1,4 +1,4 @@
-WASM_DIR := target/wasm32-unknown-unknown/release
+WASM_DIR := target/wasm32v1-none/release
 BINDINGS_DIR := bindings
 PYTHON ?= python3
 SHA256 ?= sha256sum
@@ -16,7 +16,7 @@ endif
 all: build bindings
 
 build: generate-api-docs
-	cargo build --workspace --target wasm32-unknown-unknown --release
+	cargo build --workspace --target wasm32v1-none --release
 
 generate-api-docs:
 	$(PYTHON) scripts/generate_api_docs.py --output $(DOCS_OUTPUT)

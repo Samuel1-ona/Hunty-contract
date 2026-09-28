@@ -13,6 +13,11 @@ export interface AppConfig {
   port: number;
   adminSecret: string;
   redisUrl: string;
+  /**
+   * Express `trust proxy` setting, from TRUST_PROXY. Left undefined (Express
+   * default: do not trust proxies) when the variable is unset.
+   */
+  trustProxy?: boolean | number | string;
   rateLimit: RateLimitConfig;
   stellar: {
     network: string;
@@ -44,6 +49,17 @@ function parsePositiveInteger(env: NodeJS.ProcessEnv, key: string): number {
   return value;
 }
 
+function parseTrustProxy(env: NodeJS.ProcessEnv): boolean | number | string | undefined {
+  const raw = env.TRUST_PROXY?.trim();
+  if (!raw) return undefined;
+  const lower = raw.toLowerCase();
+  if (lower === 'true') return true;
+  if (lower === 'false') return false;
+  if (/^\d+$/.test(raw)) return Number(raw);
+  // Otherwise an Express trust-proxy expression, e.g. "loopback" or "10.0.0.0/8, 172.16.0.0/12".
+  return raw;
+}
+
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   const environment = requireEnv(env, 'APP_ENV');
   if (!allowedEnvironments.has(environment as AppEnvironment)) {
@@ -55,6 +71,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     port: parsePositiveInteger(env, 'PORT'),
     adminSecret: requireEnv(env, 'ADMIN_SECRET'),
     redisUrl: requireEnv(env, 'REDIS_URL'),
+    trustProxy: parseTrustProxy(env),
     rateLimit: {
       maxMints: parsePositiveInteger(env, 'MAX_MINTS'),
       windowMs: parsePositiveInteger(env, 'MINT_WINDOW_MS'),
