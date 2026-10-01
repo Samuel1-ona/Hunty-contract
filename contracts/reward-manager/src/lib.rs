@@ -2773,11 +2773,7 @@ impl RewardManager {
     /// A `Vec<PendingNftMint>` of pending mint entries, up to `limit` entries
     /// starting from `offset`. Returns an empty `Vec` when `offset` is beyond
     /// the end of the list or when no pending mints exist.
-    pub fn list_pending_nft_mints(
-        env: Env,
-        offset: u32,
-        limit: u32,
-    ) -> Vec<PendingNftMint> {
+    pub fn list_pending_nft_mints(env: Env, offset: u32, limit: u32) -> Vec<PendingNftMint> {
         Storage::list_pending_nft_mints(&env, offset, limit)
     }
 
@@ -3895,14 +3891,27 @@ impl RewardManager {
         env: Env,
         admin: Address,
         target_version: u32,
+        wasm_hash: BytesN<32>,
     ) -> Result<hunty_migration::UpgradeProposal, hunty_migration::UpgradeAuthError> {
-        let proposal =
-            migration::RewardManagerMigration::propose_upgrade(&env, &admin, target_version)?;
+        let proposal = migration::RewardManagerMigration::propose_upgrade(
+            &env,
+            &admin,
+            target_version,
+            wasm_hash,
+        )?;
         env.events().publish(
             migration::RewardManagerMigration::upgrade_proposed_topic(&env),
             migration::RewardManagerMigration::upgrade_proposed_event(&proposal),
         );
         Ok(proposal)
+    }
+
+    pub fn upgrade(
+        env: Env,
+        admin: Address,
+        new_wasm_hash: BytesN<32>,
+    ) -> Result<(), hunty_migration::UpgradeAuthError> {
+        migration::RewardManagerMigration::upgrade(&env, &admin, new_wasm_hash)
     }
 
     pub fn set_upgrade_timelock(

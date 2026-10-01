@@ -1,5 +1,5 @@
 #![no_std]
-use soroban_sdk::{contracterror, contracttype, symbol_short, Address, Env, Symbol, Vec};
+use soroban_sdk::{contracterror, contracttype, symbol_short, Address, BytesN, Env, Symbol, Vec};
 
 /// Current schema version for Hunty contract storage layouts.
 pub const CURRENT_SCHEMA_VERSION: u32 = 3;
@@ -30,6 +30,7 @@ pub enum UpgradeAuthError {
     TimelockPending = 3,
     VersionMismatch = 4,
     InvalidTimelock = 5,
+    WasmHashMismatch = 6,
 }
 
 #[contracttype]
@@ -47,6 +48,7 @@ pub struct MigrationReport {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct UpgradeProposal {
     pub target_version: u32,
+    pub wasm_hash: BytesN<32>,
     pub proposed_at: u64,
     pub effective_at: u64,
     pub proposer: Address,
@@ -57,6 +59,7 @@ pub struct UpgradeProposal {
 pub struct UpgradeHistoryEntry {
     pub from_version: u32,
     pub to_version: u32,
+    pub wasm_hash: BytesN<32>,
     pub executed_at: u64,
     pub executor: Address,
 }
@@ -80,6 +83,7 @@ pub struct TimelockChange {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct UpgradeProposedEvent {
     pub target_version: u32,
+    pub wasm_hash: BytesN<32>,
     pub proposed_at: u64,
     pub effective_at: u64,
     pub proposer: Address,
@@ -90,6 +94,7 @@ pub struct UpgradeProposedEvent {
 pub struct UpgradeExecutedEvent {
     pub from_version: u32,
     pub to_version: u32,
+    pub wasm_hash: BytesN<32>,
     pub executed_at: u64,
     pub executor: Address,
 }
@@ -251,6 +256,7 @@ impl UpgradeAuthorization {
         env: &Env,
         proposer: &Address,
         target_version: u32,
+        wasm_hash: BytesN<32>,
         now: u64,
     ) -> Result<UpgradeProposal, UpgradeAuthError> {
         let timelock = Self::get_timelock_seconds(env);
@@ -259,11 +265,31 @@ impl UpgradeAuthorization {
         }
         let proposal = UpgradeProposal {
             target_version,
+            wasm_hash,
             proposed_at: now,
             effective_at: now.saturating_add(timelock),
             proposer: proposer.clone(),
         };
         env.storage().instance().set(&PROPOSAL_KEY, &proposal);
+        Ok(proposal)
+    }
+
+    pub fn validate_upgrade(
+        env: &Env,
+        wasm_hash: &BytesN<32>,
+        now: u64,
+    ) -> Result<UpgradeProposal, UpgradeAuthError> {
+        let timelock = Self::get_timelock_seconds(env);
+        if timelock < MIN_UPGRADE_TIMELOCK_SECONDS {
+            return Err(UpgradeAuthError::InvalidTimelock);
+        }
+        let proposal = Self::get_proposal(env).ok_or(UpgradeAuthError::NoProposal)?;
+        if proposal.wasm_hash != *wasm_hash {
+            return Err(UpgradeAuthError::WasmHashMismatch);
+        }
+        if now < proposal.effective_at {
+            return Err(UpgradeAuthError::TimelockPending);
+        }
         Ok(proposal)
     }
 
@@ -336,11 +362,12 @@ impl UpgradeAuthorization {
         Ok(())
     }
 
-    pub fn finalize_migration_run(
+    pub fn finalize_upgrade_run(
         env: &Env,
         executor: &Address,
         from_version: u32,
         to_version: u32,
+        wasm_hash: &BytesN<32>,
         now: u64,
     ) {
         Self::clear_proposal(env);
@@ -349,10 +376,22 @@ impl UpgradeAuthorization {
             &UpgradeHistoryEntry {
                 from_version,
                 to_version,
+                wasm_hash: wasm_hash.clone(),
                 executed_at: now,
                 executor: executor.clone(),
             },
         );
+    }
+
+    pub fn finalize_migration_run(
+        env: &Env,
+        executor: &Address,
+        from_version: u32,
+        to_version: u32,
+        now: u64,
+    ) {
+        let default_hash = BytesN::from_array(env, &[0u8; 32]);
+        Self::finalize_upgrade_run(env, executor, from_version, to_version, &default_hash, now);
     }
 }
 
@@ -394,14 +433,19 @@ mod tests {
     /// Fresh storage defaults the timelock to 0. Proposing an upgrade must be
     /// rejected until the admin configures a compliant timelock, so a
     /// migration can never be proposed and executed in the same ledger.
+    fn dummy_hash(env: &Env) -> BytesN<32> {
+        BytesN::from_array(env, &[1u8; 32])
+    }
+
     #[test]
     fn default_timelock_zero_rejects_proposal() {
         let (env, contract_id) = setup();
         let proposer = Address::generate(&env);
+        let hash = dummy_hash(&env);
         env.as_contract(&contract_id, || {
             assert_eq!(UpgradeAuthorization::get_timelock_seconds(&env), 0);
             assert_eq!(
-                UpgradeAuthorization::propose_upgrade(&env, &proposer, TARGET, BASE_TS),
+                UpgradeAuthorization::propose_upgrade(&env, &proposer, TARGET, hash, BASE_TS),
                 Err(UpgradeAuthError::InvalidTimelock)
             );
             assert!(UpgradeAuthorization::get_proposal(&env).is_none());
@@ -459,12 +503,19 @@ mod tests {
     fn timelock_at_minimum_allows_proposal_and_delayed_execution() {
         let (env, contract_id) = setup();
         let proposer = Address::generate(&env);
+        let hash = dummy_hash(&env);
         env.as_contract(&contract_id, || {
             UpgradeAuthorization::set_timelock_seconds(&env, BASE_TS, MIN_UPGRADE_TIMELOCK_SECONDS)
                 .unwrap();
 
-            let proposal =
-                UpgradeAuthorization::propose_upgrade(&env, &proposer, TARGET, BASE_TS).unwrap();
+            let proposal = UpgradeAuthorization::propose_upgrade(
+                &env,
+                &proposer,
+                TARGET,
+                hash.clone(),
+                BASE_TS,
+            )
+            .unwrap();
             assert_eq!(
                 proposal.effective_at,
                 BASE_TS + MIN_UPGRADE_TIMELOCK_SECONDS
@@ -515,8 +566,10 @@ mod tests {
 
             // Proposals made meanwhile still use the old (longer) window.
             let proposer = Address::generate(&env);
+            let hash = dummy_hash(&env);
             let proposal =
-                UpgradeAuthorization::propose_upgrade(&env, &proposer, TARGET, request_at).unwrap();
+                UpgradeAuthorization::propose_upgrade(&env, &proposer, TARGET, hash, request_at)
+                    .unwrap();
             assert_eq!(proposal.effective_at, request_at + initial);
         });
 
@@ -605,9 +658,223 @@ mod tests {
         set_time(&env, applied_at);
         env.as_contract(&contract_id, || {
             let proposer = Address::generate(&env);
+            let hash = dummy_hash(&env);
             let proposal =
-                UpgradeAuthorization::propose_upgrade(&env, &proposer, TARGET, applied_at).unwrap();
+                UpgradeAuthorization::propose_upgrade(&env, &proposer, TARGET, hash, applied_at)
+                    .unwrap();
             assert_eq!(proposal.effective_at, applied_at + reduced);
+        });
+    }
+
+    // -----------------------------------------------------------------------
+    // Issue #1060: WASM upgrade proposal and execution security tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_1_authorized_proposal_succeeds() {
+        let (env, contract_id) = setup();
+        let admin = Address::generate(&env);
+        let hash_a = BytesN::from_array(&env, &[10u8; 32]);
+        env.as_contract(&contract_id, || {
+            UpgradeAuthorization::set_upgrade_admin(&env, &admin);
+            UpgradeAuthorization::set_timelock_seconds(&env, BASE_TS, MIN_UPGRADE_TIMELOCK_SECONDS)
+                .unwrap();
+
+            let proposal = UpgradeAuthorization::propose_upgrade(
+                &env,
+                &admin,
+                TARGET,
+                hash_a.clone(),
+                BASE_TS,
+            )
+            .unwrap();
+            assert_eq!(proposal.target_version, TARGET);
+            assert_eq!(proposal.wasm_hash, hash_a);
+            assert_eq!(proposal.proposer, admin);
+            assert_eq!(
+                proposal.effective_at,
+                BASE_TS + MIN_UPGRADE_TIMELOCK_SECONDS
+            );
+        });
+    }
+
+    #[test]
+    fn test_2_unauthorized_proposal_fails() {
+        let (env, contract_id) = setup();
+        env.mock_all_auths();
+        let admin = Address::generate(&env);
+        let non_admin = Address::generate(&env);
+        env.as_contract(&contract_id, || {
+            UpgradeAuthorization::set_upgrade_admin(&env, &admin);
+            UpgradeAuthorization::set_timelock_seconds(&env, BASE_TS, MIN_UPGRADE_TIMELOCK_SECONDS)
+                .unwrap();
+
+            assert_eq!(
+                UpgradeAuthorization::require_admin(&env, &non_admin, Some(admin)),
+                Err(UpgradeAuthError::Unauthorized)
+            );
+        });
+    }
+
+    #[test]
+    fn test_3_timelock_enforced_before_expiration() {
+        let (env, contract_id) = setup();
+        let admin = Address::generate(&env);
+        let hash_a = BytesN::from_array(&env, &[0xAA; 32]);
+        env.as_contract(&contract_id, || {
+            UpgradeAuthorization::set_upgrade_admin(&env, &admin);
+            UpgradeAuthorization::set_timelock_seconds(&env, BASE_TS, MIN_UPGRADE_TIMELOCK_SECONDS)
+                .unwrap();
+
+            let proposal = UpgradeAuthorization::propose_upgrade(
+                &env,
+                &admin,
+                TARGET,
+                hash_a.clone(),
+                BASE_TS,
+            )
+            .unwrap();
+
+            // 1 second before effective_at: must fail with TimelockPending
+            set_time(&env, proposal.effective_at - 1);
+            assert_eq!(
+                UpgradeAuthorization::validate_upgrade(&env, &hash_a, proposal.effective_at - 1),
+                Err(UpgradeAuthError::TimelockPending)
+            );
+        });
+    }
+
+    #[test]
+    fn test_4_hash_mismatch_fails() {
+        let (env, contract_id) = setup();
+        let admin = Address::generate(&env);
+        let hash_a = BytesN::from_array(&env, &[0xAA; 32]);
+        let hash_b = BytesN::from_array(&env, &[0xBB; 32]);
+        env.as_contract(&contract_id, || {
+            UpgradeAuthorization::set_upgrade_admin(&env, &admin);
+            UpgradeAuthorization::set_timelock_seconds(&env, BASE_TS, MIN_UPGRADE_TIMELOCK_SECONDS)
+                .unwrap();
+
+            let proposal =
+                UpgradeAuthorization::propose_upgrade(&env, &admin, TARGET, hash_a, BASE_TS)
+                    .unwrap();
+
+            set_time(&env, proposal.effective_at);
+            // Attempting upgrade with hash_b must fail with WasmHashMismatch
+            assert_eq!(
+                UpgradeAuthorization::validate_upgrade(&env, &hash_b, proposal.effective_at),
+                Err(UpgradeAuthError::WasmHashMismatch)
+            );
+        });
+    }
+
+    #[test]
+    fn test_5_successful_upgrade_validation() {
+        let (env, contract_id) = setup();
+        let admin = Address::generate(&env);
+        let hash_a = BytesN::from_array(&env, &[0xAA; 32]);
+        env.as_contract(&contract_id, || {
+            UpgradeAuthorization::set_upgrade_admin(&env, &admin);
+            UpgradeAuthorization::set_timelock_seconds(&env, BASE_TS, MIN_UPGRADE_TIMELOCK_SECONDS)
+                .unwrap();
+
+            let proposal = UpgradeAuthorization::propose_upgrade(
+                &env,
+                &admin,
+                TARGET,
+                hash_a.clone(),
+                BASE_TS,
+            )
+            .unwrap();
+
+            set_time(&env, proposal.effective_at);
+            let validated =
+                UpgradeAuthorization::validate_upgrade(&env, &hash_a, proposal.effective_at)
+                    .unwrap();
+            assert_eq!(validated.wasm_hash, hash_a);
+        });
+    }
+
+    #[test]
+    fn test_6_replay_execution_fails() {
+        let (env, contract_id) = setup();
+        let admin = Address::generate(&env);
+        let hash_a = BytesN::from_array(&env, &[0xAA; 32]);
+        env.as_contract(&contract_id, || {
+            UpgradeAuthorization::set_upgrade_admin(&env, &admin);
+            UpgradeAuthorization::set_timelock_seconds(&env, BASE_TS, MIN_UPGRADE_TIMELOCK_SECONDS)
+                .unwrap();
+
+            let proposal = UpgradeAuthorization::propose_upgrade(
+                &env,
+                &admin,
+                TARGET,
+                hash_a.clone(),
+                BASE_TS,
+            )
+            .unwrap();
+
+            set_time(&env, proposal.effective_at);
+            assert!(
+                UpgradeAuthorization::validate_upgrade(&env, &hash_a, proposal.effective_at)
+                    .is_ok()
+            );
+
+            // Finalize upgrade run (clears proposal and records history)
+            UpgradeAuthorization::finalize_upgrade_run(
+                &env,
+                &admin,
+                1,
+                TARGET,
+                &hash_a,
+                proposal.effective_at,
+            );
+
+            // Replay attempt: proposal no longer exists
+            assert_eq!(
+                UpgradeAuthorization::validate_upgrade(&env, &hash_a, proposal.effective_at),
+                Err(UpgradeAuthError::NoProposal)
+            );
+        });
+    }
+
+    #[test]
+    fn test_7_upgrade_history_records_exact_wasm_hash() {
+        let (env, contract_id) = setup();
+        let admin = Address::generate(&env);
+        let hash_a = BytesN::from_array(&env, &[0xAA; 32]);
+        env.as_contract(&contract_id, || {
+            UpgradeAuthorization::set_upgrade_admin(&env, &admin);
+            UpgradeAuthorization::set_timelock_seconds(&env, BASE_TS, MIN_UPGRADE_TIMELOCK_SECONDS)
+                .unwrap();
+
+            let proposal = UpgradeAuthorization::propose_upgrade(
+                &env,
+                &admin,
+                TARGET,
+                hash_a.clone(),
+                BASE_TS,
+            )
+            .unwrap();
+
+            set_time(&env, proposal.effective_at);
+            UpgradeAuthorization::finalize_upgrade_run(
+                &env,
+                &admin,
+                1,
+                TARGET,
+                &hash_a,
+                proposal.effective_at,
+            );
+
+            let history = UpgradeAuthorization::get_history(&env, 0, 10);
+            assert_eq!(history.len(), 1);
+            let entry = history.get(0).unwrap();
+            assert_eq!(entry.from_version, 1);
+            assert_eq!(entry.to_version, TARGET);
+            assert_eq!(entry.wasm_hash, hash_a);
+            assert_eq!(entry.executed_at, proposal.effective_at);
+            assert_eq!(entry.executor, admin);
         });
     }
 }
