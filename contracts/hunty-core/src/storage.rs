@@ -886,19 +886,19 @@ impl Storage {
         Self::get_clue(env, hunt_id, clue_id).ok_or(HuntError::ClueNotFound)
     }
 
-    pub fn add_player_to_list(env: &Env, hunt_id: u64, player: &Address) {
-    if env.storage().persistent().has(&marker_key) {
-        // ❌ DELETE this whole loop
-        let count = get_player_count(env, hunt_id);
-        for i in 0..count {
-            let p: Address = env.storage().persistent().get(&list_key(i)).unwrap();
-            if p == *player {
-                return;
+    pub fn list_clues_for_hunt(env: &Env, hunt_id: u64, offset: u32, limit: u32) -> Vec<Clue> {
+        let clue_ids = Self::get_clue_ids_for_hunt(env, hunt_id, offset, limit);
+
+        let mut clues = Vec::new(env);
+
+        for i in 0..clue_ids.len() {
+            if let Some(clue_id) = clue_ids.get(i) {
+                if let Some(clue) = Self::get_clue(env, hunt_id, clue_id) {
+                    clues.push_back(clue);
+                }
             }
         }
-    }
-    // ... push to list, set marker, bump count
-}
+
         clues
     }
 

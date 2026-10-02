@@ -11,6 +11,14 @@ fn create_mock_token(env: &Env) -> (Address, Address) {
     (address, admin)
 }
 
+/// Returns a fresh address authorized to call `distribute_rewards`, which now
+/// requires an explicitly authorized caller (#1061).
+fn authorized_distributor(env: &Env) -> Address {
+    let caller = Address::generate(env);
+    crate::storage::Storage::add_authorized_contract(env, &caller);
+    caller
+}
+
 /// Mints `amount` units of the token at `token_address` to `to`.
 fn mint_tokens(env: &Env, token_address: &Address, to: &Address, amount: i128) {
     StellarAssetClient::new(env, token_address).mint(to, &amount);
@@ -264,8 +272,13 @@ fn test_distribute_rewards_uses_pool_token() {
             completion_rank: 0,
         };
 
-        let result =
-            RewardManager::distribute_rewards(env.clone(), 1, player.clone(), reward_config);
+        let result = RewardManager::distribute_rewards(
+            env.clone(),
+            authorized_distributor(&env),
+            1,
+            player.clone(),
+            reward_config,
+        );
 
         assert!(result.is_ok());
 
@@ -671,7 +684,14 @@ fn test_admin_withdraw_unclaimed_uses_pool_token() {
             nft_tier: 0,
             completion_rank: 0,
         };
-        RewardManager::distribute_rewards(env.clone(), 1, player.clone(), reward_config).unwrap();
+        RewardManager::distribute_rewards(
+            env.clone(),
+            authorized_distributor(&env),
+            1,
+            player.clone(),
+            reward_config,
+        )
+        .unwrap();
 
         // Admin withdraws 20M of the remaining 70M
         let result = RewardManager::admin_withdraw_unclaimed(

@@ -726,10 +726,7 @@ fn test_rate_limit_single_storage_entry_across_days() {
         );
 
         // Exactly one entry exists: the namespaced persistent key.
-        let namespaced_key = (
-            soroban_sdk::Symbol::new(env, "HRATE"),
-            creator.clone(),
-        );
+        let namespaced_key = (soroban_sdk::Symbol::new(env, "HRATE"), creator.clone());
         assert!(
             env.storage().persistent().has(&namespaced_key),
             "rate-limit entry must exist under (HRATE, Address) in persistent storage"

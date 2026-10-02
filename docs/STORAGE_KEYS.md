@@ -64,6 +64,8 @@ A CI/script check (`scripts/ci/check_storage_keys_doc.sh`) asserts that every
 | `TEAM_COUNT_KEY` | `TMCT` | `(TMCT, hunt_id)` |
 | `PLAYER_TEAM_KEY` | `PLTM` | `(PLTM, hunt_id, player)` |
 | `TEAM_PROGRESS_KEY` | `TMPR` | `(TMPR, hunt_id, team_id)` |
+| `ATTEMPT_KEY` | `ATT` | answer-attempt tracking |
+| `RATE_LIMIT_KEY` | `HRATE` | `(HRATE, Address)` — per-address rate-limit entry |
 
 > Hunt records, clue records, and their indexes are authoritative persistent
 > entries. `HUNT_CACHE_KEY` is intentionally instance-only because it is a
@@ -170,6 +172,8 @@ A CI/script check (`scripts/ci/check_storage_keys_doc.sh`) asserts that every
 | `VESTING_KEY` | `VEST` | `(VEST, hunt_id, player)` vesting record |
 | `POOL_FUNDERS_KEY` | `PFNDRS` | `(PFNDRS, hunt_id)` — list of distinct funders not yet refunded |
 | `POOL_FUNDER_CONTRIB_KEY` | `PFCONT` | `(PFCONT, hunt_id, funder)` — cumulative unrefunded contribution |
+| `POOL_MIG_KEY` | `PMIG` | `(PMIG, hunt_id)` — cumulative total migrated out of a pool (issue #1191) |
+| `PENDING_NFT_LIST_KEY` | `PNFTLST` | `(PNFTLST, hunt_id)` — list of pending (failed) NFT mints |
 
 ### Audit log capacity (reward-manager)
 

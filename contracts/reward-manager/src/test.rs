@@ -11,7 +11,7 @@ mod test {
     use crate::types::{DistributionMode, RankRewardTier, RewardConfig, RewardPoolConfig};
     use crate::{
         BatchDistributionEntry, HuntyCoreSetEvent, PoolDistribution, RewardManager,
-        RewardsDistributedEvent,
+        RewardManagerClient, RewardsDistributedEvent,
     };
     use soroban_sdk::testutils::Address as _;
     use soroban_sdk::testutils::Events as _;
@@ -30,9 +30,7 @@ mod test {
             .events()
             .iter()
             .filter_map(|event| {
-                let xdr::ContractEventBody::V0(body) = &event.body else {
-                    return None;
-                };
+                let xdr::ContractEventBody::V0(body) = &event.body;
                 let contract = event.contract_id.as_ref()?;
                 let contract_val = Val::try_from_val(
                     env,
@@ -61,6 +59,22 @@ mod test {
         let token_contract = env.register_stellar_asset_contract_v2(token_admin.clone());
         let token_address = token_contract.address();
         (contract_id, token_address, token_admin)
+    }
+
+    /// Calls `distribute_rewards` with a freshly authorized distributor.
+    ///
+    /// `distribute_rewards` requires an explicitly authorized caller (#1061), so
+    /// these tests route through this helper instead of threading a caller
+    /// through every call site.
+    fn distribute_rewards(
+        env: Env,
+        hunt_id: u64,
+        player: Address,
+        config: RewardConfig,
+    ) -> Result<(), RewardErrorCode> {
+        let caller = Address::generate(&env);
+        Storage::add_authorized_contract(&env, &caller);
+        RewardManager::distribute_rewards(env, caller, hunt_id, player, config)
     }
 
     /// Helper function to create a reward pool with the token address.
@@ -399,7 +413,9 @@ mod test {
                 token_address.clone(),
                 0,
                 Some(nft_contract_placeholder(&env)),
-            0u32, true)
+                0u32,
+                true,
+            )
             .unwrap();
             let tiers = Vec::from_array(&env, [make_tier(60, 100), make_tier(3_600, 0)]);
             let err =
@@ -744,8 +760,19 @@ mod test {
 
         env.as_contract(&contract_id, || {
             let admin = Address::generate(&env);
-            RewardManager::initialize(env.clone(), admin.clone(), token_address.clone(), Address::generate(&env)).unwrap();
-            let result = RewardManager::initialize(env.clone(), admin, second_token.clone(), Address::generate(&env));
+            RewardManager::initialize(
+                env.clone(),
+                admin.clone(),
+                token_address.clone(),
+                Address::generate(&env),
+            )
+            .unwrap();
+            let result = RewardManager::initialize(
+                env.clone(),
+                admin,
+                second_token.clone(),
+                Address::generate(&env),
+            );
             assert_eq!(result, Err(RewardErrorCode::AlreadyInitialized));
             assert_eq!(Storage::get_xlm_token(&env), Some(token_address.clone()));
         });
@@ -761,7 +788,13 @@ mod test {
         let nft_contract = Address::generate(&env);
 
         env.as_contract(&contract_id, || {
-            RewardManager::initialize(env.clone(), admin.clone(), token_address, Address::generate(&env)).unwrap();
+            RewardManager::initialize(
+                env.clone(),
+                admin.clone(),
+                token_address,
+                Address::generate(&env),
+            )
+            .unwrap();
         });
         env.mock_all_auths_allowing_non_root_auth();
         env.as_contract(&contract_id, || {
@@ -786,7 +819,13 @@ mod test {
 
         env.mock_all_auths();
         env.as_contract(&contract_id, || {
-            RewardManager::initialize(env.clone(), admin.clone(), token_address, Address::generate(&env)).unwrap();
+            RewardManager::initialize(
+                env.clone(),
+                admin.clone(),
+                token_address,
+                Address::generate(&env),
+            )
+            .unwrap();
         });
         env.as_contract(&contract_id, || {
             assert_eq!(Storage::get_nft_contract(&env), None);
@@ -815,7 +854,13 @@ mod test {
 
         env.mock_all_auths();
         env.as_contract(&contract_id, || {
-            RewardManager::initialize(env.clone(), admin.clone(), token_address, Address::generate(&env)).unwrap();
+            RewardManager::initialize(
+                env.clone(),
+                admin.clone(),
+                token_address,
+                Address::generate(&env),
+            )
+            .unwrap();
         });
         env.mock_all_auths_allowing_non_root_auth();
         env.as_contract(&contract_id, || {
@@ -860,7 +905,13 @@ mod test {
 
         env.mock_all_auths();
         env.as_contract(&contract_id, || {
-            RewardManager::initialize(env.clone(), admin.clone(), token_address, Address::generate(&env)).unwrap();
+            RewardManager::initialize(
+                env.clone(),
+                admin.clone(),
+                token_address,
+                Address::generate(&env),
+            )
+            .unwrap();
         });
         env.mock_all_auths_allowing_non_root_auth();
         env.as_contract(&contract_id, || {
@@ -919,7 +970,13 @@ mod test {
         let nft_contract = Address::generate(&env);
 
         env.as_contract(&contract_id, || {
-            RewardManager::initialize(env.clone(), admin.clone(), token_address, Address::generate(&env)).unwrap();
+            RewardManager::initialize(
+                env.clone(),
+                admin.clone(),
+                token_address,
+                Address::generate(&env),
+            )
+            .unwrap();
         });
 
         env.mock_all_auths_allowing_non_root_auth();
@@ -1205,7 +1262,9 @@ mod test {
                 token_address.clone(),
                 0,
                 Some(nft_contract_placeholder(&env)),
-            0u32, true)
+                0u32,
+                true,
+            )
             .unwrap();
 
             // Try to fund with less than 1 XLM (10_000_000 stroops)
@@ -1241,7 +1300,9 @@ mod test {
                 token_address.clone(),
                 0,
                 Some(nft_contract_placeholder(&env)),
-            0u32, true)
+                0u32,
+                true,
+            )
             .unwrap();
 
             // Funding with exactly 1 XLM should succeed
@@ -1268,7 +1329,9 @@ mod test {
                 token_address.clone(),
                 0,
                 Some(nft_contract_placeholder(&env)),
-            0u32, true)
+                0u32,
+                true,
+            )
             .unwrap();
 
             // Try to fund with more than 1 billion XLM (1_000_000_000 * 10_000_000 stroops)
@@ -1299,7 +1362,9 @@ mod test {
                 token_address.clone(),
                 0,
                 Some(nft_contract_placeholder(&env)),
-            0u32, true)
+                0u32,
+                true,
+            )
             .unwrap();
 
             // Funding with exactly 1 billion XLM should succeed
@@ -1336,7 +1401,9 @@ mod test {
                 token_address.clone(),
                 0,
                 Some(nft_contract_placeholder(&env)),
-            0u32, true)
+                0u32,
+                true,
+            )
             .unwrap();
 
             // First funding: 600 million XLM - should succeed
@@ -1391,7 +1458,9 @@ mod test {
                 token_address.clone(),
                 0,
                 Some(nft_contract_placeholder(&env)),
-            0u32, true)
+                0u32,
+                true,
+            )
             .unwrap();
 
             // First deposit: 300M XLM
@@ -1712,7 +1781,7 @@ mod test {
             create_pool_with_token(&env, creator.clone(), 1, token_address.clone(), 1_000_000)
                 .unwrap();
             RewardManager::fund_reward_pool(env.clone(), creator.clone(), 1, 80_000_000).unwrap();
-            RewardManager::distribute_rewards(
+            distribute_rewards(
                 env.clone(),
                 1,
                 player.clone(),
@@ -1898,7 +1967,7 @@ mod test {
             RewardManager::fund_reward_pool(env.clone(), creator.clone(), 1, 50_000_000).unwrap();
 
             let config = xlm_only_config(&env, 20_000_000);
-            let result = RewardManager::distribute_rewards(env.clone(), 1, player.clone(), config);
+            let result = distribute_rewards(env.clone(), 1, player.clone(), config);
             assert!(result.is_ok());
         });
 
@@ -1938,7 +2007,7 @@ mod test {
             RewardManager::fund_reward_pool(env.clone(), creator.clone(), 7, 50_000_000).unwrap();
 
             let config = xlm_only_config(&env, 20_000_000);
-            RewardManager::distribute_rewards(env.clone(), 7, player.clone(), config).unwrap();
+            distribute_rewards(env.clone(), 7, player.clone(), config).unwrap();
 
             let (topics, event) =
                 find_event::<RewardsDistributedEvent>(&env, symbol_short!("RWD_DIST"))
@@ -1974,7 +2043,7 @@ mod test {
 
             // Try to distribute more than pool has
             let config = xlm_only_config(&env, 50_000_000);
-            let result = RewardManager::distribute_rewards(env.clone(), 1, player.clone(), config);
+            let result = distribute_rewards(env.clone(), 1, player.clone(), config);
             assert_eq!(result, Err(RewardErrorCode::InsufficientPool));
         });
 
@@ -2001,7 +2070,7 @@ mod test {
 
             // Attempt to distribute 500 — below minimum of 10_000_000
             let config = xlm_only_config(&env, 500);
-            let result = RewardManager::distribute_rewards(env.clone(), 1, player.clone(), config);
+            let result = distribute_rewards(env.clone(), 1, player.clone(), config);
             assert_eq!(result, Err(RewardErrorCode::BelowMinimumAmount));
         });
 
@@ -2026,7 +2095,7 @@ mod test {
 
             // Distribute exactly the minimum
             let config = xlm_only_config(&env, 10_000_000);
-            let result = RewardManager::distribute_rewards(env.clone(), 1, player.clone(), config);
+            let result = distribute_rewards(env.clone(), 1, player.clone(), config);
             assert!(result.is_ok());
         });
 
@@ -2050,16 +2119,14 @@ mod test {
 
             // First distribution — success
             let config1 = xlm_only_config(&env, 20_000_000);
-            let result1 =
-                RewardManager::distribute_rewards(env.clone(), 1, player.clone(), config1);
+            let result1 = distribute_rewards(env.clone(), 1, player.clone(), config1);
             assert!(result1.is_ok());
 
             // Second distribution to the same player also succeeds: the
             // distribution nonce is incremented after each payout, so repeat
             // rewards are allowed.
             let config2 = xlm_only_config(&env, 20_000_000);
-            let result2 =
-                RewardManager::distribute_rewards(env.clone(), 1, player.clone(), config2);
+            let result2 = distribute_rewards(env.clone(), 1, player.clone(), config2);
             assert!(result2.is_ok());
         });
 
@@ -2085,7 +2152,9 @@ mod test {
                 token_address.clone(),
                 0,
                 Some(nft_contract_placeholder(&env)),
-            0u32, true)
+                0u32,
+                true,
+            )
             .unwrap();
 
             // Empty config (no XLM, no NFT)
@@ -2100,7 +2169,7 @@ mod test {
                 nft_tier: 0,
                 completion_rank: 0,
             };
-            let result = RewardManager::distribute_rewards(env.clone(), 1, player.clone(), config);
+            let result = distribute_rewards(env.clone(), 1, player.clone(), config);
             assert_eq!(result, Err(RewardErrorCode::InvalidConfig));
         });
     }
@@ -2123,7 +2192,9 @@ mod test {
                 token_address.clone(),
                 0,
                 Some(nft_contract_placeholder(&env)),
-            0u32, true)
+                0u32,
+                true,
+            )
             .unwrap();
 
             // Config with zero XLM amount is invalid (has_xlm returns false → InvalidConfig)
@@ -2138,7 +2209,7 @@ mod test {
                 nft_tier: 0,
                 completion_rank: 0,
             };
-            let result = RewardManager::distribute_rewards(env.clone(), 1, player.clone(), config);
+            let result = distribute_rewards(env.clone(), 1, player.clone(), config);
             assert_eq!(result, Err(RewardErrorCode::InvalidConfig));
         });
     }
@@ -2163,7 +2234,9 @@ mod test {
                 token_address.clone(),
                 0,
                 Some(nft_contract_placeholder(&env)),
-            0u32, true)
+                0u32,
+                true,
+            )
             .unwrap();
             RewardManager::fund_reward_pool(env.clone(), creator.clone(), 1, 50_000_000).unwrap();
 
@@ -2180,7 +2253,7 @@ mod test {
             };
 
             // Distribution should succeed even though NFT mint fails
-            let result = RewardManager::distribute_rewards(env.clone(), 1, player.clone(), config);
+            let result = distribute_rewards(env.clone(), 1, player.clone(), config);
             assert!(result.is_ok());
         });
 
@@ -2207,7 +2280,13 @@ mod test {
         let missing_nft_contract = Address::generate(&env);
 
         env.as_contract(&contract_id, || {
-            RewardManager::initialize(env.clone(), admin.clone(), token_address.clone(), Address::generate(&env)).unwrap();
+            RewardManager::initialize(
+                env.clone(),
+                admin.clone(),
+                token_address.clone(),
+                Address::generate(&env),
+            )
+            .unwrap();
 
             // Pool lookup happens first: create an NFT-only pool (min 0 with
             // an NFT contract declared) so distribution can proceed.
@@ -2218,7 +2297,9 @@ mod test {
                 token_address.clone(),
                 0,
                 Some(nft_contract_placeholder(&env)),
-            0u32, true)
+                0u32,
+                true,
+            )
             .unwrap();
 
             let config = RewardConfig {
@@ -2234,7 +2315,7 @@ mod test {
             };
 
             // Distribution should succeed (no XLM to block on NFT failure)
-            let result = RewardManager::distribute_rewards(env.clone(), 1, player.clone(), config);
+            let result = distribute_rewards(env.clone(), 1, player.clone(), config);
             assert!(result.is_ok());
         });
 
@@ -2258,12 +2339,22 @@ mod test {
         let player = Address::generate(&env);
 
         env.as_contract(&contract_id, || {
-            RewardManager::initialize(env.clone(), admin.clone(), token_address.clone(), Address::generate(&env)).unwrap();
+            RewardManager::initialize(
+                env.clone(),
+                admin.clone(),
+                token_address.clone(),
+                Address::generate(&env),
+            )
+            .unwrap();
         });
         env.mock_all_auths_allowing_non_root_auth();
         env.as_contract(&contract_id, || {
-            let result =
-                RewardManager::retry_failed_nft_mint(env.clone(), caller.clone(), 1, player.clone());
+            let result = RewardManager::retry_failed_nft_mint(
+                env.clone(),
+                caller.clone(),
+                1,
+                player.clone(),
+            );
             assert_eq!(result, Err(RewardErrorCode::NftMintPendingNotFound));
         });
     }
@@ -2279,7 +2370,13 @@ mod test {
         let missing_nft = Address::generate(&env);
 
         env.as_contract(&contract_id, || {
-            RewardManager::initialize(env.clone(), admin.clone(), token_address.clone(), Address::generate(&env)).unwrap();
+            RewardManager::initialize(
+                env.clone(),
+                admin.clone(),
+                token_address.clone(),
+                Address::generate(&env),
+            )
+            .unwrap();
 
             RewardManager::create_reward_pool_with_nft(
                 env.clone(),
@@ -2305,7 +2402,7 @@ mod test {
                 completion_rank: 0,
             };
 
-            RewardManager::distribute_rewards(env.clone(), 1, player.clone(), config).unwrap();
+            distribute_rewards(env.clone(), 1, player.clone(), config).unwrap();
 
             assert!(Storage::get_pending_nft_mint(&env, 1, &player).is_some());
         });
@@ -2330,7 +2427,13 @@ mod test {
         let admin = Address::generate(&env);
 
         env.as_contract(&contract_id, || {
-            RewardManager::initialize(env.clone(), admin.clone(), token_address.clone(), Address::generate(&env)).unwrap();
+            RewardManager::initialize(
+                env.clone(),
+                admin.clone(),
+                token_address.clone(),
+                Address::generate(&env),
+            )
+            .unwrap();
 
             let empty = RewardManager::list_pending_nft_mints(env.clone(), 0, 10);
             assert_eq!(empty.len(), 0);
@@ -2348,7 +2451,13 @@ mod test {
         let missing_nft = Address::generate(&env);
 
         env.as_contract(&contract_id, || {
-            RewardManager::initialize(env.clone(), admin.clone(), token_address.clone(), Address::generate(&env)).unwrap();
+            RewardManager::initialize(
+                env.clone(),
+                admin.clone(),
+                token_address.clone(),
+                Address::generate(&env),
+            )
+            .unwrap();
 
             RewardManager::create_reward_pool_with_nft(
                 env.clone(),
@@ -2374,8 +2483,8 @@ mod test {
                 completion_rank: 0,
             };
 
-            RewardManager::distribute_rewards(env.clone(), 1, player1.clone(), make_config()).unwrap();
-            RewardManager::distribute_rewards(env.clone(), 1, player2.clone(), make_config()).unwrap();
+            distribute_rewards(env.clone(), 1, player1.clone(), make_config()).unwrap();
+            distribute_rewards(env.clone(), 1, player2.clone(), make_config()).unwrap();
 
             let all = RewardManager::list_pending_nft_mints(env.clone(), 0, 10);
             assert_eq!(all.len(), 2);
@@ -2401,7 +2510,13 @@ mod test {
         let missing_nft = Address::generate(&env);
 
         env.as_contract(&contract_id, || {
-            RewardManager::initialize(env.clone(), admin.clone(), token_address.clone(), Address::generate(&env)).unwrap();
+            RewardManager::initialize(
+                env.clone(),
+                admin.clone(),
+                token_address.clone(),
+                Address::generate(&env),
+            )
+            .unwrap();
 
             // Pool lookup happens first: create an NFT-only pool so the
             // distribution can proceed to the (failing) NFT mint.
@@ -2412,7 +2527,9 @@ mod test {
                 token_address.clone(),
                 0,
                 Some(nft_contract_placeholder(&env)),
-            0u32, true)
+                0u32,
+                true,
+            )
             .unwrap();
 
             let config = RewardConfig {
@@ -2428,7 +2545,7 @@ mod test {
             };
 
             // Distribution succeeds despite NFT failure
-            let result = RewardManager::distribute_rewards(env.clone(), 1, player.clone(), config);
+            let result = distribute_rewards(env.clone(), 1, player.clone(), config);
             assert!(result.is_ok());
 
             // Verify pending NFT mint entry was created
@@ -2451,7 +2568,7 @@ mod test {
             // distribute_rewards looks up the pool config before anything
             // else, so an unknown hunt_id now yields PoolNotFound.
             let config = xlm_only_config(&env, 10_000_000);
-            let result = RewardManager::distribute_rewards(env.clone(), 1, player.clone(), config);
+            let result = distribute_rewards(env.clone(), 1, player.clone(), config);
             assert_eq!(result, Err(RewardErrorCode::PoolNotFound));
         });
     }
@@ -2473,21 +2590,21 @@ mod test {
             create_pool_with_token(&env, creator.clone(), 1, token_address.clone(), 0).unwrap();
             RewardManager::fund_reward_pool(env.clone(), creator.clone(), 1, 300_000_000).unwrap();
 
-            assert!(RewardManager::distribute_rewards(
+            assert!(distribute_rewards(
                 env.clone(),
                 1,
                 player1.clone(),
                 xlm_only_config(&env, 100_000_000),
             )
             .is_ok());
-            assert!(RewardManager::distribute_rewards(
+            assert!(distribute_rewards(
                 env.clone(),
                 1,
                 player2.clone(),
                 xlm_only_config(&env, 100_000_000),
             )
             .is_ok());
-            assert!(RewardManager::distribute_rewards(
+            assert!(distribute_rewards(
                 env.clone(),
                 1,
                 player3.clone(),
@@ -2534,7 +2651,7 @@ mod test {
 
             // After distribution
             let config = xlm_only_config(&env, 30_000_000);
-            RewardManager::distribute_rewards(env.clone(), 1, player.clone(), config).unwrap();
+            distribute_rewards(env.clone(), 1, player.clone(), config).unwrap();
             assert_eq!(RewardManager::get_pool_balance(env.clone(), 1), 50_000_000);
         });
     }
@@ -2566,9 +2683,7 @@ mod test {
         // Distribute from hunt 1
         env.as_contract(&contract_id, || {
             let config = xlm_only_config(&env, 30_000_000);
-            assert!(
-                RewardManager::distribute_rewards(env.clone(), 1, player.clone(), config).is_ok()
-            );
+            assert!(distribute_rewards(env.clone(), 1, player.clone(), config).is_ok());
             assert_eq!(RewardManager::get_pool_balance(env.clone(), 1), 20_000_000);
             assert_eq!(RewardManager::get_pool_balance(env.clone(), 2), 100_000_000);
         });
@@ -2576,9 +2691,7 @@ mod test {
         // Player can still claim from hunt 2 (separate pool)
         env.as_contract(&contract_id, || {
             let config = xlm_only_config(&env, 50_000_000);
-            assert!(
-                RewardManager::distribute_rewards(env.clone(), 2, player.clone(), config).is_ok()
-            );
+            assert!(distribute_rewards(env.clone(), 2, player.clone(), config).is_ok());
             assert_eq!(RewardManager::get_pool_balance(env.clone(), 2), 50_000_000);
         });
     }
@@ -2606,7 +2719,7 @@ mod test {
 
             // After distribution
             let config = xlm_only_config(&env, 20_000_000);
-            RewardManager::distribute_rewards(env.clone(), 1, player.clone(), config).unwrap();
+            distribute_rewards(env.clone(), 1, player.clone(), config).unwrap();
 
             let status = RewardManager::get_distribution_status(env.clone(), 1, player.clone());
             assert!(status.distributed);
@@ -2658,8 +2771,11 @@ mod test {
             create_pool_with_token(&env, creator.clone(), 1, token_address.clone(), 0).unwrap();
             RewardManager::fund_reward_pool(env.clone(), creator.clone(), 1, 50_000_000).unwrap();
 
+            let distributor = Address::generate(&env);
+            Storage::add_authorized_contract(&env, &distributor);
             let ok = RewardManager::distribute_rewards_legacy(
                 env.clone(),
+                distributor,
                 player.clone(),
                 1,
                 2_000,
@@ -2690,7 +2806,7 @@ mod test {
             RewardManager::fund_reward_pool(env.clone(), creator.clone(), 1, 30_000_000).unwrap();
 
             // First distribution uses 2_000 — leaves 1_000
-            RewardManager::distribute_rewards(
+            distribute_rewards(
                 env.clone(),
                 1,
                 player1.clone(),
@@ -2704,7 +2820,7 @@ mod test {
             assert_eq!(v.balance, 10_000_000);
 
             // Attempting to over-distribute also returns InsufficientPool
-            let result = RewardManager::distribute_rewards(
+            let result = distribute_rewards(
                 env.clone(),
                 1,
                 player2.clone(),
@@ -2728,8 +2844,13 @@ mod test {
         mint_tokens(&env, &token_address, &token_admin, &creator, 100_000_000);
 
         env.as_contract(&contract_id, || {
-            RewardManager::initialize(env.clone(), token_admin.clone(), token_address.clone(), Address::generate(&env))
-                .unwrap();
+            RewardManager::initialize(
+                env.clone(),
+                token_admin.clone(),
+                token_address.clone(),
+                Address::generate(&env),
+            )
+            .unwrap();
             create_pool_with_token(&env, creator.clone(), 77, token_address.clone(), 0).unwrap();
             RewardManager::fund_reward_pool(env.clone(), creator.clone(), 77, 60_000_000).unwrap();
             RewardManager::refund_pool(env.clone(), creator.clone(), 77).unwrap();
@@ -2817,7 +2938,7 @@ mod test {
             RewardManager::fund_reward_pool(env.clone(), sponsor.clone(), 6, 60_000_000).unwrap();
 
             // A distribution spends 30M, leaving 70M — still split 40/60.
-            RewardManager::distribute_rewards(
+            distribute_rewards(
                 env.clone(),
                 6,
                 player.clone(),
@@ -2854,8 +2975,13 @@ mod test {
         mint_tokens(&env, &token_address, &token_admin, &creator, 100_000_000);
 
         env.as_contract(&contract_id, || {
-            RewardManager::initialize(env.clone(), token_admin.clone(), token_address.clone(), Address::generate(&env))
-                .unwrap();
+            RewardManager::initialize(
+                env.clone(),
+                token_admin.clone(),
+                token_address.clone(),
+                Address::generate(&env),
+            )
+            .unwrap();
             create_pool_with_token(&env, creator.clone(), 88, token_address.clone(), 0).unwrap();
             RewardManager::fund_reward_pool(env.clone(), creator.clone(), 88, 10_000_000).unwrap();
 
@@ -2876,8 +3002,13 @@ mod test {
         mint_tokens(&env, &token_address, &token_admin, &creator, 100_000_000);
 
         env.as_contract(&contract_id, || {
-            RewardManager::initialize(env.clone(), token_admin.clone(), token_address.clone(), Address::generate(&env))
-                .unwrap();
+            RewardManager::initialize(
+                env.clone(),
+                token_admin.clone(),
+                token_address.clone(),
+                Address::generate(&env),
+            )
+            .unwrap();
             RewardManager::create_reward_pool_with_nft(
                 env.clone(),
                 creator.clone(),
@@ -2885,7 +3016,9 @@ mod test {
                 token_address.clone(),
                 0,
                 Some(nft_contract_placeholder(&env)),
-            0u32, true)
+                0u32,
+                true,
+            )
             .unwrap();
             RewardManager::fund_reward_pool(env.clone(), creator.clone(), 99, 60_000_000).unwrap();
 
@@ -2922,19 +3055,19 @@ mod test {
         mint_tokens(&env, &token_address, &token_admin, &creator, 100_000_000);
 
         env.as_contract(&contract_id, || {
-            RewardManager::initialize(env.clone(), admin.clone(), token_address.clone(), Address::generate(&env)).unwrap();
+            RewardManager::initialize(
+                env.clone(),
+                admin.clone(),
+                token_address.clone(),
+                Address::generate(&env),
+            )
+            .unwrap();
             create_pool_with_token(&env, creator.clone(), 1, token_address.clone(), 0).unwrap();
             RewardManager::fund_reward_pool(env.clone(), creator.clone(), 1, 60_000_000).unwrap();
 
             // Distribute to one player, leaving 4_000 unclaimed
             let player = Address::generate(&env);
-            RewardManager::distribute_rewards(
-                env.clone(),
-                1,
-                player,
-                xlm_only_config(&env, 20_000_000),
-            )
-            .unwrap();
+            distribute_rewards(env.clone(), 1, player, xlm_only_config(&env, 20_000_000)).unwrap();
 
             // Admin withdraws the remaining 4_000 to recipient
             let result = RewardManager::admin_withdraw_unclaimed(
@@ -2966,7 +3099,13 @@ mod test {
         mint_tokens(&env, &token_address, &token_admin, &creator, 100_000_000);
 
         env.as_contract(&contract_id, || {
-            RewardManager::initialize(env.clone(), admin.clone(), token_address.clone(), Address::generate(&env)).unwrap();
+            RewardManager::initialize(
+                env.clone(),
+                admin.clone(),
+                token_address.clone(),
+                Address::generate(&env),
+            )
+            .unwrap();
             create_pool_with_token(&env, creator.clone(), 1, token_address.clone(), 0).unwrap();
             RewardManager::fund_reward_pool(env.clone(), creator.clone(), 1, 50_000_000).unwrap();
 
@@ -2994,7 +3133,13 @@ mod test {
         let recipient = Address::generate(&env);
 
         env.as_contract(&contract_id, || {
-            RewardManager::initialize(env.clone(), admin.clone(), token_address.clone(), Address::generate(&env)).unwrap();
+            RewardManager::initialize(
+                env.clone(),
+                admin.clone(),
+                token_address.clone(),
+                Address::generate(&env),
+            )
+            .unwrap();
 
             // No pool created for hunt_id 99
             let result = RewardManager::admin_withdraw_unclaimed(
@@ -3021,12 +3166,18 @@ mod test {
         mint_tokens(&env, &token_address, &token_admin, &creator, 30_000_000);
 
         env.as_contract(&contract_id, || {
-            RewardManager::initialize(env.clone(), admin.clone(), token_address.clone(), Address::generate(&env)).unwrap();
+            RewardManager::initialize(
+                env.clone(),
+                admin.clone(),
+                token_address.clone(),
+                Address::generate(&env),
+            )
+            .unwrap();
             create_pool_with_token(&env, creator.clone(), 1, token_address.clone(), 0).unwrap();
             RewardManager::fund_reward_pool(env.clone(), creator.clone(), 1, 30_000_000).unwrap();
 
             // Distribute all funds
-            RewardManager::distribute_rewards(
+            distribute_rewards(
                 env.clone(),
                 1,
                 player.clone(),
@@ -3080,7 +3231,13 @@ mod test {
         let recipient = Address::generate(&env);
 
         env.as_contract(&contract_id, || {
-            RewardManager::initialize(env.clone(), admin.clone(), token_address.clone(), Address::generate(&env)).unwrap();
+            RewardManager::initialize(
+                env.clone(),
+                admin.clone(),
+                token_address.clone(),
+                Address::generate(&env),
+            )
+            .unwrap();
             // Create pool with 0 initial balance and never fund it
             create_pool_with_token(&env, creator.clone(), 1, token_address.clone(), 0).unwrap();
 
@@ -3109,7 +3266,13 @@ mod test {
         let admin = Address::generate(&env);
 
         env.as_contract(&contract_id, || {
-            RewardManager::initialize(env.clone(), admin.clone(), token_address, Address::generate(&env)).unwrap();
+            RewardManager::initialize(
+                env.clone(),
+                admin.clone(),
+                token_address,
+                Address::generate(&env),
+            )
+            .unwrap();
         });
         // Re-mock and run the admin-authenticated call in its own invocation:
         // a single invocation cannot authorize the same address twice under
@@ -3137,7 +3300,13 @@ mod test {
         let authorized = Address::generate(&env);
 
         env.as_contract(&contract_id, || {
-            RewardManager::initialize(env.clone(), admin.clone(), token_address, Address::generate(&env)).unwrap();
+            RewardManager::initialize(
+                env.clone(),
+                admin.clone(),
+                token_address,
+                Address::generate(&env),
+            )
+            .unwrap();
             let result =
                 RewardManager::add_authorized_contract(env.clone(), attacker, authorized.clone());
             assert_eq!(result, Err(RewardErrorCode::Unauthorized));
@@ -3154,7 +3323,13 @@ mod test {
         let authorized = Address::generate(&env);
 
         env.as_contract(&contract_id, || {
-            RewardManager::initialize(env.clone(), admin.clone(), token_address, Address::generate(&env)).unwrap();
+            RewardManager::initialize(
+                env.clone(),
+                admin.clone(),
+                token_address,
+                Address::generate(&env),
+            )
+            .unwrap();
             Storage::add_authorized_contract(&env, &authorized);
             assert!(Storage::is_authorized_contract(&env, &authorized));
         });
@@ -3186,7 +3361,13 @@ mod test {
         mint_tokens(&env, &token_address, &token_admin, &creator, 10_000);
 
         env.as_contract(&contract_id, || {
-            RewardManager::initialize(env.clone(), admin.clone(), token_address.clone(), Address::generate(&env)).unwrap();
+            RewardManager::initialize(
+                env.clone(),
+                admin.clone(),
+                token_address.clone(),
+                Address::generate(&env),
+            )
+            .unwrap();
             RewardManager::create_reward_pool_with_nft(
                 env.clone(),
                 creator.clone(),
@@ -3194,7 +3375,9 @@ mod test {
                 token_address.clone(),
                 0,
                 Some(nft_contract_placeholder(&env)),
-            0u32, true)
+                0u32,
+                true,
+            )
             .unwrap();
             RewardManager::fund_reward_pool(env.clone(), creator.clone(), 1, 5_000).unwrap();
             Storage::add_authorized_contract(&env, &authorized);
@@ -3239,27 +3422,29 @@ mod test {
                 token_address.clone(),
                 0,
                 Some(nft_contract_placeholder(&env)),
-            0u32, true)
+                0u32,
+                true,
+            )
             .unwrap();
             RewardManager::fund_reward_pool(env.clone(), creator.clone(), 1, 30_000_000).unwrap();
         });
 
         env.as_contract(&contract_id, || {
-            RewardManager::distribute_rewards(
+            distribute_rewards(
                 env.clone(),
                 1,
                 player1.clone(),
                 xlm_only_config(&env, 10_000_000),
             )
             .unwrap();
-            RewardManager::distribute_rewards(
+            distribute_rewards(
                 env.clone(),
                 1,
                 player2.clone(),
                 xlm_only_config(&env, 10_000_000),
             )
             .unwrap();
-            RewardManager::distribute_rewards(
+            distribute_rewards(
                 env.clone(),
                 1,
                 player3.clone(),
@@ -3328,7 +3513,9 @@ mod test {
                 token_address.clone(),
                 0,
                 Some(nft_contract_placeholder(&env)),
-            0u32, true)
+                0u32,
+                true,
+            )
             .unwrap();
 
             let stats = RewardManager::get_pool_statistics(env.clone(), 1).unwrap();
@@ -3358,7 +3545,9 @@ mod test {
                 token_address.clone(),
                 0,
                 Some(nft_contract_placeholder(&env)),
-            0u32, true)
+                0u32,
+                true,
+            )
             .unwrap();
             RewardManager::fund_reward_pool(env.clone(), creator.clone(), 1, 80_000_000).unwrap();
 
@@ -3392,12 +3581,14 @@ mod test {
                 token_address.clone(),
                 0,
                 Some(nft_contract_placeholder(&env)),
-            0u32, true)
+                0u32,
+                true,
+            )
             .unwrap();
             RewardManager::fund_reward_pool(env.clone(), creator.clone(), 1, 100_000_000).unwrap();
 
             // Distribute to player1
-            RewardManager::distribute_rewards(
+            distribute_rewards(
                 env.clone(),
                 1,
                 player1.clone(),
@@ -3421,7 +3612,7 @@ mod test {
             assert!(stats.last_distribution_timestamp > 0);
 
             // Distribute to player2
-            RewardManager::distribute_rewards(
+            distribute_rewards(
                 env.clone(),
                 1,
                 player2.clone(),
@@ -3459,7 +3650,9 @@ mod test {
                 token_address.clone(),
                 0,
                 Some(nft_contract_placeholder(&env)),
-            0u32, true)
+                0u32,
+                true,
+            )
             .unwrap();
             RewardManager::fund_reward_pool(env.clone(), creator.clone(), 1, 50_000_000).unwrap();
 
@@ -3486,7 +3679,9 @@ mod test {
                 token_address.clone(),
                 0,
                 Some(nft_contract_placeholder(&env)),
-            0u32, true)
+                0u32,
+                true,
+            )
             .unwrap();
         });
 
@@ -3554,7 +3749,13 @@ mod test {
         let hunty_core_id = setup_hunty_core(&env, 1, true);
 
         env.as_contract(&contract_id, || {
-            RewardManager::initialize(env.clone(), admin.clone(), token_address.clone(), Address::generate(&env)).unwrap();
+            RewardManager::initialize(
+                env.clone(),
+                admin.clone(),
+                token_address.clone(),
+                Address::generate(&env),
+            )
+            .unwrap();
             // Create + fund the source and create the destination BEFORE wiring
             // HuntyCore, so pool creation does not perform hunt-existence checks.
             RewardManager::create_reward_pool_with_nft(
@@ -3564,7 +3765,9 @@ mod test {
                 token_address.clone(),
                 0,
                 Some(nft_contract_placeholder(&env)),
-            0u32, true)
+                0u32,
+                true,
+            )
             .unwrap();
             RewardManager::create_reward_pool_with_nft(
                 env.clone(),
@@ -3573,7 +3776,9 @@ mod test {
                 token_address.clone(),
                 0,
                 Some(nft_contract_placeholder(&env)),
-            0u32, true)
+                0u32,
+                true,
+            )
             .unwrap();
             RewardManager::fund_reward_pool(env.clone(), creator.clone(), 1, 60_000_000).unwrap();
 
@@ -3659,7 +3864,10 @@ mod test {
             // identity: total_deposited == balance + total_distributed + total_refunded + total_migrated_out
             assert_eq!(
                 src.total_deposited,
-                src.balance + src.total_distributed + Storage::get_pool_total_refunded(&env, 1) + src.total_migrated_out,
+                src.balance
+                    + src.total_distributed
+                    + Storage::get_pool_total_refunded(&env, 1)
+                    + src.total_migrated_out,
                 "source pool accounting identity broken"
             );
 
@@ -3668,10 +3876,13 @@ mod test {
             assert_eq!(dst.balance, 60_000_000);
             assert_eq!(dst.total_deposited, 60_000_000);
             assert_eq!(dst.total_migrated_out, 0); // destination gains funds, not loses them
-            // identity: total_deposited == balance + total_distributed + total_refunded + total_migrated_out
+                                                   // identity: total_deposited == balance + total_distributed + total_refunded + total_migrated_out
             assert_eq!(
                 dst.total_deposited,
-                dst.balance + dst.total_distributed + Storage::get_pool_total_refunded(&env, 2) + dst.total_migrated_out,
+                dst.balance
+                    + dst.total_distributed
+                    + Storage::get_pool_total_refunded(&env, 2)
+                    + dst.total_migrated_out,
                 "destination pool accounting identity broken"
             );
         });
@@ -3840,7 +4051,13 @@ mod test {
         let hunty_core_id = setup_hunty_core(&env, 1, true);
 
         env.as_contract(&contract_id, || {
-            RewardManager::initialize(env.clone(), admin.clone(), token_address.clone(), Address::generate(&env)).unwrap();
+            RewardManager::initialize(
+                env.clone(),
+                admin.clone(),
+                token_address.clone(),
+                Address::generate(&env),
+            )
+            .unwrap();
             RewardManager::create_reward_pool_with_nft(
                 env.clone(),
                 creator.clone(),
@@ -3848,7 +4065,9 @@ mod test {
                 token_address.clone(),
                 0,
                 Some(nft_contract_placeholder(&env)),
-            0u32, true)
+                0u32,
+                true,
+            )
             .unwrap();
             RewardManager::create_reward_pool_with_nft(
                 env.clone(),
@@ -3857,7 +4076,9 @@ mod test {
                 token_address.clone(),
                 0,
                 Some(nft_contract_placeholder(&env)),
-            0u32, true)
+                0u32,
+                true,
+            )
             .unwrap();
             RewardManager::fund_reward_pool(env.clone(), creator.clone(), 1, 30_000_000).unwrap();
             RewardManager::fund_reward_pool(env.clone(), creator.clone(), 2, 25_000_000).unwrap();
@@ -3888,7 +4109,13 @@ mod test {
         let hunty_core_id = setup_hunty_core(&env, 1, false);
 
         env.as_contract(&contract_id, || {
-            RewardManager::initialize(env.clone(), admin.clone(), token_address.clone(), Address::generate(&env)).unwrap();
+            RewardManager::initialize(
+                env.clone(),
+                admin.clone(),
+                token_address.clone(),
+                Address::generate(&env),
+            )
+            .unwrap();
             RewardManager::create_reward_pool_with_nft(
                 env.clone(),
                 creator.clone(),
@@ -3896,7 +4123,9 @@ mod test {
                 token_address.clone(),
                 0,
                 Some(nft_contract_placeholder(&env)),
-            0u32, true)
+                0u32,
+                true,
+            )
             .unwrap();
             RewardManager::create_reward_pool_with_nft(
                 env.clone(),
@@ -3905,7 +4134,9 @@ mod test {
                 token_address.clone(),
                 0,
                 Some(nft_contract_placeholder(&env)),
-            0u32, true)
+                0u32,
+                true,
+            )
             .unwrap();
             RewardManager::fund_reward_pool(env.clone(), creator.clone(), 1, 60_000_000).unwrap();
             Storage::set_hunty_core(&env, &hunty_core_id);
@@ -3929,7 +4160,13 @@ mod test {
         mint_tokens(&env, &token_address, &token_admin, &creator, 100_000_000);
 
         env.as_contract(&contract_id, || {
-            RewardManager::initialize(env.clone(), admin.clone(), token_address.clone(), Address::generate(&env)).unwrap();
+            RewardManager::initialize(
+                env.clone(),
+                admin.clone(),
+                token_address.clone(),
+                Address::generate(&env),
+            )
+            .unwrap();
             RewardManager::create_reward_pool_with_nft(
                 env.clone(),
                 creator.clone(),
@@ -3937,7 +4174,9 @@ mod test {
                 token_address.clone(),
                 0,
                 Some(nft_contract_placeholder(&env)),
-            0u32, true)
+                0u32,
+                true,
+            )
             .unwrap();
             RewardManager::create_reward_pool_with_nft(
                 env.clone(),
@@ -3946,7 +4185,9 @@ mod test {
                 token_address.clone(),
                 0,
                 Some(nft_contract_placeholder(&env)),
-            0u32, true)
+                0u32,
+                true,
+            )
             .unwrap();
             RewardManager::fund_reward_pool(env.clone(), creator.clone(), 1, 60_000_000).unwrap();
 
@@ -3968,7 +4209,13 @@ mod test {
         let hunty_core_id = setup_hunty_core(&env, 1, true);
 
         env.as_contract(&contract_id, || {
-            RewardManager::initialize(env.clone(), admin.clone(), token_address.clone(), Address::generate(&env)).unwrap();
+            RewardManager::initialize(
+                env.clone(),
+                admin.clone(),
+                token_address.clone(),
+                Address::generate(&env),
+            )
+            .unwrap();
             RewardManager::create_reward_pool_with_nft(
                 env.clone(),
                 creator.clone(),
@@ -3976,7 +4223,9 @@ mod test {
                 token_address.clone(),
                 0,
                 Some(nft_contract_placeholder(&env)),
-            0u32, true)
+                0u32,
+                true,
+            )
             .unwrap();
             RewardManager::fund_reward_pool(env.clone(), creator.clone(), 1, 60_000_000).unwrap();
             Storage::set_hunty_core(&env, &hunty_core_id);
@@ -3996,7 +4245,13 @@ mod test {
         let creator = Address::generate(&env);
 
         env.as_contract(&contract_id, || {
-            RewardManager::initialize(env.clone(), admin.clone(), token_address.clone(), Address::generate(&env)).unwrap();
+            RewardManager::initialize(
+                env.clone(),
+                admin.clone(),
+                token_address.clone(),
+                Address::generate(&env),
+            )
+            .unwrap();
             RewardManager::create_reward_pool_with_nft(
                 env.clone(),
                 creator.clone(),
@@ -4004,7 +4259,9 @@ mod test {
                 token_address.clone(),
                 0,
                 Some(nft_contract_placeholder(&env)),
-            0u32, true)
+                0u32,
+                true,
+            )
             .unwrap();
 
             let result = RewardManager::migrate_pool(env.clone(), creator.clone(), 1, 2);
@@ -4024,7 +4281,13 @@ mod test {
         mint_tokens(&env, &token_address, &token_admin, &creator, 100_000_000);
 
         env.as_contract(&contract_id, || {
-            RewardManager::initialize(env.clone(), admin.clone(), token_address.clone(), Address::generate(&env)).unwrap();
+            RewardManager::initialize(
+                env.clone(),
+                admin.clone(),
+                token_address.clone(),
+                Address::generate(&env),
+            )
+            .unwrap();
             RewardManager::create_reward_pool_with_nft(
                 env.clone(),
                 creator.clone(),
@@ -4032,7 +4295,9 @@ mod test {
                 token_address.clone(),
                 0,
                 Some(nft_contract_placeholder(&env)),
-            0u32, true)
+                0u32,
+                true,
+            )
             .unwrap();
             RewardManager::fund_reward_pool(env.clone(), creator.clone(), 1, 60_000_000).unwrap();
             // Destination is owned by a different creator.
@@ -4043,7 +4308,9 @@ mod test {
                 token_address.clone(),
                 0,
                 Some(nft_contract_placeholder(&env)),
-            0u32, true)
+                0u32,
+                true,
+            )
             .unwrap();
 
             let result = RewardManager::migrate_pool(env.clone(), creator.clone(), 1, 2);
@@ -4062,7 +4329,13 @@ mod test {
         mint_tokens(&env, &token_address, &token_admin, &creator, 100_000_000);
 
         env.as_contract(&contract_id, || {
-            RewardManager::initialize(env.clone(), admin.clone(), token_address.clone(), Address::generate(&env)).unwrap();
+            RewardManager::initialize(
+                env.clone(),
+                admin.clone(),
+                token_address.clone(),
+                Address::generate(&env),
+            )
+            .unwrap();
             RewardManager::create_reward_pool_with_nft(
                 env.clone(),
                 creator.clone(),
@@ -4070,7 +4343,9 @@ mod test {
                 token_address.clone(),
                 0,
                 Some(nft_contract_placeholder(&env)),
-            0u32, true)
+                0u32,
+                true,
+            )
             .unwrap();
             RewardManager::fund_reward_pool(env.clone(), creator.clone(), 1, 60_000_000).unwrap();
 
@@ -4089,7 +4364,13 @@ mod test {
         let hunty_core_id = setup_hunty_core(&env, 1, true);
 
         env.as_contract(&contract_id, || {
-            RewardManager::initialize(env.clone(), admin.clone(), token_address.clone(), Address::generate(&env)).unwrap();
+            RewardManager::initialize(
+                env.clone(),
+                admin.clone(),
+                token_address.clone(),
+                Address::generate(&env),
+            )
+            .unwrap();
             // Source created but never funded.
             RewardManager::create_reward_pool_with_nft(
                 env.clone(),
@@ -4098,7 +4379,9 @@ mod test {
                 token_address.clone(),
                 0,
                 Some(nft_contract_placeholder(&env)),
-            0u32, true)
+                0u32,
+                true,
+            )
             .unwrap();
             RewardManager::create_reward_pool_with_nft(
                 env.clone(),
@@ -4107,7 +4390,9 @@ mod test {
                 token_address.clone(),
                 0,
                 Some(nft_contract_placeholder(&env)),
-            0u32, true)
+                0u32,
+                true,
+            )
             .unwrap();
             Storage::set_hunty_core(&env, &hunty_core_id);
 
@@ -4134,7 +4419,9 @@ mod test {
                 token_address.clone(),
                 0,
                 Some(nft_contract_placeholder(&env)),
-            0u32, true)
+                0u32,
+                true,
+            )
             .unwrap();
 
             let analytics = RewardManager::get_distribution_analytics(env.clone(), 1, None, None);
@@ -4166,11 +4453,13 @@ mod test {
                 token_address.clone(),
                 0,
                 Some(nft_contract_placeholder(&env)),
-            0u32, true)
+                0u32,
+                true,
+            )
             .unwrap();
             RewardManager::fund_reward_pool(env.clone(), creator.clone(), 1, 100_000_000).unwrap();
 
-            RewardManager::distribute_rewards(
+            distribute_rewards(
                 env.clone(),
                 1,
                 player.clone(),
@@ -4213,12 +4502,14 @@ mod test {
                 token_address.clone(),
                 0,
                 Some(nft_contract_placeholder(&env)),
-            0u32, true)
+                0u32,
+                true,
+            )
             .unwrap();
             RewardManager::fund_reward_pool(env.clone(), creator.clone(), 1, 200_000_000).unwrap();
 
             // Distribute 10M, 20M, 30M — median should be 20M
-            RewardManager::distribute_rewards(
+            distribute_rewards(
                 env.clone(),
                 1,
                 player1.clone(),
@@ -4226,7 +4517,7 @@ mod test {
             )
             .unwrap();
 
-            RewardManager::distribute_rewards(
+            distribute_rewards(
                 env.clone(),
                 1,
                 player2.clone(),
@@ -4234,7 +4525,7 @@ mod test {
             )
             .unwrap();
 
-            RewardManager::distribute_rewards(
+            distribute_rewards(
                 env.clone(),
                 1,
                 player3.clone(),
@@ -4284,14 +4575,16 @@ mod test {
                 token_address.clone(),
                 0,
                 Some(nft_contract_placeholder(&env)),
-            0u32, true)
+                0u32,
+                true,
+            )
             .unwrap();
             RewardManager::fund_reward_pool(env.clone(), creator.clone(), 1, 200_000_000).unwrap();
 
             let amounts = [5_000_000i128, 20_000_000, 10_000_000, 15_000_000];
             let mut idx: u32 = 0;
             while idx < 4 {
-                RewardManager::distribute_rewards(
+                distribute_rewards(
                     env.clone(),
                     1,
                     players.get(idx).unwrap().clone(),
@@ -4347,7 +4640,9 @@ mod test {
                 token_address.clone(),
                 0,
                 Some(nft_contract_placeholder(&env)),
-            0u32, true)
+                0u32,
+                true,
+            )
             .unwrap();
             RewardManager::fund_reward_pool(env.clone(), creator.clone(), 1, 200_000_000).unwrap();
 
@@ -4405,7 +4700,9 @@ mod test {
                 token_address.clone(),
                 0,
                 Some(nft_contract_placeholder(&env)),
-            0u32, true)
+                0u32,
+                true,
+            )
             .unwrap();
             RewardManager::fund_reward_pool(env.clone(), creator.clone(), 1, 1_000_000_000_000)
                 .unwrap();
@@ -4481,7 +4778,13 @@ mod test {
         let player = Address::generate(&env);
 
         env.as_contract(&contract_id, || {
-            RewardManager::initialize(env.clone(), admin.clone(), token_address, Address::generate(&env)).unwrap();
+            RewardManager::initialize(
+                env.clone(),
+                admin.clone(),
+                token_address,
+                Address::generate(&env),
+            )
+            .unwrap();
         });
         // Re-mock before the admin-authenticated resolve call (see note in
         // test_admin_adds_authorized_contract).
@@ -4586,7 +4889,9 @@ mod test {
                     token_address.clone(),
                     0,
                     None,
-                0u32, true);
+                    0u32,
+                    true,
+                );
                 // The auth check should reject this
                 // Note: In a real Soroban test, this would require setting up
                 // the auth challenge properly. For now, we test that mock_all_auths
@@ -4611,7 +4916,13 @@ mod test {
         mint_tokens(&env, &token_address, &token_admin, &creator, 100_000_000);
 
         env.as_contract(&contract_id, || {
-            RewardManager::initialize(env.clone(), admin.clone(), token_address.clone(), Address::generate(&env)).unwrap();
+            RewardManager::initialize(
+                env.clone(),
+                admin.clone(),
+                token_address.clone(),
+                Address::generate(&env),
+            )
+            .unwrap();
             create_pool_with_token(&env, creator.clone(), 1, token_address.clone(), 0).unwrap();
             RewardManager::fund_reward_pool(env.clone(), creator.clone(), 1, 50_000_000).unwrap();
         });
@@ -4668,7 +4979,13 @@ mod test {
     /// Seeds a funded pool config directly in storage, bypassing
     /// `create_reward_pool`/`fund_reward_pool` (and their creator-auth calls)
     /// so these tests exercise only admin_withdraw's own status gate.
-    fn seed_funded_pool(env: &Env, hunt_id: u64, creator: Address, token_address: Address, balance: i128) {
+    fn seed_funded_pool(
+        env: &Env,
+        hunt_id: u64,
+        creator: Address,
+        token_address: Address,
+        balance: i128,
+    ) {
         Storage::set_pool_config(
             env,
             hunt_id,
@@ -4852,7 +5169,13 @@ mod test {
         let attacker = Address::generate(&env);
 
         env.as_contract(&contract_id, || {
-            RewardManager::initialize(env.clone(), admin.clone(), token_address.clone(), Address::generate(&env)).unwrap();
+            RewardManager::initialize(
+                env.clone(),
+                admin.clone(),
+                token_address.clone(),
+                Address::generate(&env),
+            )
+            .unwrap();
 
             // Verify contract is not paused initially
             assert!(!RewardManager::is_paused(env.clone()));
@@ -4880,7 +5203,13 @@ mod test {
         let attacker = Address::generate(&env);
 
         env.as_contract(&contract_id, || {
-            RewardManager::initialize(env.clone(), admin.clone(), token_address.clone(), Address::generate(&env)).unwrap();
+            RewardManager::initialize(
+                env.clone(),
+                admin.clone(),
+                token_address.clone(),
+                Address::generate(&env),
+            )
+            .unwrap();
 
             // Admin pauses the contract
             let reason = soroban_sdk::String::from_str(&env, "Testing pause");
@@ -4914,7 +5243,13 @@ mod test {
         mint_tokens(&env, &token_address, &token_admin, &creator, 100_000_000);
 
         env.as_contract(&contract_id, || {
-            RewardManager::initialize(env.clone(), admin.clone(), token_address.clone(), Address::generate(&env)).unwrap();
+            RewardManager::initialize(
+                env.clone(),
+                admin.clone(),
+                token_address.clone(),
+                Address::generate(&env),
+            )
+            .unwrap();
             create_pool_with_token(&env, creator.clone(), 1, token_address.clone(), 0).unwrap();
             RewardManager::fund_reward_pool(env.clone(), creator.clone(), 1, 50_000_000).unwrap();
 
@@ -4952,7 +5287,13 @@ mod test {
         let contract_to_auth = Address::generate(&env);
 
         env.as_contract(&contract_id, || {
-            RewardManager::initialize(env.clone(), admin.clone(), token_address.clone(), Address::generate(&env)).unwrap();
+            RewardManager::initialize(
+                env.clone(),
+                admin.clone(),
+                token_address.clone(),
+                Address::generate(&env),
+            )
+            .unwrap();
         });
 
         env.mock_all_auths_allowing_non_root_auth();
@@ -4980,7 +5321,13 @@ mod test {
         let contract_addr = Address::generate(&env);
 
         env.as_contract(&contract_id, || {
-            RewardManager::initialize(env.clone(), admin.clone(), token_address.clone(), Address::generate(&env)).unwrap();
+            RewardManager::initialize(
+                env.clone(),
+                admin.clone(),
+                token_address.clone(),
+                Address::generate(&env),
+            )
+            .unwrap();
             Storage::add_authorized_contract(&env, &contract_addr);
             assert!(Storage::is_authorized_contract(&env, &contract_addr));
         });
@@ -5031,7 +5378,7 @@ mod test {
             RewardManager::fund_reward_pool(env.clone(), creator.clone(), 1, 100_000_000).unwrap();
 
             // First distribution for player should succeed
-            let result1 = RewardManager::distribute_rewards(
+            let result1 = distribute_rewards(
                 env.clone(),
                 1,
                 player.clone(),
@@ -5040,7 +5387,7 @@ mod test {
             assert!(result1.is_ok(), "First distribution should succeed");
 
             // Second distribution for same player should fail with AlreadyDistributed
-            let result2 = RewardManager::distribute_rewards(
+            let result2 = distribute_rewards(
                 env.clone(),
                 1,
                 player.clone(),
@@ -5088,13 +5435,12 @@ mod test {
             let mut config = xlm_only_config(&env, 30_000_000);
             config.nft_contract = Some(Address::generate(&env)); // Invalid/non-existent contract
 
-            let result =
-                RewardManager::distribute_rewards(env.clone(), 1, player.clone(), config.clone());
+            let _result = distribute_rewards(env.clone(), 1, player.clone(), config.clone());
             // Distribution with XLM should succeed, NFT should fail gracefully
             // OR if validation rejects the bad config, either way the check below works
 
             // Regardless of first attempt outcome, second attempt should be rejected
-            let result2 = RewardManager::distribute_rewards(
+            let result2 = distribute_rewards(
                 env.clone(),
                 1,
                 player.clone(),
@@ -5135,7 +5481,7 @@ mod test {
             assert_eq!(total_deposited_1, 100_000_000);
 
             // Distribute 30_000_000 to a player
-            RewardManager::distribute_rewards(
+            distribute_rewards(
                 env.clone(),
                 1,
                 player.clone(),
@@ -5215,7 +5561,8 @@ mod test {
             let refund_events: std::vec::Vec<_> = events
                 .iter()
                 .filter(|e| {
-                    e.1.get(0).map(|topic| topic.get_payload()) == Some(expected_topic.get_payload())
+                    e.1.get(0).map(|topic| topic.get_payload())
+                        == Some(expected_topic.get_payload())
                 })
                 .collect();
 
@@ -5281,7 +5628,13 @@ mod test {
         mint_tokens(&env, &token_address, &token_admin, &creator, 200_000_000);
 
         env.as_contract(&contract_id, || {
-            RewardManager::initialize(env.clone(), admin.clone(), token_address.clone(), Address::generate(&env)).unwrap();
+            RewardManager::initialize(
+                env.clone(),
+                admin.clone(),
+                token_address.clone(),
+                Address::generate(&env),
+            )
+            .unwrap();
             RewardManager::create_reward_pool(
                 env.clone(),
                 creator.clone(),
@@ -5296,13 +5649,7 @@ mod test {
 
             // Distribute some funds (25_000_000 out, 75_000_000 left)
             let player = Address::generate(&env);
-            RewardManager::distribute_rewards(
-                env.clone(),
-                1,
-                player,
-                xlm_only_config(&env, 25_000_000),
-            )
-            .unwrap();
+            distribute_rewards(env.clone(), 1, player, xlm_only_config(&env, 25_000_000)).unwrap();
 
             // Admin withdrawal of unclaimed
             RewardManager::admin_withdraw_unclaimed(

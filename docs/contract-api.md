@@ -84,6 +84,8 @@ pub fn initialize_admin(env: Env, admin: Address) -> Result<(), HuntErrorCode>
 - `InvalidPoints` = 49
 - `HuntFull` = 50
 - `LeaderboardVisibilityUnauthorized` = 51
+- `InviteCodeRequired` = 52
+- `TooManyAliases` = 53
 
 ---
 
@@ -159,6 +161,8 @@ pub fn pause_contract(env: Env, admin: Address) -> Result<(), HuntErrorCode>
 - `InvalidPoints` = 49
 - `HuntFull` = 50
 - `LeaderboardVisibilityUnauthorized` = 51
+- `InviteCodeRequired` = 52
+- `TooManyAliases` = 53
 
 ---
 
@@ -234,6 +238,8 @@ pub fn unpause_contract(env: Env, admin: Address) -> Result<(), HuntErrorCode>
 - `InvalidPoints` = 49
 - `HuntFull` = 50
 - `LeaderboardVisibilityUnauthorized` = 51
+- `InviteCodeRequired` = 52
+- `TooManyAliases` = 53
 
 ---
 
@@ -257,6 +263,8 @@ pub fn is_contract_paused(env: Env) -> bool
 
 #### `create_hunt`
 
+Returns Ok if clues are visible to callers (hunt exists and is not in Draft).
+Draft-status hunts hide clue questions to prevent pre-game answer farming.
 Creates a new scavenger hunt with the provided metadata.
 
 # Arguments
@@ -355,6 +363,8 @@ pub fn create_hunt(env: Env, creator: Address, title: String, description: Strin
 - `InvalidPoints` = 49
 - `HuntFull` = 50
 - `LeaderboardVisibilityUnauthorized` = 51
+- `InviteCodeRequired` = 52
+- `TooManyAliases` = 53
 
 ---
 
@@ -435,6 +445,8 @@ pub fn clone_hunt(env: Env, template_hunt_id: u64, caller: Address) -> Result<u6
 - `InvalidPoints` = 49
 - `HuntFull` = 50
 - `LeaderboardVisibilityUnauthorized` = 51
+- `InviteCodeRequired` = 52
+- `TooManyAliases` = 53
 
 ---
 
@@ -513,6 +525,8 @@ pub fn clone_hunt_with_answers(env: Env, template_hunt_id: u64, caller: Address,
 - `InvalidPoints` = 49
 - `HuntFull` = 50
 - `LeaderboardVisibilityUnauthorized` = 51
+- `InviteCodeRequired` = 52
+- `TooManyAliases` = 53
 
 ---
 
@@ -588,6 +602,8 @@ pub fn set_time_bonus_config(env: Env, hunt_id: u64, caller: Address, time_bonus
 - `InvalidPoints` = 49
 - `HuntFull` = 50
 - `LeaderboardVisibilityUnauthorized` = 51
+- `InviteCodeRequired` = 52
+- `TooManyAliases` = 53
 
 ---
 
@@ -667,6 +683,8 @@ pub fn set_max_attempts_per_clue(env: Env, hunt_id: u64, caller: Address, max_at
 - `InvalidPoints` = 49
 - `HuntFull` = 50
 - `LeaderboardVisibilityUnauthorized` = 51
+- `InviteCodeRequired` = 52
+- `TooManyAliases` = 53
 
 ---
 
@@ -744,6 +762,8 @@ pub fn update_hunt_description(env: Env, hunt_id: u64, caller: Address, descript
 - `InvalidPoints` = 49
 - `HuntFull` = 50
 - `LeaderboardVisibilityUnauthorized` = 51
+- `InviteCodeRequired` = 52
+- `TooManyAliases` = 53
 
 ---
 
@@ -821,6 +841,8 @@ pub fn set_max_players(env: Env, hunt_id: u64, caller: Address, max_players: u32
 - `InvalidPoints` = 49
 - `HuntFull` = 50
 - `LeaderboardVisibilityUnauthorized` = 51
+- `InviteCodeRequired` = 52
+- `TooManyAliases` = 53
 
 ---
 
@@ -899,6 +921,8 @@ pub fn set_registration_deadline(env: Env, hunt_id: u64, creator: Address, regis
 - `InvalidPoints` = 49
 - `HuntFull` = 50
 - `LeaderboardVisibilityUnauthorized` = 51
+- `InviteCodeRequired` = 52
+- `TooManyAliases` = 53
 
 ---
 
@@ -977,6 +1001,8 @@ pub fn set_team_mode(env: Env, hunt_id: u64, creator: Address, team_mode: bool) 
 - `InvalidPoints` = 49
 - `HuntFull` = 50
 - `LeaderboardVisibilityUnauthorized` = 51
+- `InviteCodeRequired` = 52
+- `TooManyAliases` = 53
 
 ---
 
@@ -1055,6 +1081,8 @@ pub fn set_allow_partial_scoring(env: Env, hunt_id: u64, creator: Address, allow
 - `InvalidPoints` = 49
 - `HuntFull` = 50
 - `LeaderboardVisibilityUnauthorized` = 51
+- `InviteCodeRequired` = 52
+- `TooManyAliases` = 53
 
 ---
 
@@ -1130,6 +1158,172 @@ pub fn get_hunt_end_time(env: Env, hunt_id: u64) -> Result<u64, HuntErrorCode>
 - `InvalidPoints` = 49
 - `HuntFull` = 50
 - `LeaderboardVisibilityUnauthorized` = 51
+- `InviteCodeRequired` = 52
+- `TooManyAliases` = 53
+
+---
+
+#### `is_hunt_terminal`
+
+Returns whether the hunt is in a terminal state.
+
+A hunt is terminal once it can no longer accept new play or be
+reactivated: `Completed`, `Cancelled`, or `Archived`. This view is
+consumed by the reward manager to decide whether a pool may be
+refunded to its creator.
+
+**Signature:**
+
+```rust
+pub fn is_hunt_terminal(env: Env, hunt_id: u64) -> Result<bool, HuntErrorCode>
+```
+
+**Parameters:**
+
+- `env: Env`
+- `hunt_id: u64`
+
+**Returns:** `Result<bool, HuntErrorCode>`
+
+**Error type:** `HuntErrorCode`
+
+**Error codes:**
+
+- `HuntNotFound` = 1
+- `ClueNotFound` = 2
+- `InvalidHuntStatus` = 3
+- `PlayerNotRegistered` = 4
+- `ClueAlreadyCompleted` = 5
+- `InvalidAnswer` = 6
+- `HuntNotActive` = 7
+- `Unauthorized` = 8
+- `InsufficientRewardPool` = 9
+- `DuplicateRegistration` = 10
+- `InvalidTitle` = 11
+- `InvalidDescription` = 12
+- `InvalidAddress` = 13
+- `TooManyClues` = 14
+- `InvalidQuestion` = 15
+- `RefundFailed` = 16
+- `NoCluesAdded` = 17
+- `HuntNotCompleted` = 18
+- `RewardAlreadyClaimed` = 19
+- `RewardDistributionFailed` = 20
+- `NoRewardsConfigured` = 21
+- `DuplicateSubmission` = 22
+- `SubmissionExpired` = 23
+- `BannedPlayer` = 24
+- `NoRequiredClues` = 25
+- `RateLimitExceeded` = 26
+- `ScoreOverflow` = 27
+- `RegistrationsPaused` = 28
+- `AnswersPaused` = 29
+- `RewardsPaused` = 30
+- `HuntEndTimeInPast` = 31
+- `NoPendingAdmin` = 32
+- `PendingAdminMismatch` = 33
+- `InvalidRarity` = 34
+- `InvalidTimeBonusConfig` = 35
+- `AddressBlacklisted` = 36
+- `ContractPaused` = 37
+- `InvalidMaxAttempts` = 38
+- `InvalidWeight` = 39
+- `HintNotAvailable` = 40
+- `HintAlreadyUnlocked` = 41
+- `InsufficientScore` = 42
+- `TooManyCategories` = 43
+- `InvalidCategory` = 44
+- `InvalidDifficulty` = 45
+- `CorruptPlayerProgress` = 46
+- `HuntNotStarted` = 47
+- `AdminAlreadyProposed` = 48
+- `InvalidPoints` = 49
+- `HuntFull` = 50
+- `LeaderboardVisibilityUnauthorized` = 51
+- `InviteCodeRequired` = 52
+- `TooManyAliases` = 53
+
+---
+
+#### `is_hunt_expired_or_cancelled`
+
+Returns whether the hunt is expired or cancelled.
+
+A hunt is considered expired when it has an `end_time` set and the
+current ledger timestamp is at or past that end time. A hunt is
+cancelled when its status is `Cancelled`. This view is consumed by the
+reward manager to decide whether a pool may be migrated to a new hunt.
+
+**Signature:**
+
+```rust
+pub fn is_hunt_expired_or_cancelled(env: Env, hunt_id: u64) -> Result<bool, HuntErrorCode>
+```
+
+**Parameters:**
+
+- `env: Env`
+- `hunt_id: u64`
+
+**Returns:** `Result<bool, HuntErrorCode>`
+
+**Error type:** `HuntErrorCode`
+
+**Error codes:**
+
+- `HuntNotFound` = 1
+- `ClueNotFound` = 2
+- `InvalidHuntStatus` = 3
+- `PlayerNotRegistered` = 4
+- `ClueAlreadyCompleted` = 5
+- `InvalidAnswer` = 6
+- `HuntNotActive` = 7
+- `Unauthorized` = 8
+- `InsufficientRewardPool` = 9
+- `DuplicateRegistration` = 10
+- `InvalidTitle` = 11
+- `InvalidDescription` = 12
+- `InvalidAddress` = 13
+- `TooManyClues` = 14
+- `InvalidQuestion` = 15
+- `RefundFailed` = 16
+- `NoCluesAdded` = 17
+- `HuntNotCompleted` = 18
+- `RewardAlreadyClaimed` = 19
+- `RewardDistributionFailed` = 20
+- `NoRewardsConfigured` = 21
+- `DuplicateSubmission` = 22
+- `SubmissionExpired` = 23
+- `BannedPlayer` = 24
+- `NoRequiredClues` = 25
+- `RateLimitExceeded` = 26
+- `ScoreOverflow` = 27
+- `RegistrationsPaused` = 28
+- `AnswersPaused` = 29
+- `RewardsPaused` = 30
+- `HuntEndTimeInPast` = 31
+- `NoPendingAdmin` = 32
+- `PendingAdminMismatch` = 33
+- `InvalidRarity` = 34
+- `InvalidTimeBonusConfig` = 35
+- `AddressBlacklisted` = 36
+- `ContractPaused` = 37
+- `InvalidMaxAttempts` = 38
+- `InvalidWeight` = 39
+- `HintNotAvailable` = 40
+- `HintAlreadyUnlocked` = 41
+- `InsufficientScore` = 42
+- `TooManyCategories` = 43
+- `InvalidCategory` = 44
+- `InvalidDifficulty` = 45
+- `CorruptPlayerProgress` = 46
+- `HuntNotStarted` = 47
+- `AdminAlreadyProposed` = 48
+- `InvalidPoints` = 49
+- `HuntFull` = 50
+- `LeaderboardVisibilityUnauthorized` = 51
+- `InviteCodeRequired` = 52
+- `TooManyAliases` = 53
 
 ---
 
@@ -1237,6 +1431,8 @@ pub fn add_clue(env: Env, hunt_id: u64, question: String, answer: String, points
 - `InvalidPoints` = 49
 - `HuntFull` = 50
 - `LeaderboardVisibilityUnauthorized` = 51
+- `InviteCodeRequired` = 52
+- `TooManyAliases` = 53
 
 ---
 
@@ -1316,6 +1512,8 @@ pub fn add_clues(env: Env, hunt_id: u64, clues: Vec<BatchClueInput>) -> Result<V
 - `InvalidPoints` = 49
 - `HuntFull` = 50
 - `LeaderboardVisibilityUnauthorized` = 51
+- `InviteCodeRequired` = 52
+- `TooManyAliases` = 53
 
 ---
 
@@ -1336,6 +1534,7 @@ Only the hunt creator can add aliases, and only while the hunt is in Draft statu
 * `Unauthorized` - Caller is not the hunt creator
 * `ClueNotFound` - Clue does not exist
 * `InvalidAnswer` - Any answer is empty or exceeds max length
+* `TooManyAliases` - Adding the aliases would exceed `MAX_ALIASES_PER_CLUE`
 
 **Signature:**
 
@@ -1407,12 +1606,20 @@ pub fn add_clue_aliases(env: Env, hunt_id: u64, clue_id: u32, answers: Vec<Strin
 - `InvalidPoints` = 49
 - `HuntFull` = 50
 - `LeaderboardVisibilityUnauthorized` = 51
+- `InviteCodeRequired` = 52
+- `TooManyAliases` = 53
 
 ---
 
 #### `get_clue`
 
 Returns clue information for a hunt/clue. Does not expose the answer hash.
+
+Questions are only returned once the hunt is `Active` and the ledger
+timestamp has reached `start_time` (when set). Before that, callers
+receive [`HuntErrorCode::HuntNotActive`] so questions cannot be read
+ahead of registration and solved offline to game time-based scoring
+and reward tiers.
 
 **Signature:**
 
@@ -1483,6 +1690,8 @@ pub fn get_clue(env: Env, hunt_id: u64, clue_id: u32) -> Result<ClueInfo, HuntEr
 - `InvalidPoints` = 49
 - `HuntFull` = 50
 - `LeaderboardVisibilityUnauthorized` = 51
+- `InviteCodeRequired` = 52
+- `TooManyAliases` = 53
 
 ---
 
@@ -1625,6 +1834,8 @@ pub fn set_hunt_categories(env: Env, hunt_id: u64, caller: Address, categories: 
 - `InvalidPoints` = 49
 - `HuntFull` = 50
 - `LeaderboardVisibilityUnauthorized` = 51
+- `InviteCodeRequired` = 52
+- `TooManyAliases` = 53
 
 ---
 
@@ -1744,6 +1955,8 @@ pub fn set_hunt_difficulty_override(env: Env, hunt_id: u64, caller: Address, dif
 - `InvalidPoints` = 49
 - `HuntFull` = 50
 - `LeaderboardVisibilityUnauthorized` = 51
+- `InviteCodeRequired` = 52
+- `TooManyAliases` = 53
 
 ---
 
@@ -1823,6 +2036,8 @@ pub fn set_clue_hint(env: Env, hunt_id: u64, clue_id: u32, caller: Address, hint
 - `InvalidPoints` = 49
 - `HuntFull` = 50
 - `LeaderboardVisibilityUnauthorized` = 51
+- `InviteCodeRequired` = 52
+- `TooManyAliases` = 53
 
 ---
 
@@ -1900,6 +2115,8 @@ pub fn request_hint(env: Env, hunt_id: u64, clue_id: u32, player: Address) -> Re
 - `InvalidPoints` = 49
 - `HuntFull` = 50
 - `LeaderboardVisibilityUnauthorized` = 51
+- `InviteCodeRequired` = 52
+- `TooManyAliases` = 53
 
 ---
 
@@ -1932,6 +2149,7 @@ pub fn list_clues_paginated(env: Env, hunt_id: u64, page: u32, page_size: u32) -
 Normalizes answer (trim, lowercase) and returns SHA256 hash as BytesN<32>.
 Uses hunt_id and clue_id as salt to prevent rainbow table precomputation.
 Hashing scheme: SHA256(hunt_id || clue_id || normalized_answer)
+Returns true if `hash` is already present in `hashes`.
 Resolves the XLM amount for the completing player.
 
 If the hunt's rewardManager-configured pool has a matching
@@ -2012,6 +2230,8 @@ pub fn activate_hunt(env: Env, hunt_id: u64, caller: Address) -> Result<(), Hunt
 - `InvalidPoints` = 49
 - `HuntFull` = 50
 - `LeaderboardVisibilityUnauthorized` = 51
+- `InviteCodeRequired` = 52
+- `TooManyAliases` = 53
 
 ---
 
@@ -2086,6 +2306,8 @@ pub fn deactivate_hunt(env: Env, hunt_id: u64, caller: Address) -> Result<(), Hu
 - `InvalidPoints` = 49
 - `HuntFull` = 50
 - `LeaderboardVisibilityUnauthorized` = 51
+- `InviteCodeRequired` = 52
+- `TooManyAliases` = 53
 
 ---
 
@@ -2160,6 +2382,8 @@ pub fn cancel_hunt(env: Env, hunt_id: u64, caller: Address) -> Result<(), HuntEr
 - `InvalidPoints` = 49
 - `HuntFull` = 50
 - `LeaderboardVisibilityUnauthorized` = 51
+- `InviteCodeRequired` = 52
+- `TooManyAliases` = 53
 
 ---
 
@@ -2264,6 +2488,8 @@ pub fn close_hunt(env: Env, hunt_id: u64, caller: Address) -> Result<(), HuntErr
 - `InvalidPoints` = 49
 - `HuntFull` = 50
 - `LeaderboardVisibilityUnauthorized` = 51
+- `InviteCodeRequired` = 52
+- `TooManyAliases` = 53
 
 ---
 
@@ -2338,6 +2564,8 @@ pub fn archive_hunt(env: Env, hunt_id: u64, caller: Address) -> Result<(), HuntE
 - `InvalidPoints` = 49
 - `HuntFull` = 50
 - `LeaderboardVisibilityUnauthorized` = 51
+- `InviteCodeRequired` = 52
+- `TooManyAliases` = 53
 
 ---
 
@@ -2432,6 +2660,8 @@ pub fn gc_hunt(env: Env, hunt_id: u64, caller: Address) -> Result<GcReport, Hunt
 - `InvalidPoints` = 49
 - `HuntFull` = 50
 - `LeaderboardVisibilityUnauthorized` = 51
+- `InviteCodeRequired` = 52
+- `TooManyAliases` = 53
 
 ---
 
@@ -2526,18 +2756,23 @@ pub fn get_hunt_info(env: Env, hunt_id: u64) -> Result<Hunt, HuntErrorCode>
 - `InvalidPoints` = 49
 - `HuntFull` = 50
 - `LeaderboardVisibilityUnauthorized` = 51
+- `InviteCodeRequired` = 52
+- `TooManyAliases` = 53
 
 ---
 
 #### `set_reward_config`
 
-Convenience helper used in tests to set reward configuration on a hunt.
+Sets the reward configuration for a hunt.
+Only the hunt creator (or a co-creator) may do this, and only while the
+hunt is still in `Draft` — reward parameters must not be mutable once
+players can register (#1012).
 Sets nft_image_uri to a placeholder when nft_enabled is true.
 
 **Signature:**
 
 ```rust
-pub fn set_reward_config(env: Env, hunt_id: u64, max_winners: u32, xlm_pool: i128, nft_enabled: bool, nft_contract: Option<Address>) -> Result<(), HuntErrorCode>
+pub fn set_reward_config(env: Env, hunt_id: u64, max_winners: u32, xlm_pool: i128, nft_enabled: bool, nft_contract: Option<Address>, caller: Address) -> Result<(), HuntErrorCode>
 ```
 
 **Parameters:**
@@ -2548,6 +2783,7 @@ pub fn set_reward_config(env: Env, hunt_id: u64, max_winners: u32, xlm_pool: i12
 - `xlm_pool: i128`
 - `nft_enabled: bool`
 - `nft_contract: Option<Address>`
+- `caller: Address`
 
 **Returns:** `Result<(), HuntErrorCode>`
 
@@ -2606,6 +2842,8 @@ pub fn set_reward_config(env: Env, hunt_id: u64, max_winners: u32, xlm_pool: i12
 - `InvalidPoints` = 49
 - `HuntFull` = 50
 - `LeaderboardVisibilityUnauthorized` = 51
+- `InviteCodeRequired` = 52
+- `TooManyAliases` = 53
 
 ---
 
@@ -2682,6 +2920,8 @@ pub fn set_reward_manager(env: Env, admin: Address, reward_manager: Address) -> 
 - `InvalidPoints` = 49
 - `HuntFull` = 50
 - `LeaderboardVisibilityUnauthorized` = 51
+- `InviteCodeRequired` = 52
+- `TooManyAliases` = 53
 
 ---
 
@@ -2759,6 +2999,8 @@ pub fn blacklist_creator(env: Env, admin: Address, creator: Address) -> Result<(
 - `InvalidPoints` = 49
 - `HuntFull` = 50
 - `LeaderboardVisibilityUnauthorized` = 51
+- `InviteCodeRequired` = 52
+- `TooManyAliases` = 53
 
 ---
 
@@ -2836,6 +3078,8 @@ pub fn remove_from_blacklist(env: Env, admin: Address, creator: Address) -> Resu
 - `InvalidPoints` = 49
 - `HuntFull` = 50
 - `LeaderboardVisibilityUnauthorized` = 51
+- `InviteCodeRequired` = 52
+- `TooManyAliases` = 53
 
 ---
 
@@ -2958,6 +3202,8 @@ pub fn complete_hunt(env: Env, hunt_id: u64, player: Address) -> Result<(), Hunt
 - `InvalidPoints` = 49
 - `HuntFull` = 50
 - `LeaderboardVisibilityUnauthorized` = 51
+- `InviteCodeRequired` = 52
+- `TooManyAliases` = 53
 
 ---
 
@@ -2996,6 +3242,29 @@ duplicate registrations. Registration is only allowed while the hunt is active a
 * `InvalidHuntStatus` - Hunt is not in Active status
 * `HuntNotActive` - Hunt has ended (past end_time)
 * `DuplicateRegistration` - Player is already registered for this hunt
+Enforces `hunt.registration_deadline`, if the creator configured one.
+
+A deadline of `0` means "no deadline". The boundary is exclusive:
+registration is accepted through `deadline - 1` and refused from
+`deadline` onward.
+
+Shared by public and invite registration so a private hunt cannot be
+joined after its deadline while a public one is correctly refused.
+Applies the constraints shared by public and invite registration, then
+persists the player.
+
+Callers run their own pre-checks first — the public/invite split and the
+duplicate-registration rule genuinely differ between the two paths — and
+then delegate here so the capacity and deadline rules cannot drift apart.
+
+Order matters: every check runs before `save_player_progress`, so a
+rejected registration persists nothing. Within a single Soroban
+invocation the count read and the write are atomic, so the check-then-act
+sequence cannot interleave with another registration.
+Rejects registration when the hunt is already at `max_players`.
+
+A `max_players` of 0 means "unlimited", matching the other optional hunt
+limits.
 
 **Signature:**
 
@@ -3066,6 +3335,8 @@ pub fn register_player(env: Env, hunt_id: u64, player: Address) -> Result<(), Hu
 - `InvalidPoints` = 49
 - `HuntFull` = 50
 - `LeaderboardVisibilityUnauthorized` = 51
+- `InviteCodeRequired` = 52
+- `TooManyAliases` = 53
 
 ---
 
@@ -3162,6 +3433,8 @@ pub fn generate_invite_code(env: Env, hunt_id: u64, creator: Address, invite_cod
 - `InvalidPoints` = 49
 - `HuntFull` = 50
 - `LeaderboardVisibilityUnauthorized` = 51
+- `InviteCodeRequired` = 52
+- `TooManyAliases` = 53
 
 ---
 
@@ -3257,6 +3530,8 @@ pub fn set_hunt_privacy(env: Env, hunt_id: u64, creator: Address, is_private: bo
 - `InvalidPoints` = 49
 - `HuntFull` = 50
 - `LeaderboardVisibilityUnauthorized` = 51
+- `InviteCodeRequired` = 52
+- `TooManyAliases` = 53
 
 ---
 
@@ -3347,6 +3622,8 @@ pub fn revoke_invite_code(env: Env, hunt_id: u64, creator: Address) -> Result<()
 - `InvalidPoints` = 49
 - `HuntFull` = 50
 - `LeaderboardVisibilityUnauthorized` = 51
+- `InviteCodeRequired` = 52
+- `TooManyAliases` = 53
 
 ---
 
@@ -3430,6 +3707,8 @@ pub fn ban_player(env: Env, hunt_id: u64, caller: Address, player: Address) -> R
 - `InvalidPoints` = 49
 - `HuntFull` = 50
 - `LeaderboardVisibilityUnauthorized` = 51
+- `InviteCodeRequired` = 52
+- `TooManyAliases` = 53
 
 ---
 
@@ -3513,6 +3792,8 @@ pub fn unban_player(env: Env, hunt_id: u64, caller: Address, player: Address) ->
 - `InvalidPoints` = 49
 - `HuntFull` = 50
 - `LeaderboardVisibilityUnauthorized` = 51
+- `InviteCodeRequired` = 52
+- `TooManyAliases` = 53
 
 ---
 
@@ -3609,6 +3890,8 @@ pub fn register_with_invite(env: Env, hunt_id: u64, player: Address, invite_code
 - `InvalidPoints` = 49
 - `HuntFull` = 50
 - `LeaderboardVisibilityUnauthorized` = 51
+- `InviteCodeRequired` = 52
+- `TooManyAliases` = 53
 
 ---
 
@@ -3691,6 +3974,8 @@ pub fn preview_answer(env: Env, hunt_id: u64, clue_id: u32, player: Address, ans
 - `InvalidPoints` = 49
 - `HuntFull` = 50
 - `LeaderboardVisibilityUnauthorized` = 51
+- `InviteCodeRequired` = 52
+- `TooManyAliases` = 53
 
 ---
 
@@ -3713,13 +3998,6 @@ event and returns `Ok(false)`.
 # Returns
 `Ok(true)` if the answer is correct, `Ok(false)` if it is incorrect
 
-> An incorrect answer resolves rather than rejecting. A Soroban invocation that
-> returns an error rolls back every storage write and event it made, which would
-> discard the attempt count, the per-clue cooldown timestamp, the consumed
-> submission nonce and the `AnswerIncorrect` event, letting a player brute-force
-> answers without ever hitting the rate limit or attempt cap. This matches
-> `preview_answer`, which already reports a wrong answer as `Ok(false)`.
-
 # Errors
 * `HuntNotFound` - Hunt does not exist
 * `HuntNotActive` - Hunt is not currently active or has ended
@@ -3740,6 +4018,40 @@ event and returns `Ok(false)`.
 In team mode, returns true if any teammate has already completed this clue.
 In team mode, records a clue completion against the player's team so
 teammates see it as already solved and share the earned score.
+The single place where an answer submission is recorded in
+`progress.recent_submissions`.
+
+Prunes timestamps that have aged out of the 60-second window, refuses the
+submission when the window is already full, and otherwise appends
+`current_time` exactly once. A `max_submissions_per_minute` of
+`UNLIMITED_SUBMISSIONS_PER_MINUTE` (0) disables tracking entirely.
+
+Every entrypoint that consumes a submission — `submit_answer`,
+`submit_answer_with_hash` and `preview_answer` — must go through here.
+Recording in a caller as well would write two timestamps for one
+submission, which silently halves the effective rate limit.
+Applies the outcome of an evaluated answer.
+
+Returns `Ok(false)` for an incorrect answer and `Ok(true)` for a correct
+one. A wrong answer must NOT be signalled with `Err`: a Soroban
+invocation that returns an error rolls back every storage write and every
+event it made, which would discard the attempt count, the per-clue
+cooldown timestamp, the consumed submission nonce and the `AnswerIncorrect`
+event. Returning `Ok(false)` commits all of them, so the per-minute rate
+limit and the attempt cap actually bite instead of being reset by every
+wrong guess. This matches `preview_answer`, which already reports an
+incorrect answer as `Ok(false)`.
+
+`progress` is saved on both paths, so the caller must not save it again.
+Verifies a submitted answer, recording the attempt either way.
+
+# Returns
+`Ok(true)` when the answer is correct, `Ok(false)` when it is wrong.
+
+An incorrect answer is reported as `Ok(false)` rather than
+`Err(InvalidAnswer)` so that the failed attempt, the per-clue cooldown
+timestamp and the consumed submission nonce are committed instead of
+rolled back. See `finalize_answer_submission`.
 
 **Signature:**
 
@@ -3757,7 +4069,7 @@ pub fn submit_answer(env: Env, hunt_id: u64, clue_id: u32, player: Address, answ
 - `submission_nonce: u64`
 - `submitted_at: u64`
 
-**Returns:** `Result<(), HuntErrorCode>`
+**Returns:** `Result<bool, HuntErrorCode>`
 
 **Error type:** `HuntErrorCode`
 
@@ -3814,10 +4126,17 @@ pub fn submit_answer(env: Env, hunt_id: u64, clue_id: u32, player: Address, answ
 - `InvalidPoints` = 49
 - `HuntFull` = 50
 - `LeaderboardVisibilityUnauthorized` = 51
+- `InviteCodeRequired` = 52
+- `TooManyAliases` = 53
 
 ---
 
 #### `submit_answer_with_hash`
+
+Variant of `submit_answer` that accepts a precomputed SHA256 answer hash.
+
+Shares the incorrect-answer semantics of `submit_answer`: a wrong answer
+returns `Ok(false)` and commits the failed attempt.
 
 **Signature:**
 
@@ -3835,7 +4154,7 @@ pub fn submit_answer_with_hash(env: Env, hunt_id: u64, clue_id: u32, player: Add
 - `submission_nonce: u64`
 - `submitted_at: u64`
 
-**Returns:** `Result<(), HuntErrorCode>`
+**Returns:** `Result<bool, HuntErrorCode>`
 
 **Error type:** `HuntErrorCode`
 
@@ -3892,6 +4211,8 @@ pub fn submit_answer_with_hash(env: Env, hunt_id: u64, clue_id: u32, player: Add
 - `InvalidPoints` = 49
 - `HuntFull` = 50
 - `LeaderboardVisibilityUnauthorized` = 51
+- `InviteCodeRequired` = 52
+- `TooManyAliases` = 53
 
 ---
 
@@ -3979,6 +4300,8 @@ pub fn get_player_progress(env: Env, hunt_id: u64, player: Address) -> Result<Pl
 - `InvalidPoints` = 49
 - `HuntFull` = 50
 - `LeaderboardVisibilityUnauthorized` = 51
+- `InviteCodeRequired` = 52
+- `TooManyAliases` = 53
 
 ---
 
@@ -4130,6 +4453,8 @@ pub fn get_hunt_leaderboard(env: Env, hunt_id: u64, limit: u32) -> Result<Leader
 - `InvalidPoints` = 49
 - `HuntFull` = 50
 - `LeaderboardVisibilityUnauthorized` = 51
+- `InviteCodeRequired` = 52
+- `TooManyAliases` = 53
 
 ---
 
@@ -4215,6 +4540,8 @@ pub fn get_hunt_leaderboard_window(env: Env, hunt_id: u64, start_index: u32, win
 - `InvalidPoints` = 49
 - `HuntFull` = 50
 - `LeaderboardVisibilityUnauthorized` = 51
+- `InviteCodeRequired` = 52
+- `TooManyAliases` = 53
 
 ---
 
@@ -4292,6 +4619,8 @@ pub fn get_hunt_statistics(env: Env, hunt_id: u64) -> Result<HuntStatistics, Hun
 - `InvalidPoints` = 49
 - `HuntFull` = 50
 - `LeaderboardVisibilityUnauthorized` = 51
+- `InviteCodeRequired` = 52
+- `TooManyAliases` = 53
 
 ---
 
@@ -4367,6 +4696,8 @@ pub fn add_view_only_access(env: Env, hunt_id: u64, creator: Address, viewer: Ad
 - `InvalidPoints` = 49
 - `HuntFull` = 50
 - `LeaderboardVisibilityUnauthorized` = 51
+- `InviteCodeRequired` = 52
+- `TooManyAliases` = 53
 
 ---
 
@@ -4442,6 +4773,8 @@ pub fn remove_view_only_access(env: Env, hunt_id: u64, creator: Address, viewer:
 - `InvalidPoints` = 49
 - `HuntFull` = 50
 - `LeaderboardVisibilityUnauthorized` = 51
+- `InviteCodeRequired` = 52
+- `TooManyAliases` = 53
 
 ---
 
@@ -4554,6 +4887,8 @@ pub fn add_co_creator(env: Env, hunt_id: u64, creator: Address, new_co_creator: 
 - `InvalidPoints` = 49
 - `HuntFull` = 50
 - `LeaderboardVisibilityUnauthorized` = 51
+- `InviteCodeRequired` = 52
+- `TooManyAliases` = 53
 
 ---
 
@@ -4629,6 +4964,8 @@ pub fn remove_co_creator(env: Env, hunt_id: u64, creator: Address, co_creator_to
 - `InvalidPoints` = 49
 - `HuntFull` = 50
 - `LeaderboardVisibilityUnauthorized` = 51
+- `InviteCodeRequired` = 52
+- `TooManyAliases` = 53
 
 ---
 
@@ -4727,6 +5064,8 @@ pub fn propose_new_admin(env: Env, admin: Address, new_admin: Address) -> Result
 - `InvalidPoints` = 49
 - `HuntFull` = 50
 - `LeaderboardVisibilityUnauthorized` = 51
+- `InviteCodeRequired` = 52
+- `TooManyAliases` = 53
 
 ---
 
@@ -4806,6 +5145,8 @@ pub fn accept_admin(env: Env, new_admin: Address) -> Result<(), HuntErrorCode>
 - `InvalidPoints` = 49
 - `HuntFull` = 50
 - `LeaderboardVisibilityUnauthorized` = 51
+- `InviteCodeRequired` = 52
+- `TooManyAliases` = 53
 
 ---
 
@@ -4880,6 +5221,8 @@ pub fn add_global_view_only(env: Env, admin: Address, viewer: Address) -> Result
 - `InvalidPoints` = 49
 - `HuntFull` = 50
 - `LeaderboardVisibilityUnauthorized` = 51
+- `InviteCodeRequired` = 52
+- `TooManyAliases` = 53
 
 ---
 
@@ -4954,6 +5297,8 @@ pub fn remove_global_view_only(env: Env, admin: Address, viewer: Address) -> Res
 - `InvalidPoints` = 49
 - `HuntFull` = 50
 - `LeaderboardVisibilityUnauthorized` = 51
+- `InviteCodeRequired` = 52
+- `TooManyAliases` = 53
 
 ---
 
@@ -5062,6 +5407,8 @@ pub fn pause_registrations(env: Env, admin: Address) -> Result<(), HuntErrorCode
 - `InvalidPoints` = 49
 - `HuntFull` = 50
 - `LeaderboardVisibilityUnauthorized` = 51
+- `InviteCodeRequired` = 52
+- `TooManyAliases` = 53
 
 ---
 
@@ -5135,6 +5482,8 @@ pub fn unpause_registrations(env: Env, admin: Address) -> Result<(), HuntErrorCo
 - `InvalidPoints` = 49
 - `HuntFull` = 50
 - `LeaderboardVisibilityUnauthorized` = 51
+- `InviteCodeRequired` = 52
+- `TooManyAliases` = 53
 
 ---
 
@@ -5208,6 +5557,8 @@ pub fn pause_answers(env: Env, admin: Address) -> Result<(), HuntErrorCode>
 - `InvalidPoints` = 49
 - `HuntFull` = 50
 - `LeaderboardVisibilityUnauthorized` = 51
+- `InviteCodeRequired` = 52
+- `TooManyAliases` = 53
 
 ---
 
@@ -5281,6 +5632,8 @@ pub fn unpause_answers(env: Env, admin: Address) -> Result<(), HuntErrorCode>
 - `InvalidPoints` = 49
 - `HuntFull` = 50
 - `LeaderboardVisibilityUnauthorized` = 51
+- `InviteCodeRequired` = 52
+- `TooManyAliases` = 53
 
 ---
 
@@ -5354,6 +5707,8 @@ pub fn pause_rewards(env: Env, admin: Address) -> Result<(), HuntErrorCode>
 - `InvalidPoints` = 49
 - `HuntFull` = 50
 - `LeaderboardVisibilityUnauthorized` = 51
+- `InviteCodeRequired` = 52
+- `TooManyAliases` = 53
 
 ---
 
@@ -5427,6 +5782,8 @@ pub fn unpause_rewards(env: Env, admin: Address) -> Result<(), HuntErrorCode>
 - `InvalidPoints` = 49
 - `HuntFull` = 50
 - `LeaderboardVisibilityUnauthorized` = 51
+- `InviteCodeRequired` = 52
+- `TooManyAliases` = 53
 
 ---
 
@@ -5642,6 +5999,8 @@ pub fn set_rate_limit_admin(env: Env, caller: Address, new_admin: Address) -> Re
 - `InvalidPoints` = 49
 - `HuntFull` = 50
 - `LeaderboardVisibilityUnauthorized` = 51
+- `InviteCodeRequired` = 52
+- `TooManyAliases` = 53
 
 ---
 
@@ -5722,6 +6081,8 @@ pub fn set_creator_hunt_limit(env: Env, caller: Address, creator: Address, limit
 - `InvalidPoints` = 49
 - `HuntFull` = 50
 - `LeaderboardVisibilityUnauthorized` = 51
+- `InviteCodeRequired` = 52
+- `TooManyAliases` = 53
 
 ---
 
@@ -5801,6 +6162,8 @@ pub fn set_default_hunt_creation_limit(env: Env, caller: Address, limit: u32) ->
 - `InvalidPoints` = 49
 - `HuntFull` = 50
 - `LeaderboardVisibilityUnauthorized` = 51
+- `InviteCodeRequired` = 52
+- `TooManyAliases` = 53
 
 ---
 
@@ -5834,6 +6197,29 @@ _No contract API functions found._
 ## `nft-reward` Contract
 
 ### `NftReward`
+
+#### `__constructor`
+
+Constructor - runs atomically during deployment.
+Prevents front-running by initializing during deploy transaction.
+
+**Signature:**
+
+```rust
+pub fn __constructor(env: Env, admin: Address, minter: Address, max_supply: Option<u64>, metadata: CollectionMetadata) -> ()
+```
+
+**Parameters:**
+
+- `env: Env`
+- `admin: Address`
+- `minter: Address`
+- `max_supply: Option<u64>`
+- `metadata: CollectionMetadata`
+
+**Returns:** `()`
+
+---
 
 #### `initialize`
 
@@ -6216,13 +6602,47 @@ pub fn transfer(env: Env, _from: Address, _to: Address, _amount: i128) -> ()
 
 ### `RewardManager`
 
-#### `initialize`
+#### `__constructor`
 
-Returns true when HuntyCore reports the hunt as terminal (cancelled or completed).
+Returns HuntyCore's `HuntStatus` discriminant for `hunt_id` by calling
+`get_hunt_info` and decoding its `status` field generically as a
+`Map<Symbol, Val>`, so reward-manager never needs to depend on
+hunty-core's `Hunt` type directly. Returns `None` if the hunt does not
+exist or the response cannot be decoded.
+
+HuntStatus discriminants (see contracts/hunty-core/src/types.rs):
+Draft=0, Active=1, Completed=2, Cancelled=3, Paused=4,
+EmergencyStopped=5, Archived=6.
+Returns true when HuntyCore reports the hunt as terminal: Completed,
+Cancelled, EmergencyStopped, or Archived. Draft, Active, and Paused
+are not terminal — a paused hunt may still resume.
 Current semantic version of this contract.
 Minimum NftReward version this contract requires.
+Constructor - runs atomically during deployment.
+Prevents front-running by initializing during deploy transaction.
+
+**Signature:**
+
+```rust
+pub fn __constructor(env: Env, admin: Address, xlm_token: Address, hunty_core: Address) -> ()
+```
+
+**Parameters:**
+
+- `env: Env`
+- `admin: Address`
+- `xlm_token: Address`
+- `hunty_core: Address`
+
+**Returns:** `()`
+
+---
+
+#### `initialize`
+
 Initializes the RewardManager with the XLM token contract address (SAC).
-Must be called once before any reward distribution.
+Must be called once before any reward distribution. Rejects a second
+call with `AlreadyInitialized`.
 
 **Signature:**
 
@@ -6283,6 +6703,7 @@ pub fn initialize(env: Env, admin: Address, xlm_token: Address, hunty_core: Addr
 - `DistributionPaused` = 2038
 - `TooManyFunders` = 2039
 - `InvalidHuntStatus` = 2040
+- `HuntLocked` = 2043 - Payout settings (tiers, NFT contract, distribution mode, vesting) can only be changed while the hunt is still a Draft. Once the hunt is Active (or in any other non-Draft state), this error is returned to prevent a creator from altering rewards after players have already competed.
 
 ---
 
@@ -6348,6 +6769,7 @@ pub fn propose_new_admin(env: Env, admin: Address, new_admin: Address) -> Result
 - `DistributionPaused` = 2038
 - `TooManyFunders` = 2039
 - `InvalidHuntStatus` = 2040
+- `HuntLocked` = 2043 - Payout settings (tiers, NFT contract, distribution mode, vesting) can only be changed while the hunt is still a Draft. Once the hunt is Active (or in any other non-Draft state), this error is returned to prevent a creator from altering rewards after players have already competed.
 
 ---
 
@@ -6412,6 +6834,7 @@ pub fn accept_admin(env: Env, new_admin: Address) -> Result<(), RewardErrorCode>
 - `DistributionPaused` = 2038
 - `TooManyFunders` = 2039
 - `InvalidHuntStatus` = 2040
+- `HuntLocked` = 2043 - Payout settings (tiers, NFT contract, distribution mode, vesting) can only be changed while the hunt is still a Draft. Once the hunt is Active (or in any other non-Draft state), this error is returned to prevent a creator from altering rewards after players have already competed.
 
 ---
 
@@ -6479,6 +6902,7 @@ pub fn set_nft_reward_contract(env: Env, admin: Address, nft_contract: Address) 
 - `DistributionPaused` = 2038
 - `TooManyFunders` = 2039
 - `InvalidHuntStatus` = 2040
+- `HuntLocked` = 2043 - Payout settings (tiers, NFT contract, distribution mode, vesting) can only be changed while the hunt is still a Draft. Once the hunt is Active (or in any other non-Draft state), this error is returned to prevent a creator from altering rewards after players have already competed.
 
 ---
 
@@ -6546,6 +6970,7 @@ pub fn set_hunty_core(env: Env, admin: Address, hunty_core: Address) -> Result<(
 - `DistributionPaused` = 2038
 - `TooManyFunders` = 2039
 - `InvalidHuntStatus` = 2040
+- `HuntLocked` = 2043 - Payout settings (tiers, NFT contract, distribution mode, vesting) can only be changed while the hunt is still a Draft. Once the hunt is Active (or in any other non-Draft state), this error is returned to prevent a creator from altering rewards after players have already competed.
 
 ---
 
@@ -6612,6 +7037,7 @@ pub fn add_authorized_contract(env: Env, admin: Address, contract: Address) -> R
 - `DistributionPaused` = 2038
 - `TooManyFunders` = 2039
 - `InvalidHuntStatus` = 2040
+- `HuntLocked` = 2043 - Payout settings (tiers, NFT contract, distribution mode, vesting) can only be changed while the hunt is still a Draft. Once the hunt is Active (or in any other non-Draft state), this error is returned to prevent a creator from altering rewards after players have already competed.
 
 ---
 
@@ -6678,6 +7104,7 @@ pub fn remove_authorized_contract(env: Env, admin: Address, contract: Address) -
 - `DistributionPaused` = 2038
 - `TooManyFunders` = 2039
 - `InvalidHuntStatus` = 2040
+- `HuntLocked` = 2043 - Payout settings (tiers, NFT contract, distribution mode, vesting) can only be changed while the hunt is still a Draft. Once the hunt is Active (or in any other non-Draft state), this error is returned to prevent a creator from altering rewards after players have already competed.
 
 ---
 
@@ -6772,6 +7199,7 @@ pub fn create_reward_pool_with_nft(env: Env, creator: Address, hunt_id: u64, tok
 - `DistributionPaused` = 2038
 - `TooManyFunders` = 2039
 - `InvalidHuntStatus` = 2040
+- `HuntLocked` = 2043 - Payout settings (tiers, NFT contract, distribution mode, vesting) can only be changed while the hunt is still a Draft. Once the hunt is Active (or in any other non-Draft state), this error is returned to prevent a creator from altering rewards after players have already competed.
 
 ---
 
@@ -6860,6 +7288,7 @@ pub fn create_reward_pool(env: Env, creator: Address, hunt_id: u64, token_addres
 - `DistributionPaused` = 2038
 - `TooManyFunders` = 2039
 - `InvalidHuntStatus` = 2040
+- `HuntLocked` = 2043 - Payout settings (tiers, NFT contract, distribution mode, vesting) can only be changed while the hunt is still a Draft. Once the hunt is Active (or in any other non-Draft state), this error is returned to prevent a creator from altering rewards after players have already competed.
 
 ---
 
@@ -6940,6 +7369,7 @@ pub fn update_pool_config(env: Env, creator: Address, hunt_id: u64, min_distribu
 - `DistributionPaused` = 2038
 - `TooManyFunders` = 2039
 - `InvalidHuntStatus` = 2040
+- `HuntLocked` = 2043 - Payout settings (tiers, NFT contract, distribution mode, vesting) can only be changed while the hunt is still a Draft. Once the hunt is Active (or in any other non-Draft state), this error is returned to prevent a creator from altering rewards after players have already competed.
 
 ---
 
@@ -7007,6 +7437,7 @@ pub fn set_pool_target_amount(env: Env, creator: Address, hunt_id: u64, target_a
 - `DistributionPaused` = 2038
 - `TooManyFunders` = 2039
 - `InvalidHuntStatus` = 2040
+- `HuntLocked` = 2043 - Payout settings (tiers, NFT contract, distribution mode, vesting) can only be changed while the hunt is still a Draft. Once the hunt is Active (or in any other non-Draft state), this error is returned to prevent a creator from altering rewards after players have already competed.
 
 ---
 
@@ -7073,6 +7504,7 @@ pub fn set_min_distribution_interval(env: Env, creator: Address, hunt_id: u64, m
 - `DistributionPaused` = 2038
 - `TooManyFunders` = 2039
 - `InvalidHuntStatus` = 2040
+- `HuntLocked` = 2043 - Payout settings (tiers, NFT contract, distribution mode, vesting) can only be changed while the hunt is still a Draft. Once the hunt is Active (or in any other non-Draft state), this error is returned to prevent a creator from altering rewards after players have already competed.
 
 ---
 
@@ -7139,6 +7571,7 @@ pub fn set_distribution_mode(env: Env, creator: Address, hunt_id: u64, mode: Dis
 - `DistributionPaused` = 2038
 - `TooManyFunders` = 2039
 - `InvalidHuntStatus` = 2040
+- `HuntLocked` = 2043 - Payout settings (tiers, NFT contract, distribution mode, vesting) can only be changed while the hunt is still a Draft. Once the hunt is Active (or in any other non-Draft state), this error is returned to prevent a creator from altering rewards after players have already competed.
 
 ---
 
@@ -7229,6 +7662,7 @@ pub fn set_pool_tiers(env: Env, creator: Address, hunt_id: u64, time_based_tiers
 - `DistributionPaused` = 2038
 - `TooManyFunders` = 2039
 - `InvalidHuntStatus` = 2040
+- `HuntLocked` = 2043 - Payout settings (tiers, NFT contract, distribution mode, vesting) can only be changed while the hunt is still a Draft. Once the hunt is Active (or in any other non-Draft state), this error is returned to prevent a creator from altering rewards after players have already competed.
 
 ---
 
@@ -7310,6 +7744,7 @@ pub fn set_pool_rank_tiers(env: Env, creator: Address, hunt_id: u64, rank_based_
 - `DistributionPaused` = 2038
 - `TooManyFunders` = 2039
 - `InvalidHuntStatus` = 2040
+- `HuntLocked` = 2043 - Payout settings (tiers, NFT contract, distribution mode, vesting) can only be changed while the hunt is still a Draft. Once the hunt is Active (or in any other non-Draft state), this error is returned to prevent a creator from altering rewards after players have already competed.
 
 ---
 
@@ -7386,6 +7821,7 @@ pub fn set_pool_nft_contract(env: Env, creator: Address, hunt_id: u64, nft_contr
 - `DistributionPaused` = 2038
 - `TooManyFunders` = 2039
 - `InvalidHuntStatus` = 2040
+- `HuntLocked` = 2043 - Payout settings (tiers, NFT contract, distribution mode, vesting) can only be changed while the hunt is still a Draft. Once the hunt is Active (or in any other non-Draft state), this error is returned to prevent a creator from altering rewards after players have already competed.
 
 ---
 
@@ -7453,6 +7889,7 @@ pub fn add_delegate(env: Env, creator: Address, hunt_id: u64, delegate: Address)
 - `DistributionPaused` = 2038
 - `TooManyFunders` = 2039
 - `InvalidHuntStatus` = 2040
+- `HuntLocked` = 2043 - Payout settings (tiers, NFT contract, distribution mode, vesting) can only be changed while the hunt is still a Draft. Once the hunt is Active (or in any other non-Draft state), this error is returned to prevent a creator from altering rewards after players have already competed.
 
 ---
 
@@ -7520,6 +7957,7 @@ pub fn remove_delegate(env: Env, creator: Address, hunt_id: u64, delegate: Addre
 - `DistributionPaused` = 2038
 - `TooManyFunders` = 2039
 - `InvalidHuntStatus` = 2040
+- `HuntLocked` = 2043 - Payout settings (tiers, NFT contract, distribution mode, vesting) can only be changed while the hunt is still a Draft. Once the hunt is Active (or in any other non-Draft state), this error is returned to prevent a creator from altering rewards after players have already competed.
 
 ---
 
@@ -7656,6 +8094,7 @@ pub fn fund_reward_pool(env: Env, funder: Address, hunt_id: u64, amount: i128) -
 - `DistributionPaused` = 2038
 - `TooManyFunders` = 2039
 - `InvalidHuntStatus` = 2040
+- `HuntLocked` = 2043 - Payout settings (tiers, NFT contract, distribution mode, vesting) can only be changed while the hunt is still a Draft. Once the hunt is Active (or in any other non-Draft state), this error is returned to prevent a creator from altering rewards after players have already competed.
 
 ---
 
@@ -7759,6 +8198,7 @@ pub fn refund_pool(env: Env, creator: Address, hunt_id: u64) -> Result<(), Rewar
 - `DistributionPaused` = 2038
 - `TooManyFunders` = 2039
 - `InvalidHuntStatus` = 2040
+- `HuntLocked` = 2043 - Payout settings (tiers, NFT contract, distribution mode, vesting) can only be changed while the hunt is still a Draft. Once the hunt is Active (or in any other non-Draft state), this error is returned to prevent a creator from altering rewards after players have already competed.
 
 ---
 
@@ -7779,6 +8219,20 @@ source cannot be shown eligible and migration is rejected.
 * The **destination pool must already exist** (created via
 `create_reward_pool`).
 * **Both pools must have the same creator**, who must authorize the call.
+* **Both pools must use the same token.**
+
+# Accounting
+After a successful migration the following identities hold:
+
+**Source pool:**
+`total_deposited == balance(0) + total_distributed + total_refunded + total_migrated_out`
+
+**Destination pool:**
+`total_deposited == balance + total_distributed + total_refunded + total_migrated_out(0)`
+
+`total_migrated_out` on the source is incremented by the migrated
+amount so that `get_reward_pool` on the source never shows funds that
+have "disappeared" without explanation.
 
 # Arguments
 * `creator` - The shared creator of both pools (must authorize the call)
@@ -7789,8 +8243,8 @@ source cannot be shown eligible and migration is rejected.
 The amount of XLM migrated from the source pool to the destination pool.
 
 # Errors
-* `InvalidMigration` - source and destination are the same hunt, or the
-source pool has no balance to migrate
+* `InvalidMigration` - source and destination are the same hunt, use
+different tokens, or the source pool has no balance to migrate
 * `PoolNotFound` - the source pool does not exist
 * `DestinationPoolNotFound` - the destination pool does not exist
 * `Unauthorized` - the caller does not own both pools
@@ -7858,6 +8312,7 @@ pub fn migrate_pool(env: Env, creator: Address, source_hunt_id: u64, dest_hunt_i
 - `DistributionPaused` = 2038
 - `TooManyFunders` = 2039
 - `InvalidHuntStatus` = 2040
+- `HuntLocked` = 2043 - Payout settings (tiers, NFT contract, distribution mode, vesting) can only be changed while the hunt is still a Draft. Once the hunt is Active (or in any other non-Draft state), this error is returned to prevent a creator from altering rewards after players have already competed.
 
 ---
 
@@ -8054,6 +8509,7 @@ pub fn freeze_pool(env: Env, caller: Address, hunt_id: u64) -> Result<(), Reward
 - `DistributionPaused` = 2038
 - `TooManyFunders` = 2039
 - `InvalidHuntStatus` = 2040
+- `HuntLocked` = 2043 - Payout settings (tiers, NFT contract, distribution mode, vesting) can only be changed while the hunt is still a Draft. Once the hunt is Active (or in any other non-Draft state), this error is returned to prevent a creator from altering rewards after players have already competed.
 
 ---
 
@@ -8136,6 +8592,7 @@ pub fn unfreeze_pool(env: Env, caller: Address, hunt_id: u64) -> Result<(), Rewa
 - `DistributionPaused` = 2038
 - `TooManyFunders` = 2039
 - `InvalidHuntStatus` = 2040
+- `HuntLocked` = 2043 - Payout settings (tiers, NFT contract, distribution mode, vesting) can only be changed while the hunt is still a Draft. Once the hunt is Active (or in any other non-Draft state), this error is returned to prevent a creator from altering rewards after players have already competed.
 
 ---
 
@@ -8241,6 +8698,7 @@ pub fn set_daily_pool_cap(env: Env, admin: Address, hunt_id: u64, cap: i128) -> 
 - `DistributionPaused` = 2038
 - `TooManyFunders` = 2039
 - `InvalidHuntStatus` = 2040
+- `HuntLocked` = 2043 - Payout settings (tiers, NFT contract, distribution mode, vesting) can only be changed while the hunt is still a Draft. Once the hunt is Active (or in any other non-Draft state), this error is returned to prevent a creator from altering rewards after players have already competed.
 
 ---
 
@@ -8304,6 +8762,7 @@ pub fn set_daily_global_cap(env: Env, admin: Address, cap: i128) -> Result<(), R
 - `DistributionPaused` = 2038
 - `TooManyFunders` = 2039
 - `InvalidHuntStatus` = 2040
+- `HuntLocked` = 2043 - Payout settings (tiers, NFT contract, distribution mode, vesting) can only be changed while the hunt is still a Draft. Once the hunt is Active (or in any other non-Draft state), this error is returned to prevent a creator from altering rewards after players have already competed.
 
 ---
 
@@ -8319,15 +8778,20 @@ Legacy entrypoint retained for existing integrations. New contract
 integrations should use `distribute_rewards_authorized`, which carries
 and authenticates the calling contract explicitly.
 
+Authorization is fail-closed: the caller must be an authorized
+distributor (see `add_authorized_contract`). Unauthorized callers
+receive `Unauthorized`.
+
 **Signature:**
 
 ```rust
-pub fn distribute_rewards(env: Env, hunt_id: u64, player_address: Address, reward_config: RewardConfig) -> Result<(), RewardErrorCode>
+pub fn distribute_rewards(env: Env, caller: Address, hunt_id: u64, player_address: Address, reward_config: RewardConfig) -> Result<(), RewardErrorCode>
 ```
 
 **Parameters:**
 
 - `env: Env`
+- `caller: Address`
 - `hunt_id: u64`
 - `player_address: Address`
 - `reward_config: RewardConfig`
@@ -8378,6 +8842,7 @@ pub fn distribute_rewards(env: Env, hunt_id: u64, player_address: Address, rewar
 - `DistributionPaused` = 2038
 - `TooManyFunders` = 2039
 - `InvalidHuntStatus` = 2040
+- `HuntLocked` = 2043 - Payout settings (tiers, NFT contract, distribution mode, vesting) can only be changed while the hunt is still a Draft. Once the hunt is Active (or in any other non-Draft state), this error is returned to prevent a creator from altering rewards after players have already competed.
 
 ---
 
@@ -8445,6 +8910,7 @@ pub fn distribute_rewards_authorized(env: Env, caller: Address, hunt_id: u64, pl
 - `DistributionPaused` = 2038
 - `TooManyFunders` = 2039
 - `InvalidHuntStatus` = 2040
+- `HuntLocked` = 2043 - Payout settings (tiers, NFT contract, distribution mode, vesting) can only be changed while the hunt is still a Draft. Once the hunt is Active (or in any other non-Draft state), this error is returned to prevent a creator from altering rewards after players have already competed.
 
 ---
 
@@ -8544,6 +9010,7 @@ pub fn distribute_batch(env: Env, distributions: Vec<BatchDistributionEntry>) ->
 - `DistributionPaused` = 2038
 - `TooManyFunders` = 2039
 - `InvalidHuntStatus` = 2040
+- `HuntLocked` = 2043 - Payout settings (tiers, NFT contract, distribution mode, vesting) can only be changed while the hunt is still a Draft. Once the hunt is Active (or in any other non-Draft state), this error is returned to prevent a creator from altering rewards after players have already competed.
 
 ---
 
@@ -8609,6 +9076,7 @@ pub fn distribute_batch_authorized(env: Env, caller: Address, distributions: Vec
 - `DistributionPaused` = 2038
 - `TooManyFunders` = 2039
 - `InvalidHuntStatus` = 2040
+- `HuntLocked` = 2043 - Payout settings (tiers, NFT contract, distribution mode, vesting) can only be changed while the hunt is still a Draft. Once the hunt is Active (or in any other non-Draft state), this error is returned to prevent a creator from altering rewards after players have already competed.
 
 ---
 
@@ -8617,11 +9085,15 @@ pub fn distribute_batch_authorized(env: Env, caller: Address, distributions: Vec
 Retries a failed NFT mint for a previously distributed reward.
 
 When NFT minting fails during `distribute_rewards`, the failure is logged
-and the pending mint data is stored. This function allows the admin to
-retry the failed NFT mint and update the distribution record.
+and the pending mint data is stored. This function allows the player
+(or anyone paying the transaction fee on behalf of the player) to
+retry the failed NFT mint and update the distribution record. The
+successfully minted NFT is always sent to the `player` address
+recorded in the pending mint, regardless of who calls this function.
 
 # Arguments
-* `admin` - The contract admin address
+* `caller` - The address signing the transaction (any address; NFT is
+still delivered to the `player` recorded in the pending mint)
 * `hunt_id` - The hunt associated with the failed NFT mint
 * `player` - The player who should receive the NFT
 
@@ -8629,21 +9101,20 @@ retry the failed NFT mint and update the distribution record.
 The NFT ID of the successfully minted NFT
 
 # Errors
-* `NotInitialized` - Contract not initialized
-* `Unauthorized` - Caller is not the contract admin
 * `NftMintPendingNotFound` - No pending failed NFT mint for this hunt/player
+* `PoolNotFound` - No pool config exists for this hunt_id
 * `NftMintFailed` - NFT mint attempt failed again
 
 **Signature:**
 
 ```rust
-pub fn retry_failed_nft_mint(env: Env, admin: Address, hunt_id: u64, player: Address) -> Result<u64, RewardErrorCode>
+pub fn retry_failed_nft_mint(env: Env, caller: Address, hunt_id: u64, player: Address) -> Result<u64, RewardErrorCode>
 ```
 
 **Parameters:**
 
 - `env: Env`
-- `admin: Address`
+- `caller: Address`
 - `hunt_id: u64`
 - `player: Address`
 
@@ -8693,6 +9164,40 @@ pub fn retry_failed_nft_mint(env: Env, admin: Address, hunt_id: u64, player: Add
 - `DistributionPaused` = 2038
 - `TooManyFunders` = 2039
 - `InvalidHuntStatus` = 2040
+- `HuntLocked` = 2043 - Payout settings (tiers, NFT contract, distribution mode, vesting) can only be changed while the hunt is still a Draft. Once the hunt is Active (or in any other non-Draft state), this error is returned to prevent a creator from altering rewards after players have already competed.
+
+---
+
+#### `list_pending_nft_mints`
+
+Returns a paginated list of all pending failed NFT mints across the
+entire contract.
+
+Each entry contains the full mint metadata (hunt, player, NFT contract,
+rarity, etc.) so callers can identify which mints need to be retried.
+
+# Arguments
+* `offset` - Starting index for pagination (0-based)
+* `limit` - Maximum number of entries to return
+
+# Returns
+A `Vec<PendingNftMint>` of pending mint entries, up to `limit` entries
+starting from `offset`. Returns an empty `Vec` when `offset` is beyond
+the end of the list or when no pending mints exist.
+
+**Signature:**
+
+```rust
+pub fn list_pending_nft_mints(env: Env, offset: u32, limit: u32) -> Vec<PendingNftMint>
+```
+
+**Parameters:**
+
+- `env: Env`
+- `offset: u32`
+- `limit: u32`
+
+**Returns:** `Vec<PendingNftMint>`
 
 ---
 
@@ -8758,12 +9263,13 @@ The legacy path is not a bypass vector.
 **Signature:**
 
 ```rust
-pub fn distribute_rewards_legacy(env: Env, player: Address, hunt_id: u64, xlm_amount: i128, _nft_enabled: bool, // ignored: NFT not supported on legacy path) -> bool
+pub fn distribute_rewards_legacy(env: Env, caller: Address, player: Address, hunt_id: u64, xlm_amount: i128, _nft_enabled: bool, // ignored: NFT not supported on legacy path) -> bool
 ```
 
 **Parameters:**
 
 - `env: Env`
+- `caller: Address`
 - `player: Address`
 - `hunt_id: u64`
 - `xlm_amount: i128`
@@ -8874,12 +9380,13 @@ Returns the XLM amount distributed.
 **Signature:**
 
 ```rust
-pub fn distribute_proportional(env: Env, hunt_id: u64, player: Address, player_score: u64, total_scores: u64) -> Result<i128, RewardErrorCode>
+pub fn distribute_proportional(env: Env, caller: Address, hunt_id: u64, player: Address, player_score: u64, total_scores: u64) -> Result<i128, RewardErrorCode>
 ```
 
 **Parameters:**
 
 - `env: Env`
+- `caller: Address`
 - `hunt_id: u64`
 - `player: Address`
 - `player_score: u64`
@@ -8931,6 +9438,7 @@ pub fn distribute_proportional(env: Env, hunt_id: u64, player: Address, player_s
 - `DistributionPaused` = 2038
 - `TooManyFunders` = 2039
 - `InvalidHuntStatus` = 2040
+- `HuntLocked` = 2043 - Payout settings (tiers, NFT contract, distribution mode, vesting) can only be changed while the hunt is still a Draft. Once the hunt is Active (or in any other non-Draft state), this error is returned to prevent a creator from altering rewards after players have already competed.
 
 ---
 
@@ -9073,6 +9581,7 @@ pub fn set_vesting_period_secs(env: Env, creator: Address, hunt_id: u64, vesting
 - `DistributionPaused` = 2038
 - `TooManyFunders` = 2039
 - `InvalidHuntStatus` = 2040
+- `HuntLocked` = 2043 - Payout settings (tiers, NFT contract, distribution mode, vesting) can only be changed while the hunt is still a Draft. Once the hunt is Active (or in any other non-Draft state), this error is returned to prevent a creator from altering rewards after players have already competed.
 
 ---
 
@@ -9157,6 +9666,7 @@ pub fn claim_vested(env: Env, player: Address, hunt_id: u64) -> Result<i128, Rew
 - `DistributionPaused` = 2038
 - `TooManyFunders` = 2039
 - `InvalidHuntStatus` = 2040
+- `HuntLocked` = 2043 - Payout settings (tiers, NFT contract, distribution mode, vesting) can only be changed while the hunt is still a Draft. Once the hunt is Active (or in any other non-Draft state), this error is returned to prevent a creator from altering rewards after players have already competed.
 
 ---
 
@@ -9263,6 +9773,7 @@ pub fn admin_resolve_distribution(env: Env, admin: Address, hunt_id: u64, player
 - `DistributionPaused` = 2038
 - `TooManyFunders` = 2039
 - `InvalidHuntStatus` = 2040
+- `HuntLocked` = 2043 - Payout settings (tiers, NFT contract, distribution mode, vesting) can only be changed while the hunt is still a Draft. Once the hunt is Active (or in any other non-Draft state), this error is returned to prevent a creator from altering rewards after players have already competed.
 
 ---
 
@@ -9383,7 +9894,8 @@ still be mid-game. When HuntyCore is configured, the hunt status is verified.
 * `Unauthorized` - Caller is not the contract admin
 * `PoolNotFound` - No pool exists for this hunt_id
 * `InvalidAmount` - Amount is <= 0, or exceeds the available pool balance
-* `SourcePoolNotEligible` - Hunt is still active (not ended or cancelled)
+* `InvalidHuntStatus` - Hunt has not reached a terminal status (only
+checked when HuntyCore is configured)
 
 **Signature:**
 
@@ -9445,6 +9957,7 @@ pub fn admin_withdraw_unclaimed(env: Env, admin: Address, hunt_id: u64, recipien
 - `DistributionPaused` = 2038
 - `TooManyFunders` = 2039
 - `InvalidHuntStatus` = 2040
+- `HuntLocked` = 2043 - Payout settings (tiers, NFT contract, distribution mode, vesting) can only be changed while the hunt is still a Draft. Once the hunt is Active (or in any other non-Draft state), this error is returned to prevent a creator from altering rewards after players have already competed.
 
 ---
 
@@ -9470,7 +9983,8 @@ still be mid-game. When HuntyCore is configured, the hunt status is verified.
 * `Unauthorized` - Caller is not the contract admin
 * `PoolNotFound` - No pool exists for this hunt_id
 * `InvalidAmount` - Pool balance is zero (nothing to withdraw)
-* `SourcePoolNotEligible` - Hunt is still active (not ended or cancelled)
+* `InvalidHuntStatus` - Hunt has not reached a terminal status (only
+checked when HuntyCore is configured)
 
 **Signature:**
 
@@ -9531,6 +10045,7 @@ pub fn admin_withdraw_all(env: Env, admin: Address, hunt_id: u64, recipient: Add
 - `DistributionPaused` = 2038
 - `TooManyFunders` = 2039
 - `InvalidHuntStatus` = 2040
+- `HuntLocked` = 2043 - Payout settings (tiers, NFT contract, distribution mode, vesting) can only be changed while the hunt is still a Draft. Once the hunt is Active (or in any other non-Draft state), this error is returned to prevent a creator from altering rewards after players have already competed.
 
 ---
 
@@ -9597,6 +10112,7 @@ pub fn pause(env: Env, admin: Address, reason: soroban_sdk::String) -> Result<()
 - `DistributionPaused` = 2038
 - `TooManyFunders` = 2039
 - `InvalidHuntStatus` = 2040
+- `HuntLocked` = 2043 - Payout settings (tiers, NFT contract, distribution mode, vesting) can only be changed while the hunt is still a Draft. Once the hunt is Active (or in any other non-Draft state), this error is returned to prevent a creator from altering rewards after players have already competed.
 
 ---
 
@@ -9662,6 +10178,7 @@ pub fn unpause(env: Env, admin: Address) -> Result<(), RewardErrorCode>
 - `DistributionPaused` = 2038
 - `TooManyFunders` = 2039
 - `InvalidHuntStatus` = 2040
+- `HuntLocked` = 2043 - Payout settings (tiers, NFT contract, distribution mode, vesting) can only be changed while the hunt is still a Draft. Once the hunt is Active (or in any other non-Draft state), this error is returned to prevent a creator from altering rewards after players have already competed.
 
 ---
 
@@ -9744,6 +10261,7 @@ pub fn pause_funding(env: Env, admin: Address) -> Result<(), RewardErrorCode>
 - `DistributionPaused` = 2038
 - `TooManyFunders` = 2039
 - `InvalidHuntStatus` = 2040
+- `HuntLocked` = 2043 - Payout settings (tiers, NFT contract, distribution mode, vesting) can only be changed while the hunt is still a Draft. Once the hunt is Active (or in any other non-Draft state), this error is returned to prevent a creator from altering rewards after players have already competed.
 
 ---
 
@@ -9808,6 +10326,7 @@ pub fn unpause_funding(env: Env, admin: Address) -> Result<(), RewardErrorCode>
 - `DistributionPaused` = 2038
 - `TooManyFunders` = 2039
 - `InvalidHuntStatus` = 2040
+- `HuntLocked` = 2043 - Payout settings (tiers, NFT contract, distribution mode, vesting) can only be changed while the hunt is still a Draft. Once the hunt is Active (or in any other non-Draft state), this error is returned to prevent a creator from altering rewards after players have already competed.
 
 ---
 
@@ -9872,6 +10391,7 @@ pub fn pause_distribution(env: Env, admin: Address) -> Result<(), RewardErrorCod
 - `DistributionPaused` = 2038
 - `TooManyFunders` = 2039
 - `InvalidHuntStatus` = 2040
+- `HuntLocked` = 2043 - Payout settings (tiers, NFT contract, distribution mode, vesting) can only be changed while the hunt is still a Draft. Once the hunt is Active (or in any other non-Draft state), this error is returned to prevent a creator from altering rewards after players have already competed.
 
 ---
 
@@ -9936,6 +10456,7 @@ pub fn unpause_distribution(env: Env, admin: Address) -> Result<(), RewardErrorC
 - `DistributionPaused` = 2038
 - `TooManyFunders` = 2039
 - `InvalidHuntStatus` = 2040
+- `HuntLocked` = 2043 - Payout settings (tiers, NFT contract, distribution mode, vesting) can only be changed while the hunt is still a Draft. Once the hunt is Active (or in any other non-Draft state), this error is returned to prevent a creator from altering rewards after players have already competed.
 
 ---
 
@@ -10061,6 +10582,7 @@ pub fn emergency_withdraw(env: Env, admin: Address, hunt_id: u64, recipient: Add
 - `DistributionPaused` = 2038
 - `TooManyFunders` = 2039
 - `InvalidHuntStatus` = 2040
+- `HuntLocked` = 2043 - Payout settings (tiers, NFT contract, distribution mode, vesting) can only be changed while the hunt is still a Draft. Once the hunt is Active (or in any other non-Draft state), this error is returned to prevent a creator from altering rewards after players have already competed.
 
 ---
 
@@ -10408,6 +10930,8 @@ pub fn get_pool_audit_log(env: Env, hunt_id: u64, start_after: Option<u64>, limi
 - `InvalidPoints` = 49
 - `HuntFull` = 50
 - `LeaderboardVisibilityUnauthorized` = 51
+- `InviteCodeRequired` = 52
+- `TooManyAliases` = 53
 
 ## `NftErrorCode`
 
@@ -10475,6 +10999,7 @@ pub fn get_pool_audit_log(env: Env, hunt_id: u64, start_after: Option<u64>, limi
 - `DistributionPaused` = 2038
 - `TooManyFunders` = 2039
 - `InvalidHuntStatus` = 2040
+- `HuntLocked` = 2043 - Payout settings (tiers, NFT contract, distribution mode, vesting) can only be changed while the hunt is still a Draft. Once the hunt is Active (or in any other non-Draft state), this error is returned to prevent a creator from altering rewards after players have already competed.
 
 ## `UpgradeAuthError`
 

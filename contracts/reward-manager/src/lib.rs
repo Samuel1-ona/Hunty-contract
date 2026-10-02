@@ -390,8 +390,8 @@ impl RewardManager {
     }
 
     /// Initializes the RewardManager with the XLM token contract address (SAC).
-    /// Must be called once before any reward distribution.
-    /// @deprecated Use constructor during deployment instead.
+    /// Must be called once before any reward distribution. Rejects a second
+    /// call with `AlreadyInitialized`.
     pub fn initialize(
         env: Env,
         admin: Address,
@@ -1592,11 +1592,7 @@ impl RewardManager {
         // remains true for the source pool. Without this, `get_reward_pool` on
         // the source shows funds that vanished with no explanation.
         let prev_migrated_out = Storage::get_pool_total_migrated_out(&env, source_hunt_id);
-        Storage::set_pool_total_migrated_out(
-            &env,
-            source_hunt_id,
-            prev_migrated_out + amount,
-        );
+        Storage::set_pool_total_migrated_out(&env, source_hunt_id, prev_migrated_out + amount);
 
         // The source's sponsors no longer have a claim there — their share of
         // the balance just moved to the destination pool under the creator's
@@ -2808,11 +2804,7 @@ impl RewardManager {
     /// A `Vec<PendingNftMint>` of pending mint entries, up to `limit` entries
     /// starting from `offset`. Returns an empty `Vec` when `offset` is beyond
     /// the end of the list or when no pending mints exist.
-    pub fn list_pending_nft_mints(
-        env: Env,
-        offset: u32,
-        limit: u32,
-    ) -> Vec<PendingNftMint> {
+    pub fn list_pending_nft_mints(env: Env, offset: u32, limit: u32) -> Vec<PendingNftMint> {
         Storage::list_pending_nft_mints(&env, offset, limit)
     }
 
@@ -2861,6 +2853,7 @@ impl RewardManager {
     /// - No structured logging of the error
     pub fn distribute_rewards_legacy(
         env: Env,
+        caller: Address,
         player: Address,
         hunt_id: u64,
         xlm_amount: i128,
@@ -2881,7 +2874,7 @@ impl RewardManager {
             nft_tier: 0,
             completion_rank: 0,
         };
-        Self::distribute_rewards(env, hunt_id, player, config).is_ok()
+        Self::distribute_rewards(env, caller, hunt_id, player, config).is_ok()
     }
 
     /// Returns the distribution status for a hunt/player pair.
@@ -2982,6 +2975,7 @@ impl RewardManager {
     /// Returns the XLM amount distributed.
     pub fn distribute_proportional(
         env: Env,
+        caller: Address,
         hunt_id: u64,
         player: Address,
         player_score: u64,
@@ -3032,7 +3026,7 @@ impl RewardManager {
             completion_rank: 0,
         };
 
-        Self::distribute_rewards(env, hunt_id, player, config)?;
+        Self::distribute_rewards(env, caller, hunt_id, player, config)?;
         Ok(amount)
     }
 
