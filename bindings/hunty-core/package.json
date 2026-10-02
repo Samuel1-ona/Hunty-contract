@@ -8,12 +8,11 @@
     "build": "tsc"
   },
   "dependencies": {
-    "@stellar/stellar-sdk": "^17.0.0",
+    "@stellar/stellar-sdk": "^16.0.1",
     "buffer": "6.0.3"
   },
   "devDependencies": {
-    "typescript": "^7.0.2"
+    "typescript": "^5.6.2"
   },
-  "contractHash": "d40a0f5202c822a209183ac67691e32bbb26be5ada93cb4c18e4bc05214a4bf9",
-  "sourceCommit": "7cddd5da4d360fb7e54be3e300575004c3bad706"
+  "contractHash": "8c0c42ca9900ab6e8c1e7d2952ff7cc241726b3686f08c02945fd4aa6d15b45e"
 }

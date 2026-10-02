@@ -35,7 +35,9 @@ fn sample_metadata(env: &Env, title: &str) -> NftMetadata {
     NftMetadata {
         title: String::from_str(env, title),
         description: String::from_str(env, "desc"),
-        image_uri: String::from_str(env, "ipfs://test"),
+        // image_uri_is_valid requires an ipfs:// value to carry a v0 CID of
+        // at least 46 base58 characters.
+        image_uri: String::from_str(env, "ipfs://QmYwAPJzv5CZsnA625s3Xf2nemtYgPpHdWEz79ojWnPbdG"),
         hunt_title: String::from_str(env, title),
         rarity: 0,
         tier: 0,
@@ -72,9 +74,7 @@ fn mint_transferable(
         metadata.hunt_title.clone().into_val(env),
     );
     map.set(Symbol::new(env, "transferable"), true.into_val(env));
-    client
-        .mint_reward_nft_from_map(minter, &hunt_id, owner, &map)
-        .unwrap()
+    client.mint_reward_nft_from_map(minter, &hunt_id, owner, &map)
 }
 
 #[test]

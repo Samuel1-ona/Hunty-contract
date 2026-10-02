@@ -4,7 +4,7 @@ from __future__ import annotations
 import argparse
 import re
 from pathlib import Path
-from typing import Dict, List, Optional, Sequence
+from typing import Dict, List, Optional, Sequence, Set
 
 ROOT = Path(__file__).resolve().parent.parent
 CONTRACTS_DIR = ROOT / "contracts"
@@ -145,6 +145,26 @@ def parse_contract_impls(text: str) -> List[Dict[str, object]]:
     return impls
 
 
+def test_only_modules(src_dir: Path) -> Set[str]:
+    """Return the stems of modules the crate root only declares under `cfg(test)`.
+
+    Test-only modules can still contain `#[contractimpl]` blocks (helper probe
+    contracts, for example). Those are not part of the published ABI, so they
+    must not show up in the generated documentation.
+    """
+    crate_root = src_dir / 'lib.rs'
+    if not crate_root.exists():
+        return set()
+    text = crate_root.read_text()
+    stems = set()
+    for match in re.finditer(
+        r'(#\[cfg\(test\)\][^\n]*\n\s*)*mod\s+(\w+)\s*;', text
+    ):
+        if 'cfg(test)' in match.group(0):
+            stems.add(match.group(2))
+    return stems
+
+
 def gather_contract_data() -> Dict[str, Dict[str, object]]:
     contract_data: Dict[str, Dict[str, object]] = {}
     error_enums: Dict[str, List[Dict[str, str]]] = {}
@@ -159,7 +179,10 @@ def gather_contract_data() -> Dict[str, Dict[str, object]]:
             'impls': [],
             'errors': {},
         }
+        skipped = test_only_modules(src_dir)
         for rust_file in sorted(src_dir.glob('*.rs')):
+            if rust_file.stem in skipped:
+                continue
             text = rust_file.read_text()
             enums = parse_error_enums(text)
             for key, variants in enums.items():

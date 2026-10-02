@@ -22,11 +22,28 @@ struct LegacyPoolAuditEntry {
     timestamp: u64,
 }
 
+// `RewardManager` is deployed through its 3-argument `__constructor`; these
+// tests only touch storage, so any admin/token/hunty-core will do.
+fn register_reward_manager(env: &Env) -> Address {
+    let token_admin = Address::generate(env);
+    let token_address = env
+        .register_stellar_asset_contract_v2(token_admin)
+        .address();
+    env.register(
+        RewardManager,
+        (
+            Address::generate(env),
+            token_address,
+            Address::generate(env),
+        ),
+    )
+}
+
 #[test]
 fn test_audit_log_keys_append_count_and_ring_buffer() {
     let env = Env::default();
     env.mock_all_auths();
-    let contract_id = env.register(RewardManager, ());
+    let contract_id = register_reward_manager(&env);
     let hunt_id = 42u64;
     let actor = Address::generate(&env);
 
@@ -89,7 +106,7 @@ fn test_audit_log_keys_append_count_and_ring_buffer() {
 #[test]
 fn audit_query_handles_empty_and_zero_limit_pages() {
     let env = Env::default();
-    let contract_id = env.register(RewardManager, ());
+    let contract_id = register_reward_manager(&env);
     env.as_contract(&contract_id, || {
         let empty = RewardManager::get_pool_audit_log(env.clone(), 7, None, None);
         assert_eq!(empty.total, 0);
@@ -109,7 +126,7 @@ fn legacy_audit_record_is_readable_after_schema_consolidation() {
     assert_eq!(PoolOperation::Withdraw as u32, 3);
 
     let env = Env::default();
-    let contract_id = env.register(RewardManager, ());
+    let contract_id = register_reward_manager(&env);
     let actor = Address::generate(&env);
 
     env.as_contract(&contract_id, || {

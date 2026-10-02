@@ -118,6 +118,8 @@ EXPECTED_FUNCTIONS: Dict[str, Set[str]] = {
         "run_migration",
         "rollback_migration",
         "get_health_dashboard",
+        "is_hunt_expired_or_cancelled",
+        "is_hunt_terminal",
     },
     "reward-manager": {
         "accept_admin",
@@ -200,6 +202,8 @@ EXPECTED_FUNCTIONS: Dict[str, Set[str]] = {
         "update_pool_config",
         "validate_pool",
         "verify_distribution",
+        "__constructor",
+        "list_pending_nft_mints",
     },
     "nft-reward": {
         "initialize",

@@ -25,11 +25,17 @@ jobs:
       - name: Install Rust (with wasm targets)
         uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
         with:
+          toolchain: 1.91.1
           targets: wasm32v1-none
 
+      - name: Install Stellar CLI
+        run: bash scripts/ci/install_stellar_cli.sh
+
       - name: Build optimized WASM (release)
+        # soroban-sdk v28 requires the Stellar CLI build system: it applies
+        # spec shaking, so plain `cargo build` cannot produce the contract.
         run: |
-          cargo build --workspace --target wasm32v1-none --release
+          stellar contract build --locked
 
       - name: Run WASM size check
         run: |

@@ -4,6 +4,9 @@ PYTHON ?= python3
 SHA256 ?= sha256sum
 DOCS_OUTPUT := docs/contract-api.md
 
+# The binding-stamping recipe uses bash substring expansion.
+SHELL := /bin/bash
+
 .PHONY: build bindings all clean generate-api-docs check check-wasm-abi setup-githooks
 .PHONY: build bindings all clean generate-api-docs check setup-githooks benchmark-compare
 # macOS compatibility: check for shasum (pre-installed on macOS) and fall back to sha256sum.
@@ -16,26 +19,30 @@ endif
 all: build bindings
 
 build: generate-api-docs
-	cargo build --workspace --target wasm32v1-none --release
+	stellar contract build --locked
 
 generate-api-docs:
 	$(PYTHON) scripts/generate_api_docs.py --output $(DOCS_OUTPUT)
 
-# Compute SHA-256 hash of a WASM file and retrieve the current git commit.
-# Stamps both into the binding's package.json under `contractHash` and
-# `sourceCommit` so consumers can verify which build produced the bindings.
+# Compute the SHA-256 hash of a WASM file and stamp it into the binding's
+# package.json under `contractHash`, so consumers can verify which build
+# produced the bindings.
+#
+# Only the contract hash is stamped. A `sourceCommit` field would record
+# whatever HEAD happens to be at generation time, which differs between a
+# local build (the branch head) and the `pull_request` merge commit CI builds,
+# so the `git diff --exit-code bindings` check could never pass.
 define stamp-binding
 	contract_hash=$$($(SHA256) "$(WASM_DIR)/$(1)" | cut -d' ' -f1); \
-	commit_hash=$$(git rev-parse HEAD 2>/dev/null || echo "unknown"); \
 	pkg="$(BINDINGS_DIR)/$(2)/package.json"; \
 	if [ -f "$$pkg" ]; then \
 		node -e " \
 			var p = require('./$$pkg'); \
 			p.contractHash = '$$contract_hash'; \
-			p.sourceCommit = '$$commit_hash'; \
+			delete p.sourceCommit; \
 			require('fs').writeFileSync('$$pkg', JSON.stringify(p, null, 2) + '\n'); \
 		"; \
-		echo "  >> Stamped $$pkg: hash=$${contract_hash::12}… commit=$${commit_hash::12}…"; \
+		echo "  >> Stamped $$pkg: hash=$${contract_hash::12}…"; \
 	fi
 endef
 

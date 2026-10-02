@@ -45,6 +45,7 @@ A CI/script check (`scripts/ci/check_storage_keys_doc.sh`) asserts that every
 | `REWARD_MGR_KEY` | `R` | reward-manager address |
 | `BAN_KEY` | `BA` | ban / blacklist entry |
 | `SUBMISSION_KEY` | `S` | answer submission |
+| `ATTEMPT_KEY` | `ATT` | `(ATT, hunt_id, clue_id, player)` — per-player per-clue attempt counter |
 | `ADMIN_KEY` | `AD` | admin address |
 | `PENDING_ADMIN_KEY` | `ADM_PEND` | pending admin transfer |
 | `VIEW_ONLY_KEY` | `V` | per-hunt view-only |
@@ -60,6 +61,7 @@ A CI/script check (`scripts/ci/check_storage_keys_doc.sh`) asserts that every
 | `CACHE_HIT_KEY` | `CHIT` | cache hit counter |
 | `CACHE_MISS_KEY` | `CMISS` | cache miss counter |
 | `PLAYER_HUNTS_KEY` | `PHNT` | `(PHNT, player)` — hunts joined by player |
+| `RATE_LIMIT_KEY` | `HRATE` | `(HRATE, creator)` — creator hunt-creation rate-limit window |
 | `TEAM_KEY` | `TEAM` | `(TEAM, hunt_id, team_id)` |
 | `TEAM_COUNT_KEY` | `TMCT` | `(TMCT, hunt_id)` |
 | `PLAYER_TEAM_KEY` | `PLTM` | `(PLTM, hunt_id, player)` |
@@ -110,6 +112,8 @@ A CI/script check (`scripts/ci/check_storage_keys_doc.sh`) asserts that every
 | `COLLECTION_METADATA_KEY` | `COLL` | collection metadata |
 | `HAS_AUTH_KEY` | `HAUTH` | auth-initialized flag |
 | `ALL_NFTS_KEY` | `ALLNFT` | vector of all minted NFT ids |
+| `ALL_NFT_COUNT_KEY` | `ANFTC` | count of NFTs in the global `ALLNFT` index |
+| `LIVE_SUPPLY_KEY` | `LIVES` | burn-adjusted live supply counter |
 | `TOTAL_HUNTS_KEY` | `TH` | distinct hunts that minted |
 | `TOTAL_OWNERS_KEY` | `TO` | distinct owners counter |
 | `CONTRACT_VERSION_KEY` | `CTRV` | contract version (instance storage) |
@@ -153,6 +157,7 @@ A CI/script check (`scripts/ci/check_storage_keys_doc.sh`) asserts that every
 | `POOL_CFG_KEY` | `PCFG` | `(PCFG, hunt_id)` |
 | `POOL_DEP_KEY` | `PDEP` | `(PDEP, hunt_id)` deposited |
 | `POOL_DST_KEY` | `PDST` | `(PDST, hunt_id)` distributed |
+| `POOL_MIG_KEY` | `PMIG` | `(PMIG, hunt_id)` total migrated out |
 | `POOL_RFD_KEY` | `PRFD` | `(PRFD, hunt_id)` total refunded (issue #628) |
 | `POOL_DIST_COUNT_KEY` | `PDCNT` | `(PDCNT, hunt_id)` distribution count |
 | `POOL_LAST_DIST_TS_KEY` | `PLDTS` | `(PLDTS, hunt_id)` |
@@ -167,6 +172,7 @@ A CI/script check (`scripts/ci/check_storage_keys_doc.sh`) asserts that every
 | `PAUSE_DIST_KEY` | `PAUSE_DS` | granular distribution pause (issue #628) |
 | `EMERGENCY_LOG_KEY` | `EMLOG` | emergency action log — also seen as `ELOG` |
 | `PENDING_NFT_KEY` | `PNFT` | `(PNFT, hunt_id, player)` pending mint |
+| `PENDING_NFT_LIST_KEY` | `PNFTLST` | global list of pending NFT mints |
 | `VESTING_KEY` | `VEST` | `(VEST, hunt_id, player)` vesting record |
 | `POOL_FUNDERS_KEY` | `PFNDRS` | `(PFNDRS, hunt_id)` — list of distinct funders not yet refunded |
 | `POOL_FUNDER_CONTRIB_KEY` | `PFCONT` | `(PFCONT, hunt_id, funder)` — cumulative unrefunded contribution |

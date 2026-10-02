@@ -155,7 +155,8 @@ fn burning_swaps_the_last_index_entry_and_keeps_the_rest_discoverable() {
     // Swap-remove: the last entry takes the freed position, nothing is lost.
     assert_eq!(listed_ids(&client), vec![id1, id3]);
     assert!(client.get_nft(&id2).is_none());
-    assert_eq!(client.total_supply(), 3);
+    // total_supply tracks the live count, so burning one leaves two.
+    assert_eq!(client.total_supply(), 2);
     assert_eq!(client.get_hunt_nft_count(&1), 2);
 
     // The freed slot is reused rather than skipped by the next mint.

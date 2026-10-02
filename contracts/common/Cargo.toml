@@ -10,3 +10,9 @@ doctest = false
 
 [dependencies]
 soroban-sdk = { workspace = true }
+
+[dev-dependencies]
+# The unit tests in src/test_audit.rs use the SDK test utilities
+# (Env::events, Address::generate, mock_all_auths), which are only
+# available with the `testutils` feature.
+soroban-sdk = { workspace = true, features = ["testutils"] }

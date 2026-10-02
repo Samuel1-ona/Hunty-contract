@@ -2717,7 +2717,7 @@ impl HuntyCore {
         // Hash the invite code with hunt_id as salt to prevent rainbow-table attacks.
         // Use the same buffer-based approach as normalize_and_hash_answer for consistency.
         let code_len = invite_code.len() as usize;
-        if code_len == 0 || code_len > MAX_INVITE_CODE_LENGTH {
+        if !(MIN_INVITE_CODE_LENGTH..=MAX_INVITE_CODE_LENGTH).contains(&code_len) {
             return Err(HuntErrorCode::InvalidAnswer);
         }
         let mut buf = [0u8; 8 + MAX_INVITE_CODE_LENGTH];
@@ -2963,7 +2963,7 @@ impl HuntyCore {
         // Hash the provided invite code with the same salt (hunt_id) and compare.
         // Use the same buffer-based approach as generate_invite_code for consistency.
         let code_len = invite_code.len() as usize;
-        if code_len == 0 || code_len > MAX_INVITE_CODE_LENGTH {
+        if !(MIN_INVITE_CODE_LENGTH..=MAX_INVITE_CODE_LENGTH).contains(&code_len) {
             return Err(HuntErrorCode::InvalidAnswer);
         }
         let mut buf = [0u8; 8 + MAX_INVITE_CODE_LENGTH];
@@ -4120,7 +4120,7 @@ impl HuntyCore {
         if Storage::get_co_creators(&env, hunt_id).len() >= MAX_CO_CREATORS_PER_HUNT {
             return Err(HuntErrorCode::TooManyClues);
         }
-        Storage::add_co_creator(&env, hunt_id, &new_co_creator);
+        Storage::add_co_creator(&env, hunt_id, &new_co_creator)?;
 
         let event = CoCreatorAddedEvent {
             hunt_id,

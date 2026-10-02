@@ -33,8 +33,13 @@ jobs:
           path: ~/.cargo/git
           key: ${{ runner.os }}-cargo-index-${{ hashFiles('**/Cargo.lock') }}
 
+      - name: Install Stellar CLI
+        run: bash scripts/ci/install_stellar_cli.sh
+
       - name: Build WASM contracts
-        run: cargo build --target wasm32v1-none --release
+        # soroban-sdk v28 only produces a correct contract artifact when built
+        # by the Stellar CLI build system, which performs spec shaking.
+        run: stellar contract build --locked
 
       - name: Run tests
         run: cargo test --locked --workspace

@@ -27,14 +27,15 @@ fn setup() -> Fixture {
     let env = Env::default();
     env.mock_all_auths();
 
-    let contract_id = env.register(RewardManager, ());
     let admin = Address::generate(&env);
     let stranger = Address::generate(&env);
     let xlm_token = Address::generate(&env);
-
-    env.as_contract(&contract_id, || {
-        RewardManager::initialize(env.clone(), admin.clone(), xlm_token).unwrap();
-    });
+    // `RewardManager` initializes through its 3-argument `__constructor`
+    // (admin, xlm_token, hunty_core); registration with `()` would panic.
+    let contract_id = env.register(
+        RewardManager,
+        (admin.clone(), xlm_token.clone(), Address::generate(&env)),
+    );
 
     Fixture {
         env,
