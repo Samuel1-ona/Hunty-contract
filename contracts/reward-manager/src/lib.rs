@@ -1841,7 +1841,9 @@ impl RewardManager {
     /// that a freeze issued by the admin may only be lifted by the admin
     /// (#1077). Any freezer other than the pool creator was the admin at the
     /// time of the freeze, so this restriction also survives an admin rotation.
-    /// Clears `RewardPoolConfig::frozen_by`.
+    /// A frozen pool with no recorded freezer (freeze state written before
+    /// `frozen_by` existed) is treated as an admin freeze and can only be
+    /// lifted by the admin. Clears `RewardPoolConfig::frozen_by`.
     /// Emits a `PoolUnfrozenEvent`.
     ///
     /// # Arguments
@@ -1871,11 +1873,18 @@ impl RewardManager {
         // admin. The creator cannot record an admin freeze, so "frozen by
         // anyone other than the creator" means "frozen by the admin" — even if
         // the admin address has since rotated.
-        let admin_freeze = config
+        let frozen_by_creator = config
             .frozen_by
             .as_ref()
-            .map(|freezer| freezer != &config.creator)
+            .map(|freezer| freezer == &config.creator)
             .unwrap_or(false);
+        // Fail closed when a pool is frozen but carries no recorded freezer:
+        // an unattributed freeze cannot be proven to be a creator freeze, so
+        // only the admin may lift it. `freeze_pool` always records the caller,
+        // so this only triggers for freeze state written before `frozen_by`
+        // existed. A pool that is not frozen is unaffected (both parties may
+        // still call `unfreeze_pool` as a no-op).
+        let admin_freeze = config.frozen && !frozen_by_creator;
         if admin_freeze && !is_admin {
             return Err(RewardErrorCode::Unauthorized);
         }
