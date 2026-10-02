@@ -12,6 +12,7 @@
 //! Written as a standalone integration target because the crate's `src/test.rs`
 //! unit-test module does not currently compile — see the PR description.
 
+use reward_manager::storage::Storage;
 use reward_manager::RewardManager;
 use soroban_sdk::testutils::Address as _;
 use soroban_sdk::{Address, Env};
@@ -33,7 +34,13 @@ fn setup() -> Fixture {
     let xlm_token = Address::generate(&env);
 
     env.as_contract(&contract_id, || {
-        RewardManager::initialize(env.clone(), admin.clone(), xlm_token).unwrap();
+        RewardManager::initialize(
+            env.clone(),
+            admin.clone(),
+            xlm_token,
+            Address::generate(&env),
+        )
+        .unwrap();
     });
 
     Fixture {
@@ -102,7 +109,9 @@ fn funding_blocked(fx: &Fixture) -> bool {
 fn distribution_blocked(fx: &Fixture) -> bool {
     let player = Address::generate(&fx.env);
     let result = in_contract(fx, |env| {
-        RewardManager::distribute_proportional(env.clone(), 1, player.clone(), 5, 10)
+        let caller = Address::generate(env);
+        Storage::add_authorized_contract(env, &caller);
+        RewardManager::distribute_proportional(env.clone(), caller, 1, player.clone(), 5, 10)
     });
     matches!(
         result,

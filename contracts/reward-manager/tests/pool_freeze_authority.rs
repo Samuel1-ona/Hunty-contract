@@ -29,11 +29,22 @@ fn setup() -> Fixture {
     let env = Env::default();
     env.mock_all_auths();
 
-    let contract_id = env.register(RewardManager, ());
     let admin = Address::generate(&env);
     let creator = Address::generate(&env);
     let stranger = Address::generate(&env);
     let token_address = Address::generate(&env);
+
+    // `RewardManager` initializes through its 3-argument `__constructor`
+    // (admin, xlm_token, hunty_core). Registering with no constructor
+    // arguments panics before any freeze call can run.
+    let contract_id = env.register(
+        RewardManager,
+        (
+            admin.clone(),
+            token_address.clone(),
+            Address::generate(&env),
+        ),
+    );
 
     env.as_contract(&contract_id, || {
         Storage::set_admin(&env, &admin);
@@ -153,6 +164,35 @@ fn creator_refreeze_cannot_downgrade_an_admin_freeze() {
         unfreeze(&fx, &fx.creator),
         Err(RewardErrorCode::Unauthorized)
     );
+}
+
+#[test]
+fn unattributed_freeze_cannot_be_lifted_by_creator() {
+    let fx = setup();
+
+    // Simulate freeze state written before `frozen_by` existed: the pool is
+    // frozen but no freezer is recorded. The creator must not be able to lift
+    // it, because the freeze cannot be proven to be their own.
+    in_contract(&fx, |env| {
+        let mut config = Storage::get_pool_config(env, 1).unwrap();
+        config.frozen = true;
+        config.frozen_by = None;
+        Storage::set_pool_config(env, 1, &config);
+    });
+
+    assert!(is_frozen(&fx));
+    assert_eq!(frozen_by(&fx), None);
+
+    assert_eq!(
+        unfreeze(&fx, &fx.creator),
+        Err(RewardErrorCode::Unauthorized)
+    );
+    assert!(is_frozen(&fx));
+
+    // The admin can still lift an unattributed freeze.
+    unfreeze(&fx, &fx.admin).unwrap();
+    assert!(!is_frozen(&fx));
+    assert_eq!(frozen_by(&fx), None);
 }
 
 #[test]

@@ -396,7 +396,6 @@ fn test_first_clue_hint_request_saturates_at_zero() {
     assert_eq!(progress.hinted_clues.len(), 1);
 }
 
-
 /// Issue #1028: request_hint must reject clues the player already completed.
 #[test]
 fn test_request_hint_rejected_for_completed_clue() {
@@ -425,9 +424,7 @@ fn test_request_hint_rejected_for_completed_clue() {
 
     // Requesting a hint for an already-completed clue must fail.
     assert!(
-        client
-            .try_request_hint(&hunt_id, &1u32, &player)
-            .is_err(),
+        client.try_request_hint(&hunt_id, &1u32, &player).is_err(),
         "expected ClueAlreadyCompleted error when hinting a solved clue"
     );
 

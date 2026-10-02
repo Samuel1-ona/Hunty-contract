@@ -36,6 +36,8 @@ impl Storage {
     const POOL_DEP_KEY: soroban_sdk::Symbol = symbol_short!("PDEP");
     const POOL_DST_KEY: soroban_sdk::Symbol = symbol_short!("PDST");
     const POOL_RFD_KEY: soroban_sdk::Symbol = symbol_short!("PRFD");
+    /// Cumulative amount drained from this pool via `migrate_pool`.
+    const POOL_MIG_KEY: soroban_sdk::Symbol = symbol_short!("PMIG");
     const POOL_DIST_COUNT_KEY: soroban_sdk::Symbol = symbol_short!("PDCNT");
     const POOL_LAST_DIST_TS_KEY: soroban_sdk::Symbol = symbol_short!("PLDTS");
     const POOL_DISTRIBUTIONS_KEY: soroban_sdk::Symbol = symbol_short!("PLDIST");
@@ -357,6 +359,19 @@ impl Storage {
         env.storage().persistent().get(&key).unwrap_or(0)
     }
 
+    /// Records the cumulative amount migrated out of `hunt_id` via
+    /// `migrate_pool`. Used to satisfy the accounting identity:
+    /// `total_deposited == balance + total_distributed + total_refunded + total_migrated_out`
+    pub fn set_pool_total_migrated_out(env: &Env, hunt_id: u64, amount: i128) {
+        let key = Self::pool_mig_key(hunt_id);
+        env.storage().persistent().set(&key, &amount);
+    }
+
+    pub fn get_pool_total_migrated_out(env: &Env, hunt_id: u64) -> i128 {
+        let key = Self::pool_mig_key(hunt_id);
+        env.storage().persistent().get(&key).unwrap_or(0)
+    }
+
     // ========== Global Total XLM Distributed (across all hunts) ==========
 
     pub fn set_total_xlm_distributed(env: &Env, amount: i128) {
@@ -516,6 +531,10 @@ impl Storage {
 
     fn pool_rfd_key(hunt_id: u64) -> (soroban_sdk::Symbol, u64) {
         (Self::POOL_RFD_KEY, hunt_id)
+    }
+
+    fn pool_mig_key(hunt_id: u64) -> (soroban_sdk::Symbol, u64) {
+        (Self::POOL_MIG_KEY, hunt_id)
     }
 
     fn pool_distributions_key(hunt_id: u64) -> (soroban_sdk::Symbol, u64) {

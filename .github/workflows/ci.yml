@@ -34,6 +34,12 @@ jobs:
           key: ${{ runner.os }}-cargo-index-${{ hashFiles('**/Cargo.lock') }}
 
       - name: Build WASM contracts
+        # soroban-sdk 28 refuses a plain `cargo build` for wasm targets unless the
+        # build system advertises spec-shaking support. This job only needs the
+        # contracts to compile (the tests below run natively), so it opts in
+        # rather than installing the full stellar-cli toolchain.
+        env:
+          SOROBAN_SDK_BUILD_SYSTEM_SUPPORTS_SPEC_SHAKING_V2: "1"
         run: cargo build --target wasm32v1-none --release
 
       - name: Run tests
@@ -150,7 +156,7 @@ jobs:
           key: ${{ runner.os }}-cargo-build-target-${{ hashFiles('**/Cargo.lock') }}
 
       - name: Install cargo-tarpaulin
-        uses: taiki-e/install-action@dfae9bf3d6f6c6f20ef4ebb3486c01a51341ff12 # v2
+        uses: taiki-e/install-action@4cef1412cce204788f482e778a0b9187f9626a29 # v2
         with:
           tool: cargo-tarpaulin
 

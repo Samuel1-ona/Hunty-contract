@@ -28,6 +28,10 @@ jobs:
           targets: wasm32v1-none
 
       - name: Build optimized WASM (release)
+        # soroban-sdk 28 requires a Stellar-aware build system for wasm targets;
+        # this size guard only needs the artifacts to be produced.
+        env:
+          SOROBAN_SDK_BUILD_SYSTEM_SUPPORTS_SPEC_SHAKING_V2: "1"
         run: |
           cargo build --workspace --target wasm32v1-none --release
 

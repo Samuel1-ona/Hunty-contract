@@ -163,6 +163,10 @@ pub struct RewardPoolStatus {
     pub total_deposited: i128,
     /// Cumulative total distributed from this pool.
     pub total_distributed: i128,
+    /// Cumulative total migrated out of this pool via `migrate_pool`.
+    /// Together with `total_distributed` and `total_refunded` these satisfy:
+    /// `total_deposited == balance + total_distributed + total_refunded + total_migrated_out`
+    pub total_migrated_out: i128,
     /// Pool creator / only authorized funder.
     pub creator: Address,
     /// Minimum XLM per distribution (0 = no minimum).

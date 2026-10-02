@@ -7010,8 +7010,8 @@ pub fn __constructor(env: Env, admin: Address, xlm_token: Address, hunty_core: A
 #### `initialize`
 
 Initializes the RewardManager with the XLM token contract address (SAC).
-Must be called once before any reward distribution.
-@deprecated Use constructor during deployment instead.
+Must be called once before any reward distribution. Rejects a second
+call with `AlreadyInitialized`.
 
 **Signature:**
 
@@ -8590,6 +8590,19 @@ source cannot be shown eligible and migration is rejected.
 * **Both pools must have the same creator**, who must authorize the call.
 * **Both pools must use the same token.**
 
+# Accounting
+After a successful migration the following identities hold:
+
+**Source pool:**
+`total_deposited == balance(0) + total_distributed + total_refunded + total_migrated_out`
+
+**Destination pool:**
+`total_deposited == balance + total_distributed + total_refunded + total_migrated_out(0)`
+
+`total_migrated_out` on the source is incremented by the migrated
+amount so that `get_reward_pool` on the source never shows funds that
+have "disappeared" without explanation.
+
 # Arguments
 * `creator` - The shared creator of both pools (must authorize the call)
 * `source_hunt_id` - The expired/cancelled hunt to drain
@@ -9619,12 +9632,13 @@ The legacy path is not a bypass vector.
 **Signature:**
 
 ```rust
-pub fn distribute_rewards_legacy(env: Env, player: Address, hunt_id: u64, xlm_amount: i128, _nft_enabled: bool, // ignored: NFT not supported on legacy path) -> bool
+pub fn distribute_rewards_legacy(env: Env, caller: Address, player: Address, hunt_id: u64, xlm_amount: i128, _nft_enabled: bool, // ignored: NFT not supported on legacy path) -> bool
 ```
 
 **Parameters:**
 
 - `env: Env`
+- `caller: Address`
 - `player: Address`
 - `hunt_id: u64`
 - `xlm_amount: i128`
@@ -9735,12 +9749,13 @@ Returns the XLM amount distributed.
 **Signature:**
 
 ```rust
-pub fn distribute_proportional(env: Env, hunt_id: u64, player: Address, player_score: u64, total_scores: u64) -> Result<i128, RewardErrorCode>
+pub fn distribute_proportional(env: Env, caller: Address, hunt_id: u64, player: Address, player_score: u64, total_scores: u64) -> Result<i128, RewardErrorCode>
 ```
 
 **Parameters:**
 
 - `env: Env`
+- `caller: Address`
 - `hunt_id: u64`
 - `player: Address`
 - `player_score: u64`
