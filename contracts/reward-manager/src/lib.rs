@@ -3924,14 +3924,27 @@ impl RewardManager {
         env: Env,
         admin: Address,
         target_version: u32,
+        wasm_hash: BytesN<32>,
     ) -> Result<hunty_migration::UpgradeProposal, hunty_migration::UpgradeAuthError> {
-        let proposal =
-            migration::RewardManagerMigration::propose_upgrade(&env, &admin, target_version)?;
+        let proposal = migration::RewardManagerMigration::propose_upgrade(
+            &env,
+            &admin,
+            target_version,
+            wasm_hash,
+        )?;
         env.events().publish(
             migration::RewardManagerMigration::upgrade_proposed_topic(&env),
             migration::RewardManagerMigration::upgrade_proposed_event(&proposal),
         );
         Ok(proposal)
+    }
+
+    pub fn upgrade(
+        env: Env,
+        admin: Address,
+        new_wasm_hash: BytesN<32>,
+    ) -> Result<(), hunty_migration::UpgradeAuthError> {
+        migration::RewardManagerMigration::upgrade(&env, &admin, new_wasm_hash)
     }
 
     pub fn set_upgrade_timelock(

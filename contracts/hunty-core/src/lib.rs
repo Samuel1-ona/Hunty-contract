@@ -4309,6 +4309,52 @@ impl HuntyCore {
         migration::HuntyCoreMigration::initialize_schema(&env);
     }
 
+    pub fn propose_upgrade(
+        env: Env,
+        admin: Address,
+        target_version: u32,
+        wasm_hash: BytesN<32>,
+    ) -> Result<hunty_migration::UpgradeProposal, hunty_migration::UpgradeAuthError> {
+        let proposal = migration::HuntyCoreMigration::propose_upgrade(&env, &admin, target_version, wasm_hash)?;
+        env.events().publish(
+            migration::HuntyCoreMigration::upgrade_proposed_topic(&env),
+            migration::HuntyCoreMigration::upgrade_proposed_event(&proposal),
+        );
+        Ok(proposal)
+    }
+
+    pub fn set_upgrade_timelock(
+        env: Env,
+        admin: Address,
+        delay_seconds: u64,
+    ) -> Result<(), hunty_migration::UpgradeAuthError> {
+        migration::HuntyCoreMigration::set_upgrade_timelock(&env, &admin, delay_seconds)
+    }
+
+    pub fn get_upgrade_proposal(env: Env) -> Option<hunty_migration::UpgradeProposal> {
+        migration::HuntyCoreMigration::get_upgrade_proposal(&env)
+    }
+
+    pub fn get_upgrade_timelock(env: Env) -> u64 {
+        migration::HuntyCoreMigration::get_upgrade_timelock(&env)
+    }
+
+    pub fn get_upgrade_history(
+        env: Env,
+        offset: u32,
+        limit: u32,
+    ) -> soroban_sdk::Vec<hunty_migration::UpgradeHistoryEntry> {
+        migration::HuntyCoreMigration::get_upgrade_history(&env, offset, limit)
+    }
+
+    pub fn upgrade(
+        env: Env,
+        admin: Address,
+        new_wasm_hash: BytesN<32>,
+    ) -> Result<(), hunty_migration::UpgradeAuthError> {
+        migration::HuntyCoreMigration::upgrade(&env, &admin, new_wasm_hash)
+    }
+
     pub fn run_migration(
         env: Env,
         admin: Address,

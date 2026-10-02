@@ -118,6 +118,12 @@ EXPECTED_FUNCTIONS: Dict[str, Set[str]] = {
         "run_migration",
         "rollback_migration",
         "get_health_dashboard",
+        "propose_upgrade",
+        "upgrade",
+        "set_upgrade_timelock",
+        "get_upgrade_proposal",
+        "get_upgrade_timelock",
+        "get_upgrade_history",
     },
     "reward-manager": {
         "accept_admin",
@@ -200,6 +206,7 @@ EXPECTED_FUNCTIONS: Dict[str, Set[str]] = {
         "update_pool_config",
         "validate_pool",
         "verify_distribution",
+        "upgrade",
     },
     "nft-reward": {
         "initialize",
@@ -244,6 +251,7 @@ EXPECTED_FUNCTIONS: Dict[str, Set[str]] = {
         "get_nfts_by_hunt",
         "get_hunt_nft_count",
         "burn_nft",
+        "upgrade",
     },
 }
 

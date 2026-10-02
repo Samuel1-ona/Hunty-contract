@@ -5835,6 +5835,144 @@ pub fn initialize_schema(env: Env) -> ()
 
 ---
 
+#### `propose_upgrade`
+
+**Signature:**
+
+```rust
+pub fn propose_upgrade(env: Env, admin: Address, target_version: u32, wasm_hash: BytesN<32>) -> Result<hunty_migration::UpgradeProposal, hunty_migration::UpgradeAuthError>
+```
+
+**Parameters:**
+
+- `env: Env`
+- `admin: Address`
+- `target_version: u32`
+- `wasm_hash: BytesN<32>`
+
+**Returns:** `Result<hunty_migration::UpgradeProposal, hunty_migration::UpgradeAuthError>`
+
+**Error type:** `UpgradeAuthError`
+
+**Error codes:**
+
+- `Unauthorized` = 1
+- `NoProposal` = 2
+- `TimelockPending` = 3
+- `VersionMismatch` = 4
+- `InvalidTimelock` = 5
+- `WasmHashMismatch` = 6
+
+---
+
+#### `set_upgrade_timelock`
+
+**Signature:**
+
+```rust
+pub fn set_upgrade_timelock(env: Env, admin: Address, delay_seconds: u64) -> Result<(), hunty_migration::UpgradeAuthError>
+```
+
+**Parameters:**
+
+- `env: Env`
+- `admin: Address`
+- `delay_seconds: u64`
+
+**Returns:** `Result<(), hunty_migration::UpgradeAuthError>`
+
+**Error type:** `UpgradeAuthError`
+
+**Error codes:**
+
+- `Unauthorized` = 1
+- `NoProposal` = 2
+- `TimelockPending` = 3
+- `VersionMismatch` = 4
+- `InvalidTimelock` = 5
+- `WasmHashMismatch` = 6
+
+---
+
+#### `get_upgrade_proposal`
+
+**Signature:**
+
+```rust
+pub fn get_upgrade_proposal(env: Env) -> Option<hunty_migration::UpgradeProposal>
+```
+
+**Parameters:**
+
+- `env: Env`
+
+**Returns:** `Option<hunty_migration::UpgradeProposal>`
+
+---
+
+#### `get_upgrade_timelock`
+
+**Signature:**
+
+```rust
+pub fn get_upgrade_timelock(env: Env) -> u64
+```
+
+**Parameters:**
+
+- `env: Env`
+
+**Returns:** `u64`
+
+---
+
+#### `get_upgrade_history`
+
+**Signature:**
+
+```rust
+pub fn get_upgrade_history(env: Env, offset: u32, limit: u32) -> soroban_sdk::Vec<hunty_migration::UpgradeHistoryEntry>
+```
+
+**Parameters:**
+
+- `env: Env`
+- `offset: u32`
+- `limit: u32`
+
+**Returns:** `soroban_sdk::Vec<hunty_migration::UpgradeHistoryEntry>`
+
+---
+
+#### `upgrade`
+
+**Signature:**
+
+```rust
+pub fn upgrade(env: Env, admin: Address, new_wasm_hash: BytesN<32>) -> Result<(), hunty_migration::UpgradeAuthError>
+```
+
+**Parameters:**
+
+- `env: Env`
+- `admin: Address`
+- `new_wasm_hash: BytesN<32>`
+
+**Returns:** `Result<(), hunty_migration::UpgradeAuthError>`
+
+**Error type:** `UpgradeAuthError`
+
+**Error codes:**
+
+- `Unauthorized` = 1
+- `NoProposal` = 2
+- `TimelockPending` = 3
+- `VersionMismatch` = 4
+- `InvalidTimelock` = 5
+- `WasmHashMismatch` = 6
+
+---
+
 #### `run_migration`
 
 **Signature:**
@@ -5861,6 +5999,7 @@ pub fn run_migration(env: Env, admin: Address, target_version: u32, dry_run: boo
 - `TimelockPending` = 3
 - `VersionMismatch` = 4
 - `InvalidTimelock` = 5
+- `WasmHashMismatch` = 6
 
 ---
 
@@ -5888,6 +6027,7 @@ pub fn rollback_migration(env: Env, admin: Address) -> Result<migration::Migrati
 - `TimelockPending` = 3
 - `VersionMismatch` = 4
 - `InvalidTimelock` = 5
+- `WasmHashMismatch` = 6
 
 ---
 
@@ -6512,6 +6652,235 @@ pub fn get_nft(_env: Env, _nft_id: u64) -> Option<Nft>
 - `_nft_id: u64`
 
 **Returns:** `Option<Nft>`
+
+---
+
+#### `get_schema_version`
+
+**Signature:**
+
+```rust
+pub fn get_schema_version(env: Env) -> u32
+```
+
+**Parameters:**
+
+- `env: Env`
+
+**Returns:** `u32`
+
+---
+
+#### `initialize_schema`
+
+**Signature:**
+
+```rust
+pub fn initialize_schema(env: Env, admin: Address) -> ()
+```
+
+**Parameters:**
+
+- `env: Env`
+- `admin: Address`
+
+**Returns:** `()`
+
+---
+
+#### `propose_upgrade`
+
+**Signature:**
+
+```rust
+pub fn propose_upgrade(env: Env, admin: Address, target_version: u32, wasm_hash: BytesN<32>) -> Result<hunty_migration::UpgradeProposal, hunty_migration::UpgradeAuthError>
+```
+
+**Parameters:**
+
+- `env: Env`
+- `admin: Address`
+- `target_version: u32`
+- `wasm_hash: BytesN<32>`
+
+**Returns:** `Result<hunty_migration::UpgradeProposal, hunty_migration::UpgradeAuthError>`
+
+**Error type:** `UpgradeAuthError`
+
+**Error codes:**
+
+- `Unauthorized` = 1
+- `NoProposal` = 2
+- `TimelockPending` = 3
+- `VersionMismatch` = 4
+- `InvalidTimelock` = 5
+- `WasmHashMismatch` = 6
+
+---
+
+#### `set_upgrade_timelock`
+
+**Signature:**
+
+```rust
+pub fn set_upgrade_timelock(env: Env, admin: Address, delay_seconds: u64) -> Result<(), hunty_migration::UpgradeAuthError>
+```
+
+**Parameters:**
+
+- `env: Env`
+- `admin: Address`
+- `delay_seconds: u64`
+
+**Returns:** `Result<(), hunty_migration::UpgradeAuthError>`
+
+**Error type:** `UpgradeAuthError`
+
+**Error codes:**
+
+- `Unauthorized` = 1
+- `NoProposal` = 2
+- `TimelockPending` = 3
+- `VersionMismatch` = 4
+- `InvalidTimelock` = 5
+- `WasmHashMismatch` = 6
+
+---
+
+#### `get_upgrade_proposal`
+
+**Signature:**
+
+```rust
+pub fn get_upgrade_proposal(env: Env) -> Option<hunty_migration::UpgradeProposal>
+```
+
+**Parameters:**
+
+- `env: Env`
+
+**Returns:** `Option<hunty_migration::UpgradeProposal>`
+
+---
+
+#### `get_upgrade_timelock`
+
+**Signature:**
+
+```rust
+pub fn get_upgrade_timelock(env: Env) -> u64
+```
+
+**Parameters:**
+
+- `env: Env`
+
+**Returns:** `u64`
+
+---
+
+#### `get_upgrade_history`
+
+**Signature:**
+
+```rust
+pub fn get_upgrade_history(env: Env, offset: u32, limit: u32) -> soroban_sdk::Vec<hunty_migration::UpgradeHistoryEntry>
+```
+
+**Parameters:**
+
+- `env: Env`
+- `offset: u32`
+- `limit: u32`
+
+**Returns:** `soroban_sdk::Vec<hunty_migration::UpgradeHistoryEntry>`
+
+---
+
+#### `upgrade`
+
+**Signature:**
+
+```rust
+pub fn upgrade(env: Env, admin: Address, new_wasm_hash: BytesN<32>) -> Result<(), hunty_migration::UpgradeAuthError>
+```
+
+**Parameters:**
+
+- `env: Env`
+- `admin: Address`
+- `new_wasm_hash: BytesN<32>`
+
+**Returns:** `Result<(), hunty_migration::UpgradeAuthError>`
+
+**Error type:** `UpgradeAuthError`
+
+**Error codes:**
+
+- `Unauthorized` = 1
+- `NoProposal` = 2
+- `TimelockPending` = 3
+- `VersionMismatch` = 4
+- `InvalidTimelock` = 5
+- `WasmHashMismatch` = 6
+
+---
+
+#### `run_migration`
+
+**Signature:**
+
+```rust
+pub fn run_migration(env: Env, admin: Address, target_version: u32, dry_run: bool) -> Result<migration::MigrationReport, hunty_migration::UpgradeAuthError>
+```
+
+**Parameters:**
+
+- `env: Env`
+- `admin: Address`
+- `target_version: u32`
+- `dry_run: bool`
+
+**Returns:** `Result<migration::MigrationReport, hunty_migration::UpgradeAuthError>`
+
+**Error type:** `UpgradeAuthError`
+
+**Error codes:**
+
+- `Unauthorized` = 1
+- `NoProposal` = 2
+- `TimelockPending` = 3
+- `VersionMismatch` = 4
+- `InvalidTimelock` = 5
+- `WasmHashMismatch` = 6
+
+---
+
+#### `rollback_migration`
+
+**Signature:**
+
+```rust
+pub fn rollback_migration(env: Env, admin: Address) -> Result<migration::MigrationReport, hunty_migration::UpgradeAuthError>
+```
+
+**Parameters:**
+
+- `env: Env`
+- `admin: Address`
+
+**Returns:** `Result<migration::MigrationReport, hunty_migration::UpgradeAuthError>`
+
+**Error type:** `UpgradeAuthError`
+
+**Error codes:**
+
+- `Unauthorized` = 1
+- `NoProposal` = 2
+- `TimelockPending` = 3
+- `VersionMismatch` = 4
+- `InvalidTimelock` = 5
+- `WasmHashMismatch` = 6
 
 ---
 
@@ -10681,7 +11050,7 @@ pub fn initialize_schema(env: Env, admin: Address) -> ()
 **Signature:**
 
 ```rust
-pub fn propose_upgrade(env: Env, admin: Address, target_version: u32) -> Result<hunty_migration::UpgradeProposal, hunty_migration::UpgradeAuthError>
+pub fn propose_upgrade(env: Env, admin: Address, target_version: u32, wasm_hash: BytesN<32>) -> Result<hunty_migration::UpgradeProposal, hunty_migration::UpgradeAuthError>
 ```
 
 **Parameters:**
@@ -10689,6 +11058,7 @@ pub fn propose_upgrade(env: Env, admin: Address, target_version: u32) -> Result<
 - `env: Env`
 - `admin: Address`
 - `target_version: u32`
+- `wasm_hash: BytesN<32>`
 
 **Returns:** `Result<hunty_migration::UpgradeProposal, hunty_migration::UpgradeAuthError>`
 
@@ -10701,6 +11071,36 @@ pub fn propose_upgrade(env: Env, admin: Address, target_version: u32) -> Result<
 - `TimelockPending` = 3
 - `VersionMismatch` = 4
 - `InvalidTimelock` = 5
+- `WasmHashMismatch` = 6
+
+---
+
+#### `upgrade`
+
+**Signature:**
+
+```rust
+pub fn upgrade(env: Env, admin: Address, new_wasm_hash: BytesN<32>) -> Result<(), hunty_migration::UpgradeAuthError>
+```
+
+**Parameters:**
+
+- `env: Env`
+- `admin: Address`
+- `new_wasm_hash: BytesN<32>`
+
+**Returns:** `Result<(), hunty_migration::UpgradeAuthError>`
+
+**Error type:** `UpgradeAuthError`
+
+**Error codes:**
+
+- `Unauthorized` = 1
+- `NoProposal` = 2
+- `TimelockPending` = 3
+- `VersionMismatch` = 4
+- `InvalidTimelock` = 5
+- `WasmHashMismatch` = 6
 
 ---
 
@@ -10729,6 +11129,7 @@ pub fn set_upgrade_timelock(env: Env, admin: Address, delay_seconds: u64) -> Res
 - `TimelockPending` = 3
 - `VersionMismatch` = 4
 - `InvalidTimelock` = 5
+- `WasmHashMismatch` = 6
 
 ---
 
@@ -10808,6 +11209,7 @@ pub fn run_migration(env: Env, admin: Address, target_version: u32, dry_run: boo
 - `TimelockPending` = 3
 - `VersionMismatch` = 4
 - `InvalidTimelock` = 5
+- `WasmHashMismatch` = 6
 
 ---
 
@@ -10835,6 +11237,7 @@ pub fn rollback_migration(env: Env, admin: Address) -> Result<migration::Migrati
 - `TimelockPending` = 3
 - `VersionMismatch` = 4
 - `InvalidTimelock` = 5
+- `WasmHashMismatch` = 6
 
 ---
 
@@ -11008,3 +11411,4 @@ pub fn get_pool_audit_log(env: Env, hunt_id: u64, start_after: Option<u64>, limi
 - `TimelockPending` = 3
 - `VersionMismatch` = 4
 - `InvalidTimelock` = 5
+- `WasmHashMismatch` = 6
